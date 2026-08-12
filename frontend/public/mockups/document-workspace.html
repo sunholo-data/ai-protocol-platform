@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sunholo — Document Workspace</title>
+<style>
+  :root {
+    --orange: hsl(20, 100%, 70%);
+    --orange-dim: hsl(20, 60%, 88%);
+    --orange-deep: hsl(20, 90%, 58%);
+    --teal: hsl(200, 65%, 45%);
+    --teal-dim: hsl(200, 40%, 90%);
+    --teal-deep: hsl(200, 70%, 38%);
+    --sand: hsl(35, 40%, 92%);
+    --sand-deep: hsl(35, 30%, 86%);
+    --navy: hsl(215, 70%, 25%);
+    --white: #ffffff;
+    --bg: #fafafa;
+    --fg: hsl(222, 47%, 11%);
+    --fg-muted: hsl(215, 16%, 47%);
+    --fg-subtle: hsl(215, 12%, 64%);
+    --border: hsl(214, 32%, 91%);
+    --border-strong: hsl(214, 20%, 82%);
+    --radius: 8px;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04), 0 1px 4px rgba(0,0,0,0.03);
+    --shadow-md: 0 2px 8px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04);
+    --font-sans: 'Euclid Circular A', system-ui, -apple-system, sans-serif;
+    --font-serif: 'Crimson Pro', Georgia, 'Times New Roman', serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%; font-family: var(--font-sans); font-size: 14px;
+    line-height: 1.5; color: var(--fg); background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* --- SVG icon helper --- */
+  .i { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex-shrink: 0; }
+  .i svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .i.sm { width: 14px; height: 14px; }
+  .i.lg { width: 18px; height: 18px; }
+  .i.xl { width: 20px; height: 20px; }
+
+  .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ════════ SKILLS BAR ════════ */
+  .skills-bar {
+    display: flex; align-items: center; height: 52px; padding: 0 20px;
+    background: var(--white); border-bottom: 1px solid var(--border); flex-shrink: 0; z-index: 10;
+  }
+
+  .logo-area {
+    display: flex; align-items: center; gap: 10px;
+    padding-right: 24px; border-right: 1px solid var(--border);
+    margin-right: 4px; height: 100%;
+  }
+
+  .logo-mark {
+    width: 120px; height: 36px; position: relative; flex-shrink: 0;
+  }
+
+  .logo-mark img { width: 100%; height: 100%; object-fit: contain; }
+
+  .skills-tabs { display: flex; align-items: stretch; height: 100%; flex: 1; }
+
+  .skill-tab {
+    display: flex; align-items: center; gap: 7px;
+    padding: 0 16px; font-size: 13px; font-weight: 500;
+    color: var(--fg-muted); cursor: pointer; position: relative;
+    transition: color 0.15s, background 0.15s;
+    border: none; background: none; white-space: nowrap; height: 100%;
+  }
+
+  .skill-tab:hover { color: var(--fg); background: hsl(20, 30%, 97%); }
+  .skill-tab.active { color: var(--fg); font-weight: 600; }
+
+  .skill-tab.active::after {
+    content: ''; position: absolute; bottom: 0; left: 12px; right: 12px;
+    height: 2.5px; background: var(--orange); border-radius: 2px 2px 0 0;
+  }
+
+  .skill-tab .tab-badge {
+    font-size: 9px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase;
+    padding: 1px 5px; border-radius: 3px;
+    background: var(--orange-dim); color: var(--orange-deep);
+  }
+
+  .skill-tab.active .tab-badge { background: var(--orange); color: var(--white); }
+
+  .create-skill-btn {
+    display: flex; align-items: center; gap: 5px;
+    padding: 6px 14px; font-size: 12.5px; font-weight: 500;
+    color: var(--fg-muted); background: none;
+    border: 1.5px dashed var(--border-strong); border-radius: 6px;
+    cursor: pointer; transition: all 0.15s; margin-left: 8px; white-space: nowrap;
+  }
+
+  .create-skill-btn:hover { border-color: var(--orange); color: var(--orange-deep); background: hsl(20, 100%, 98%); }
+
+  .bar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 16px; }
+
+  .avatar-btn {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--teal), var(--teal-deep));
+    border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    color: var(--white); font-size: 12px; font-weight: 600;
+  }
+
+  /* ════════ WORKSPACE ════════ */
+  .workspace { display: flex; flex: 1; overflow: hidden; min-height: 0; }
+
+  /* ── DOC PANEL ── */
+  .doc-panel {
+    width: 50%; min-width: 0; background: var(--sand);
+    display: flex; flex-direction: column; overflow: hidden;
+    transition: width 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease;
+    position: relative;
+  }
+
+  .doc-panel.collapsed { width: 0 !important; min-width: 0 !important; opacity: 0; overflow: hidden; }
+
+  /* Doc Tabs */
+  .doc-tabs-bar {
+    display: flex; align-items: stretch; height: 36px;
+    background: var(--sand-deep); border-bottom: 1px solid hsl(35,20%,82%);
+    flex-shrink: 0; overflow: hidden;
+  }
+
+  .doc-tabs-scroll {
+    display: flex; align-items: stretch; flex: 1; overflow-x: auto; scrollbar-width: none;
+  }
+
+  .doc-tabs-scroll::-webkit-scrollbar { display: none; }
+
+  .doc-tab {
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 12px; font-size: 11.5px; font-weight: 500;
+    color: var(--fg-muted); background: none; border: none;
+    cursor: pointer; white-space: nowrap; position: relative;
+    border-right: 1px solid hsl(35,20%,80%);
+    transition: background 0.12s, color 0.12s; max-width: 180px;
+  }
+
+  .doc-tab:hover { background: hsl(35,30%,90%); color: var(--fg); }
+
+  .doc-tab.active {
+    background: var(--white); color: var(--fg); font-weight: 600;
+    border-bottom: 2px solid var(--orange); margin-bottom: -1px;
+  }
+
+  .doc-tab .tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .doc-tab .tab-close {
+    width: 16px; height: 16px; border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg-subtle); cursor: pointer; flex-shrink: 0;
+    transition: background 0.1s, color 0.1s; margin-left: 2px;
+  }
+
+  .doc-tab .tab-close:hover { background: hsl(0,60%,92%); color: hsl(0,60%,50%); }
+
+  .doc-tab .tab-format {
+    font-size: 9px; font-weight: 600; letter-spacing: 0.3px;
+    text-transform: uppercase; color: var(--fg-subtle); flex-shrink: 0;
+  }
+
+  .doc-tabs-actions {
+    display: flex; align-items: center; gap: 2px; padding: 0 6px; flex-shrink: 0;
+    border-left: 1px solid hsl(35,20%,80%);
+  }
+
+  .dtab-btn {
+    width: 26px; height: 26px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: none; cursor: pointer;
+    color: var(--fg-muted); transition: background 0.12s, color 0.12s;
+  }
+
+  .dtab-btn:hover { background: hsl(35,30%,87%); color: var(--fg); }
+
+  .doc-count-badge {
+    font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 8px;
+    background: var(--orange-dim); color: var(--orange-deep); margin-left: 4px;
+  }
+
+  /* ── LIST VIEW ── */
+  .doc-list-view { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+  .doc-list-view.visible { display: flex; }
+
+  .doc-list-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid hsl(35,20%,85%); background: hsl(35,30%,94%);
+  }
+
+  .doc-list-header-left { display: flex; align-items: center; gap: 8px; }
+
+  .doc-list-title { font-size: 12.5px; font-weight: 600; color: var(--fg); }
+
+  .doc-list-badge {
+    font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.3px;
+    background: hsl(200,40%,92%); color: var(--teal-deep);
+  }
+
+  .doc-list-subtitle { font-size: 11px; color: var(--fg-subtle); }
+
+  .doc-list-search {
+    padding: 5px 10px; font-size: 12px; border: 1px solid hsl(35,20%,82%);
+    border-radius: 5px; background: var(--white); color: var(--fg);
+    outline: none; width: 180px; font-family: var(--font-sans);
+  }
+
+  .doc-list-search::placeholder { color: var(--fg-subtle); }
+  .doc-list-search:focus { border-color: var(--orange); box-shadow: 0 0 0 2px hsl(20,100%,95%); }
+
+  .doc-list-content { flex: 1; overflow-y: auto; padding: 8px; }
+
+  .doc-list-folder { margin-bottom: 4px; }
+
+  .doc-list-folder-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px; font-size: 11.5px; font-weight: 600;
+    color: var(--fg-muted); cursor: pointer; border-radius: 4px;
+    transition: background 0.1s;
+  }
+
+  .doc-list-folder-header:hover { background: hsl(35,30%,88%); }
+
+  .folder-chevron { font-size: 8px; transition: transform 0.15s; display: inline-block; width: 10px; }
+  .folder-chevron.open { transform: rotate(90deg); }
+
+  .doc-list-folder-count { font-weight: 400; color: var(--fg-subtle); margin-left: auto; font-size: 11px; }
+
+  .doc-list-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px 7px 28px; font-size: 12.5px;
+    border-radius: 5px; cursor: pointer; transition: background 0.1s; color: var(--fg-muted);
+  }
+
+  .doc-list-item:hover { background: hsl(35,30%,88%); color: var(--fg); }
+  .doc-list-item.active { background: var(--white); color: var(--fg); font-weight: 500; box-shadow: var(--shadow-sm); }
+
+  .doc-list-item .item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .doc-list-item .item-format {
+    font-size: 9px; font-weight: 600; letter-spacing: 0.3px;
+    text-transform: uppercase; color: var(--fg-subtle); flex-shrink: 0;
+  }
+
+  .item-status { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .item-status.parsed { background: hsl(140,55%,50%); }
+  .item-status.pending { background: hsl(40,70%,55%); }
+
+  .doc-list-progress {
+    padding: 8px 10px; border-top: 1px solid hsl(35,20%,85%);
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--fg-muted); flex-shrink: 0;
+  }
+
+  .doc-list-progress-bar { flex: 1; height: 4px; background: hsl(35,20%,85%); border-radius: 2px; overflow: hidden; }
+  .doc-list-progress-fill { height: 100%; background: var(--orange); border-radius: 2px; transition: width 0.3s; }
+
+  /* ── SINGLE DOC VIEW ── */
+  .doc-single-view { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .doc-single-view.hidden { display: none; }
+
+  .doc-panel-inner { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; }
+
+  .doc-card {
+    background: var(--white); border-radius: var(--radius);
+    box-shadow: var(--shadow-md); border: 1px solid hsl(35,20%,88%);
+    display: flex; flex-direction: column; flex: 1; overflow: hidden;
+    animation: fadeUp 0.35s ease both;
+  }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  .doc-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+    background: hsl(0,0%,99.5%); flex-shrink: 0;
+  }
+
+  .doc-header-left { display: flex; align-items: center; gap: 10px; }
+
+  .doc-icon {
+    width: 32px; height: 32px; border-radius: 6px;
+    background: linear-gradient(135deg, hsl(210,70%,94%), hsl(210,60%,88%));
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    color: hsl(210,50%,55%);
+  }
+
+  .doc-title-group { display: flex; flex-direction: column; gap: 1px; }
+  .doc-title { font-size: 13.5px; font-weight: 600; color: var(--fg); }
+
+  .doc-meta-line {
+    font-size: 11px; color: var(--fg-subtle);
+    display: flex; align-items: center; gap: 5px;
+  }
+
+  .doc-meta-line .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--fg-subtle); opacity: 0.5; }
+
+  .doc-header-right { display: flex; align-items: center; gap: 6px; }
+
+  .doc-action-btn {
+    display: flex; align-items: center; gap: 4px;
+    padding: 5px 10px; font-size: 11.5px; font-weight: 500;
+    color: var(--fg-muted); background: none;
+    border: 1px solid var(--border); border-radius: 5px;
+    cursor: pointer; transition: all 0.15s;
+  }
+
+  .doc-action-btn:hover { border-color: var(--border-strong); background: var(--bg); color: var(--fg); }
+  .doc-action-btn.edit-btn:hover { border-color: var(--orange); color: var(--orange-deep); background: hsl(20,100%,98%); }
+
+  .doc-content { flex: 1; padding: 24px 28px; overflow-y: auto; line-height: 1.7; }
+
+  .doc-content h1 {
+    font-family: var(--font-serif); font-size: 24px; font-weight: 600;
+    color: var(--fg); margin-bottom: 4px; letter-spacing: -0.5px; line-height: 1.25;
+  }
+
+  .doc-content .doc-subtitle {
+    font-size: 12.5px; color: var(--fg-subtle); margin-bottom: 20px;
+    padding-bottom: 16px; border-bottom: 1px solid var(--border);
+  }
+
+  .doc-content h2 {
+    font-family: var(--font-serif); font-size: 17px; font-weight: 600;
+    color: var(--fg); margin-top: 24px; margin-bottom: 10px;
+  }
+
+  .doc-content p { font-size: 13px; color: hsl(215,20%,30%); margin-bottom: 14px; max-width: 600px; }
+
+  .doc-table-wrapper { margin: 16px 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .doc-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .doc-table thead { background: hsl(210,20%,97%); }
+
+  .doc-table th {
+    padding: 8px 14px; text-align: left; font-weight: 600;
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--fg-muted); border-bottom: 1px solid var(--border);
+  }
+
+  .doc-table td { padding: 9px 14px; border-bottom: 1px solid hsl(210,20%,95%); color: hsl(215,20%,25%); }
+  .doc-table tbody tr:last-child td { border-bottom: none; }
+  .doc-table tbody tr:hover { background: hsl(35,30%,97%); }
+  .doc-table .num { font-variant-numeric: tabular-nums; font-weight: 500; }
+  .doc-table .gp { color: hsl(150,60%,38%); font-weight: 600; }
+  .doc-table .gs { color: hsl(150,70%,32%); font-weight: 700; }
+
+  .track-change {
+    display: flex; gap: 10px; margin: 16px 0; padding: 12px 14px;
+    background: hsl(40,50%,97%); border: 1px solid hsl(40,40%,88%);
+    border-left: 3px solid hsl(35,80%,55%); border-radius: 0 6px 6px 0;
+    font-size: 12px; line-height: 1.55;
+  }
+
+  .track-change-icon {
+    flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
+    background: hsl(35,70%,90%); display: flex; align-items: center;
+    justify-content: center; margin-top: 1px; color: hsl(35,60%,45%);
+  }
+
+  .track-change-header { font-weight: 600; color: hsl(35,50%,35%); margin-bottom: 2px; font-size: 11px; }
+  .track-change-text { color: hsl(35,30%,40%); }
+  .tc-ins { background: hsl(140,40%,92%); padding: 1px 4px; border-radius: 2px; color: hsl(140,50%,30%); }
+  .tc-del { background: hsl(0,40%,93%); padding: 1px 4px; border-radius: 2px; color: hsl(0,40%,45%); text-decoration: line-through; }
+
+  .doc-image-placeholder {
+    margin: 16px 0; padding: 28px 20px;
+    background: linear-gradient(135deg, hsl(210,20%,97%), hsl(210,15%,94%));
+    border: 1px dashed var(--border-strong); border-radius: 6px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--fg-subtle);
+  }
+
+  .doc-image-placeholder .img-caption { font-size: 11.5px; font-weight: 500; }
+  .doc-image-placeholder .img-desc { font-size: 10.5px; font-style: italic; max-width: 300px; text-align: center; }
+
+  .doc-footer {
+    display: flex; align-items: center; gap: 14px;
+    padding: 8px 20px; border-top: 1px solid var(--border);
+    background: hsl(0,0%,99.5%); font-size: 11px; color: var(--fg-subtle); flex-shrink: 0;
+  }
+
+  .doc-footer .stat-val { font-weight: 600; color: var(--fg-muted); }
+  .doc-footer .stat-sep { color: var(--border-strong); }
+
+  /* ── RESIZE HANDLE ── */
+  .resize-handle {
+    width: 6px; background: var(--border); cursor: col-resize;
+    position: relative; flex-shrink: 0; transition: background 0.15s;
+  }
+
+  .resize-handle:hover, .resize-handle:active { background: var(--orange); }
+
+  .resize-handle::after {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%,-50%); width: 2px; height: 32px;
+    border-radius: 1px; background: rgba(0,0,0,0.12); transition: background 0.15s;
+  }
+
+  .resize-handle:hover::after { background: rgba(255,255,255,0.6); }
+  .resize-handle.collapsed-handle { width: 0; cursor: default; }
+
+  /* ── CHAT PANEL ── */
+  .chat-panel { flex: 1; background: var(--white); display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+  .chat-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+
+  .chat-header-left { display: flex; align-items: center; gap: 8px; }
+
+  .chat-skill-indicator {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 500; color: var(--fg-muted);
+  }
+
+  .chat-skill-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: hsl(140,55%,50%); box-shadow: 0 0 0 2px hsl(140,40%,90%);
+  }
+
+  .chat-header-right { display: flex; align-items: center; gap: 6px; }
+
+  .chat-context-badge {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 4px;
+    background: var(--sand); color: var(--fg-muted); border: 1px solid var(--sand-deep);
+    max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .panel-toggle-btn {
+    width: 28px; height: 28px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: 1px solid var(--border); cursor: pointer;
+    color: var(--fg-muted); transition: all 0.12s;
+  }
+
+  .panel-toggle-btn:hover { background: var(--bg); color: var(--fg); border-color: var(--border-strong); }
+  .panel-toggle-btn.active { background: var(--orange-dim); border-color: var(--orange); color: var(--orange-deep); }
+
+  .chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+  .chat-msg { display: flex; gap: 10px; max-width: 100%; animation: msgIn 0.3s ease; }
+  @keyframes msgIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+  .chat-msg-avatar {
+    width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    margin-top: 2px; color: var(--white);
+  }
+
+  .chat-msg-avatar.bot { background: linear-gradient(135deg, var(--orange), var(--orange-deep)); }
+  .chat-msg-avatar.user { background: linear-gradient(135deg, var(--teal), var(--teal-deep)); }
+
+  .chat-msg-body { flex: 1; min-width: 0; }
+
+  .chat-msg-name {
+    font-size: 11.5px; font-weight: 600; margin-bottom: 3px;
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  .chat-msg-name .msg-time { font-weight: 400; color: var(--fg-subtle); font-size: 10.5px; }
+
+  .chat-msg-bubble {
+    padding: 10px 14px; border-radius: 2px 8px 8px 8px;
+    font-size: 13px; line-height: 1.6; color: hsl(215,20%,25%);
+  }
+
+  .chat-msg.bot .chat-msg-bubble { background: hsl(0,0%,98%); border-left: 3px solid var(--orange); }
+  .chat-msg.user .chat-msg-bubble { background: hsl(200,20%,97%); border-left: 3px solid var(--teal); }
+
+  .chat-inline-table { margin: 10px 0 4px; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; font-size: 12px; }
+  .chat-inline-table table { width: 100%; border-collapse: collapse; }
+
+  .chat-inline-table th {
+    padding: 7px 10px; text-align: left; font-weight: 600;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+    color: var(--fg-muted); background: hsl(20,20%,97%); border-bottom: 1px solid var(--border);
+  }
+
+  .chat-inline-table td { padding: 6px 10px; border-bottom: 1px solid hsl(210,20%,95%); }
+  .chat-inline-table tbody tr:last-child td { border-bottom: none; }
+
+  .chat-source-ref {
+    margin-top: 6px; font-size: 10.5px; color: var(--fg-subtle);
+    display: flex; align-items: center; gap: 4px;
+  }
+
+  .chat-source-ref a { color: var(--teal); text-decoration: none; font-weight: 500; }
+  .chat-source-ref a:hover { text-decoration: underline; }
+
+  .chat-doc-context {
+    display: flex; align-items: center; gap: 6px; padding: 8px 12px;
+    background: hsl(35,30%,96%); border: 1px solid hsl(35,20%,88%);
+    border-radius: 6px; font-size: 11.5px; color: var(--fg-muted);
+  }
+
+  .chat-doc-context strong { color: var(--fg); font-weight: 600; }
+
+  .chat-input-area { padding: 12px 16px; border-top: 1px solid var(--border); flex-shrink: 0; }
+
+  .chat-input-wrapper {
+    display: flex; align-items: flex-end; gap: 8px;
+    background: var(--bg); border: 1.5px solid var(--border);
+    border-radius: var(--radius); padding: 8px 12px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .chat-input-wrapper:focus-within { border-color: var(--orange); box-shadow: 0 0 0 3px hsl(20,100%,95%); }
+
+  .chat-input {
+    flex: 1; border: none; background: none; font-family: var(--font-sans);
+    font-size: 13px; color: var(--fg); outline: none; resize: none;
+    min-height: 20px; max-height: 100px; line-height: 1.5;
+  }
+
+  .chat-input::placeholder { color: var(--fg-subtle); }
+
+  .chat-btn {
+    width: 30px; height: 30px; border-radius: 6px; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; transition: all 0.12s;
+  }
+
+  .chat-btn.attach { background: none; color: var(--fg-subtle); }
+  .chat-btn.attach:hover { background: var(--border); color: var(--fg-muted); }
+  .chat-btn.send { background: var(--orange); color: var(--white); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .chat-btn.send:hover { background: var(--orange-deep); transform: translateY(-1px); }
+
+  /* Scrollbar */
+  .doc-content::-webkit-scrollbar, .chat-messages::-webkit-scrollbar,
+  .doc-list-content::-webkit-scrollbar { width: 5px; }
+  .doc-content::-webkit-scrollbar-track, .chat-messages::-webkit-scrollbar-track,
+  .doc-list-content::-webkit-scrollbar-track { background: transparent; }
+  .doc-content::-webkit-scrollbar-thumb, .chat-messages::-webkit-scrollbar-thumb,
+  .doc-list-content::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 3px; }
+
+  /* back button in list view */
+  .back-btn {
+    width: 26px; height: 26px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: 1px solid hsl(35,20%,82%); cursor: pointer;
+    color: var(--fg-muted); transition: all 0.12s;
+  }
+
+  .back-btn:hover { background: hsl(35,30%,87%); color: var(--fg); }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     SVG ICON DEFS (referenced throughout via <use>)
+     ============================================================ -->
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- file-text -->
+    <symbol id="ic-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+    </symbol>
+    <!-- search -->
+    <symbol id="ic-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </symbol>
+    <!-- bar-chart -->
+    <symbol id="ic-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>
+    </symbol>
+    <!-- plus -->
+    <symbol id="ic-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+    </symbol>
+    <!-- edit / pencil -->
+    <symbol id="ic-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+    </symbol>
+    <!-- external-link -->
+    <symbol id="ic-external" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+    </symbol>
+    <!-- paperclip -->
+    <symbol id="ic-clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+    </symbol>
+    <!-- send -->
+    <symbol id="ic-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+    </symbol>
+    <!-- sidebar / panel -->
+    <symbol id="ic-panel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/>
+    </symbol>
+    <!-- list -->
+    <symbol id="ic-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+    </symbol>
+    <!-- folder -->
+    <symbol id="ic-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+    </symbol>
+    <!-- x close -->
+    <symbol id="ic-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </symbol>
+    <!-- arrow-left -->
+    <symbol id="ic-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+    </symbol>
+    <!-- link -->
+    <symbol id="ic-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+    </symbol>
+    <!-- image -->
+    <symbol id="ic-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+    </symbol>
+    <!-- git-merge (track change) -->
+    <symbol id="ic-diff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>
+    </symbol>
+    <!-- table (spreadsheet icon) -->
+    <symbol id="ic-table" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>
+    </symbol>
+    <!-- chevron-right -->
+    <symbol id="ic-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="9 18 15 12 9 6"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="app">
+
+  <!-- ════════ SKILLS BAR ════════ -->
+  <nav class="skills-bar">
+    <div class="logo-area">
+      <div class="logo-mark">
+        <img src="../images/logo/sunholo-logo.svg" alt="Sunholo">
+      </div>
+    </div>
+    <div class="skills-tabs">
+      <button class="skill-tab active">
+        <span class="i sm"><svg><use href="#ic-file"/></svg></span>
+        Doc Analyst <span class="tab-badge">A2UI</span>
+      </button>
+      <button class="skill-tab">
+        <span class="i sm"><svg><use href="#ic-search"/></svg></span>
+        Web Researcher
+      </button>
+      <button class="skill-tab">
+        <span class="i sm"><svg><use href="#ic-chart"/></svg></span>
+        Data Extractor
+      </button>
+      <button class="create-skill-btn">
+        <span class="i sm"><svg><use href="#ic-plus"/></svg></span>
+        New Skill
+      </button>
+    </div>
+    <div class="bar-actions">
+      <button class="avatar-btn">M</button>
+    </div>
+  </nav>
+
+  <!-- ════════ WORKSPACE ════════ -->
+  <div class="workspace">
+
+    <!-- DOC PANEL -->
+    <div class="doc-panel" id="docPanel">
+      <!-- Doc Tabs -->
+      <div class="doc-tabs-bar">
+        <div class="doc-tabs-scroll">
+          <button class="doc-tab active" onclick="showSingleDoc()" title="Q1 2026 Financial Summary.docx">
+            <span class="i sm" style="opacity:0.5"><svg><use href="#ic-file"/></svg></span>
+            <span class="tab-name">Q1 2026 Financial Summary</span>
+            <span class="tab-format">docx</span>
+            <span class="tab-close"><svg class="i sm"><use href="#ic-x"/></svg></span>
+          </button>
+          <button class="doc-tab" title="APAC Expansion Plan.pdf">
+            <span class="i sm" style="opacity:0.5"><svg><use href="#ic-file"/></svg></span>
+            <span class="tab-name">APAC Expansion Plan</span>
+            <span class="tab-format">pdf</span>
+            <span class="tab-close"><svg class="i sm"><use href="#ic-x"/></svg></span>
+          </button>
+          <button class="doc-tab" title="Revenue Model FY26.xlsx">
+            <span class="i sm" style="opacity:0.5"><svg><use href="#ic-table"/></svg></span>
+            <span class="tab-name">Revenue Model FY26</span>
+            <span class="tab-format">xlsx</span>
+            <span class="tab-close"><svg class="i sm"><use href="#ic-x"/></svg></span>
+          </button>
+        </div>
+        <div class="doc-tabs-actions">
+          <button class="dtab-btn" onclick="showListView()" title="Show all documents">
+            <span class="i sm"><svg><use href="#ic-list"/></svg></span>
+            <span class="doc-count-badge" id="docCountBadge">14</span>
+          </button>
+          <button class="dtab-btn" title="Upload document">
+            <span class="i sm"><svg><use href="#ic-plus"/></svg></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- LIST VIEW -->
+      <div class="doc-list-view" id="docListView">
+        <div class="doc-list-header">
+          <div class="doc-list-header-left">
+            <button class="back-btn" onclick="showSingleDoc()" title="Back to document">
+              <span class="i sm"><svg><use href="#ic-back"/></svg></span>
+            </button>
+            <div>
+              <div class="doc-list-title">Q1 Financial Review <span class="doc-list-badge">14 files</span></div>
+              <div class="doc-list-subtitle">Uploaded as folder &middot; 12 of 14 parsed</div>
+            </div>
+          </div>
+          <input class="doc-list-search" type="text" placeholder="Filter documents...">
+        </div>
+        <div class="doc-list-content">
+          <div class="doc-list-folder">
+            <div class="doc-list-folder-header">
+              <span class="folder-chevron open"><svg class="i sm"><use href="#ic-chevron"/></svg></span>
+              <span class="i sm"><svg><use href="#ic-folder"/></svg></span>
+              Reports
+              <span class="doc-list-folder-count">6 files</span>
+            </div>
+            <div class="doc-list-item active">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-file"/></svg></span>
+              <span class="item-name">Q1 2026 Financial Summary.docx</span>
+              <span class="item-format">docx</span>
+              <span class="item-status parsed" title="Parsed"></span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-file"/></svg></span>
+              <span class="item-name">APAC Expansion Plan.pdf</span>
+              <span class="item-format">pdf</span>
+              <span class="item-status parsed" title="Parsed"></span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-table"/></svg></span>
+              <span class="item-name">Revenue Model FY26.xlsx</span>
+              <span class="item-format">xlsx</span>
+              <span class="item-status parsed" title="Parsed"></span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-file"/></svg></span>
+              <span class="item-name">Board Presentation Draft.pptx</span>
+              <span class="item-format">pptx</span>
+              <span class="item-status parsed" title="Parsed"></span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-file"/></svg></span>
+              <span class="item-name">Compliance Checklist.docx</span>
+              <span class="item-format">docx</span>
+              <span class="item-status parsed" title="Parsed"></span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-file"/></svg></span>
+              <span class="item-name">Executive Summary - Final.docx</span>
+              <span class="item-format">docx</span>
+              <span class="item-status pending" title="Parsing..."></span>
+            </div>
+          </div>
+          <div class="doc-list-folder">
+            <div class="doc-list-folder-header">
+              <span class="folder-chevron open"><svg class="i sm"><use href="#ic-chevron"/></svg></span>
+              <span class="i sm"><svg><use href="#ic-folder"/></svg></span>
+              Data
+              <span class="doc-list-folder-count">5 files</span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-table"/></svg></span>
+              <span class="item-name">Regional Sales Q1.xlsx</span>
+              <span class="item-format">xlsx</span>
+              <span class="item-status parsed" title="Parsed"></span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-table"/></svg></span>
+              <span class="item-name">Customer Acquisition Costs.csv</span>
+              <span class="item-format">csv</span>
+              <span class="item-status parsed" title="Parsed"></span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-table"/></svg></span>
+              <span class="item-name">Pipeline Forecast.xlsx</span>
+              <span class="item-format">xlsx</span>
+              <span class="item-status parsed" title="Parsed"></span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-table"/></svg></span>
+              <span class="item-name">Churn Analysis March.xlsx</span>
+              <span class="item-format">xlsx</span>
+              <span class="item-status parsed" title="Parsed"></span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-table"/></svg></span>
+              <span class="item-name">ARPU by Segment.csv</span>
+              <span class="item-format">csv</span>
+              <span class="item-status pending" title="Parsing..."></span>
+            </div>
+          </div>
+          <div class="doc-list-folder">
+            <div class="doc-list-folder-header">
+              <span class="folder-chevron open"><svg class="i sm"><use href="#ic-chevron"/></svg></span>
+              <span class="i sm"><svg><use href="#ic-folder"/></svg></span>
+              Charts
+              <span class="doc-list-folder-count">3 files</span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-image"/></svg></span>
+              <span class="item-name">Revenue by Region Chart.png</span>
+              <span class="item-format">png</span>
+              <span class="item-status parsed" title="Parsed"></span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-image"/></svg></span>
+              <span class="item-name">Growth Trajectory.png</span>
+              <span class="item-format">png</span>
+              <span class="item-status parsed" title="Parsed"></span>
+            </div>
+            <div class="doc-list-item">
+              <span class="i sm" style="opacity:0.5"><svg><use href="#ic-image"/></svg></span>
+              <span class="item-name">Market Share Comparison.jpg</span>
+              <span class="item-format">jpg</span>
+              <span class="item-status parsed" title="Parsed"></span>
+            </div>
+          </div>
+        </div>
+        <div class="doc-list-progress">
+          <span>Parsing: <strong>12</strong> / 14 complete</span>
+          <div class="doc-list-progress-bar"><div class="doc-list-progress-fill" style="width:86%"></div></div>
+          <span>~4s remaining</span>
+        </div>
+      </div>
+
+      <!-- SINGLE DOC VIEW -->
+      <div class="doc-single-view" id="docSingleView">
+        <div class="doc-panel-inner">
+          <div class="doc-card">
+            <div class="doc-header">
+              <div class="doc-header-left">
+                <div class="doc-icon"><span class="i lg"><svg><use href="#ic-file"/></svg></span></div>
+                <div class="doc-title-group">
+                  <div class="doc-title">Q1 2026 Financial Summary</div>
+                  <div class="doc-meta-line">
+                    <span>John Smith</span><span class="sep"></span>
+                    <span>Modified Apr 8, 2026</span><span class="sep"></span>
+                    <span>DOCX</span>
+                  </div>
+                </div>
+              </div>
+              <div class="doc-header-right">
+                <button class="doc-action-btn edit-btn">
+                  <span class="i sm"><svg><use href="#ic-edit"/></svg></span> Edit
+                </button>
+                <button class="doc-action-btn">
+                  <span class="i sm"><svg><use href="#ic-external"/></svg></span> Original
+                </button>
+              </div>
+            </div>
+            <div class="doc-content">
+              <h1>Q1 2026 Financial Summary</h1>
+              <div class="doc-subtitle">Prepared by Finance Division &mdash; Confidential</div>
+              <h2>Executive Overview</h2>
+              <p>Revenue grew 23% year-over-year to &euro;8.4M, driven by strong performance in APAC and continued enterprise expansion in EMEA. Operating margin improved to 18.2%, up from 15.7% in Q4 2025, reflecting operational efficiencies from the platform consolidation initiative.</p>
+              <h2>Regional Performance</h2>
+              <div class="doc-table-wrapper">
+                <table class="doc-table">
+                  <thead><tr><th>Region</th><th>Revenue</th><th>YoY Growth</th><th>Accounts</th><th>ARPU</th></tr></thead>
+                  <tbody>
+                    <tr><td>EMEA</td><td class="num">&euro;3.2M</td><td class="gp">+18%</td><td class="num">142</td><td class="num">&euro;22,535</td></tr>
+                    <tr><td>APAC</td><td class="num">&euro;2.8M</td><td class="gs">+31%</td><td class="num">98</td><td class="num">&euro;28,571</td></tr>
+                    <tr><td>Americas</td><td class="num">&euro;2.4M</td><td class="gp">+19%</td><td class="num">76</td><td class="num">&euro;31,579</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="track-change">
+                <div class="track-change-icon"><span class="i sm"><svg><use href="#ic-diff"/></svg></span></div>
+                <div>
+                  <div class="track-change-header">Track Change &mdash; Jane Martinez, Apr 5, 2026</div>
+                  <div class="track-change-text">Updated APAC revenue from <span class="tc-del">&euro;2.6M</span> to <span class="tc-ins">&euro;2.8M</span> to include Q1 actuals from Singapore and Tokyo offices.</div>
+                </div>
+              </div>
+              <h2>Revenue Distribution</h2>
+              <div class="doc-image-placeholder">
+                <span class="i xl" style="opacity:0.35"><svg><use href="#ic-image"/></svg></span>
+                <div class="img-caption">Chart: Revenue by Region &mdash; Q1 2026</div>
+                <div class="img-desc">Pie chart showing EMEA 38%, APAC 33%, Americas 29%</div>
+              </div>
+              <p>APAC's growth acceleration is primarily attributed to three new enterprise accounts in the financial services vertical, contributing &euro;0.8M in new ARR.</p>
+            </div>
+            <div class="doc-footer">
+              <span><span class="stat-val">42</span> blocks</span>
+              <span class="stat-sep">|</span>
+              <span><span class="stat-val">3</span> tables</span>
+              <span class="stat-sep">|</span>
+              <span><span class="stat-val">2</span> images</span>
+              <span class="stat-sep">|</span>
+              <span><span class="stat-val">5</span> changes</span>
+              <span style="margin-left:auto;font-size:10.5px">Parsed in 11ms &mdash; deterministic</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RESIZE HANDLE -->
+    <div class="resize-handle" id="resizeHandle"></div>
+
+    <!-- CHAT PANEL -->
+    <div class="chat-panel">
+      <div class="chat-header">
+        <div class="chat-header-left">
+          <div class="chat-skill-indicator">
+            <span class="chat-skill-dot"></span> Doc Analyst
+          </div>
+        </div>
+        <div class="chat-header-right">
+          <div class="chat-context-badge">
+            <span class="i sm" style="opacity:0.5"><svg><use href="#ic-folder"/></svg></span>
+            14 documents loaded
+          </div>
+          <button class="panel-toggle-btn active" id="panelToggle" onclick="toggleDocPanel()" title="Toggle document panel">
+            <span class="i sm"><svg><use href="#ic-panel"/></svg></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="chat-messages">
+        <div class="chat-doc-context">
+          <span class="i sm" style="opacity:0.5"><svg><use href="#ic-folder"/></svg></span>
+          Analyzing <strong>14 documents</strong> from "Q1 Financial Review" &mdash; 12 parsed, 2 in progress
+        </div>
+
+        <div class="chat-msg bot">
+          <div class="chat-msg-avatar bot">
+            <img src="../images/logo/sunholo-logo.svg" alt="ai" style="width:18px;height:18px">
+          </div>
+          <div class="chat-msg-body">
+            <div class="chat-msg-name">Doc Analyst <span class="msg-time">2:14 PM</span></div>
+            <div class="chat-msg-bubble">
+              I've loaded your Q1 Financial Review folder with <strong>14 documents</strong> across 3 subfolders. Here's what I found:
+              <br><br>
+              <strong>Reports</strong> (6 files) &mdash; Financial summary, APAC expansion plan, board deck, and compliance docs<br>
+              <strong>Data</strong> (5 files) &mdash; Sales data, CAC analysis, pipeline forecast, churn and ARPU breakdowns<br>
+              <strong>Charts</strong> (3 files) &mdash; Revenue, growth trajectory, and market share visualizations
+              <br><br>
+              The Q1 Financial Summary has <strong>3 tables</strong> and <strong>5 tracked changes</strong>. 2 files are still parsing &mdash; I'll let you know when they're ready.
+              <br><br>
+              What would you like to analyze across these documents?
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-msg user">
+          <div class="chat-msg-avatar user">M</div>
+          <div class="chat-msg-body">
+            <div class="chat-msg-name">Mark <span class="msg-time">2:14 PM</span></div>
+            <div class="chat-msg-bubble">Extract the revenue figures by region and show me which region has the highest ARPU. Cross-reference with the pipeline forecast to see if the trend holds for Q2.</div>
+          </div>
+        </div>
+
+        <div class="chat-msg bot">
+          <div class="chat-msg-avatar bot">
+            <img src="../images/logo/sunholo-logo.svg" alt="ai" style="width:18px;height:18px">
+          </div>
+          <div class="chat-msg-body">
+            <div class="chat-msg-name">Doc Analyst <span class="msg-time">2:15 PM</span></div>
+            <div class="chat-msg-bubble">
+              Here are the revenue figures from the Regional Performance table:
+              <div class="chat-inline-table">
+                <table>
+                  <thead><tr><th>Region</th><th>Revenue</th><th>Growth</th><th>ARPU</th></tr></thead>
+                  <tbody>
+                    <tr><td>EMEA</td><td>&euro;3.2M</td><td style="color:hsl(150,60%,38%)">+18%</td><td>&euro;22,535</td></tr>
+                    <tr><td>APAC</td><td>&euro;2.8M</td><td style="color:hsl(150,70%,32%);font-weight:700">+31%</td><td>&euro;28,571</td></tr>
+                    <tr><td style="font-weight:600">Americas</td><td>&euro;2.4M</td><td style="color:hsl(150,60%,38%)">+19%</td><td style="font-weight:700">&euro;31,579</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <strong>Americas</strong> has the highest ARPU at &euro;31,579 &mdash; 40% above EMEA despite the smallest account base.
+              <br><br>
+              Cross-referencing with <strong>Pipeline Forecast.xlsx</strong>: Americas has 12 late-stage deals worth &euro;1.2M projected for Q2, which would push ARPU even higher. APAC pipeline is thinner (4 deals, &euro;0.4M) but their +31% growth trend suggests strong organic expansion.
+              <div class="chat-source-ref">
+                <span class="i sm" style="opacity:0.5"><svg><use href="#ic-link"/></svg></span>
+                <a href="#">Q1 Financial Summary, Table 1</a> &middot;
+                <a href="#">Pipeline Forecast.xlsx, Sheet "Q2 Projected"</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-input-area">
+        <div class="chat-input-wrapper">
+          <button class="chat-btn attach" title="Attach file">
+            <span class="i"><svg><use href="#ic-clip"/></svg></span>
+          </button>
+          <textarea class="chat-input" rows="1" placeholder="Ask about these documents..."></textarea>
+          <button class="chat-btn send" title="Send">
+            <span class="i"><svg><use href="#ic-send"/></svg></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const docPanel = document.getElementById('docPanel');
+  const resizeHandle = document.getElementById('resizeHandle');
+  const panelToggle = document.getElementById('panelToggle');
+
+  function toggleDocPanel() {
+    const collapsed = docPanel.classList.toggle('collapsed');
+    resizeHandle.classList.toggle('collapsed-handle', collapsed);
+    panelToggle.classList.toggle('active', !collapsed);
+  }
+
+  const docListView = document.getElementById('docListView');
+  const docSingleView = document.getElementById('docSingleView');
+
+  function showListView() {
+    docListView.classList.add('visible');
+    docSingleView.classList.add('hidden');
+  }
+
+  function showSingleDoc() {
+    docListView.classList.remove('visible');
+    docSingleView.classList.remove('hidden');
+  }
+
+  // Drag resize
+  let isResizing = false;
+  resizeHandle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    const ws = document.querySelector('.workspace').getBoundingClientRect();
+    const pct = Math.min(Math.max(((e.clientX - ws.left) / ws.width) * 100, 20), 80);
+    docPanel.style.width = pct + '%';
+  });
+  document.addEventListener('mouseup', () => {
+    if (isResizing) { isResizing = false; document.body.style.cursor = ''; document.body.style.userSelect = ''; }
+  });
+
+  // Folder collapse
+  document.querySelectorAll('.doc-list-folder-header').forEach(h => {
+    h.addEventListener('click', () => {
+      const chev = h.querySelector('.folder-chevron');
+      const open = chev.classList.toggle('open');
+      h.parentElement.querySelectorAll('.doc-list-item').forEach(i => i.style.display = open ? '' : 'none');
+    });
+  });
+
+  // Doc list item click
+  document.querySelectorAll('.doc-list-item').forEach(i => {
+    i.addEventListener('click', () => {
+      document.querySelectorAll('.doc-list-item').forEach(x => x.classList.remove('active'));
+      i.classList.add('active');
+      showSingleDoc();
+    });
+  });
+
+  // Doc tab click
+  document.querySelectorAll('.doc-tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.doc-tab').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      showSingleDoc();
+    });
+  });
+</script>
+</body>
+</html>

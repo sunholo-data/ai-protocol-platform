@@ -1,0 +1,40 @@
+# Virtual environment
+.venv/
+
+# Cache
+__pycache__/
+*.pyc
+.ruff_cache/
+
+# Testing
+.coverage
+.coverage.*
+coverage/
+htmlcov/
+tests/
+
+# Environment
+.env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Git
+.git
+.gitignore
+
+# Docs
+README.md
+CLAUDE.md
+
+# Build
+*.egg-info/
+dist/
+build/
+Makefile

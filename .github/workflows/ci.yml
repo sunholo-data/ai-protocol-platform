@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, test, prod]
+  push:
+    branches: [dev]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint + test-fast)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --dev --extra lint
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Format check (ruff)
+        run: uv run ruff format --check .
+
+      - name: Guard platform-owner sentinel (only admin/platform_seed may write it)
+        # PLATFORM-GLOBAL-SKILLS risk mitigation: any call that creates a
+        # skill with owner_id == PLATFORM_OWNER_UID outside the seed module
+        # re-introduces the exact class of bug M5 had to clean up (duplicate
+        # rows with colliding names under different owners). Keep writes
+        # centralized so the one-way "only the deploy seeds platform skills"
+        # invariant is enforceable.
+        run: |
+          set -e
+          hits=$(grep -RnE 'owner_id\s*=\s*PLATFORM_OWNER_UID|owner_id\s*=\s*"aitana-platform"' \
+            --include='*.py' \
+            --exclude-dir='.venv' --exclude-dir='__pycache__' --exclude-dir='tests' \
+            . \
+            | grep -v 'admin/platform_seed.py' \
+            | grep -v 'skills/platform.py' \
+            || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Platform owner_id may only be set in backend/admin/platform_seed.py."
+            echo "Offending lines:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "Platform sentinel writes are confined to admin/platform_seed.py."
+
+      - name: Test (fast only)
+        # --ignore=tests/integration skips the folder at collection time.
+        # Integration tests import app.py, which calls google.auth.default()
+        # at module load — fine on Cloud Run / a dev laptop, fatal on a
+        # GitHub runner with no ADC. The marker filter alone deselects
+        # execution but still imports the test modules.
+        # ADK_ARTIFACT_BUCKET is empty so tests use InMemoryArtifactService.
+        env:
+          ADK_ARTIFACT_BUCKET: ""
+        run: uv run pytest tests/ --ignore=tests/integration -m "not slow" --tb=short -q
+
+  local-mode-safety:
+    name: LOCAL_MODE safety (no leaks in deployed configs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Refuse local-mode truthy leaks in cloudbuild / tf / workflows
+        run: python3 scripts/check_local_mode_safety.py
+
+  frontend:
+    name: Frontend (lint + typecheck + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint + typecheck
+        run: npm run quality:check:fast
+
+      - name: Test
+        run: CI=true npm run test:run

@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ARTEFACT_TITLE}}</title>
+<!--
+  MCP App artefact template (v1).
+
+  Copy this directory to name your artefact:
+    `cp -r infrastructure/mcp-sandbox/artefacts/_template/v1 \
+            infrastructure/mcp-sandbox/artefacts/<name>/v1`
+  Then edit:
+    - <title> and <h1> tags
+    - The "params" line in the header
+    - <canvas id="viz"> physics / rendering in <script>
+    - The results markers list + their compute functions
+    - ARTEFACT_NAME constant (used as postMessage namespace)
+    - Self-test at the bottom (?test=1)
+
+  Rules enforced by the harness (ADR-013 + MCP Apps spec):
+    1. Single self-contained file, =< 200 KB total.
+    2. NO external resources: no script-src http, no img-src http, no
+       network fetch. The host's CSP blocks these even if you try.
+    3. NO nested iframe. frame-src 'none'.
+    4. Speak JSON-RPC 2.0 to the host (via the sandbox proxy).
+       See the rpcNotify / rpcRequest helpers below — ~30 lines, no SDK.
+    5. Complete the ui/initialize handshake on load before sending
+       any application notifications.
+    6. Respond to ping requests with an empty result object.
+
+  Cross-host: report state to the model via emitModelContext() (NOT
+  rpcNotify directly) — it dual-bridges the model-context channel to
+  ChatGPT's window.openai, which does NOT listen to raw `ui/*`
+  postMessages. See the "Cross-host bridge" block below + trap #12 in
+  docs/workshop/protocol-gotchas.md.
+
+  See docs/ops/mcp-apps-iframe-guide.md for the full host-side story.
+-->
+<style>
+  :root {
+    --bg: #fafaf9;
+    --fg: #1c1917;
+    --muted: #78716c;
+    --border: #e7e5e4;
+    --accent: #1e40af;
+    --accent-soft: #dbeafe;
+    --hidden: #d6d3d1;
+    --panel-bg: #ffffff;
+  }
+  /*
+   * G35 (template-mcp-apps-artefact-quality.md): dark palette mirrors the
+   * light palette token-for-token. The artefact reads `hostContext.theme`
+   * from the ui/initialize handshake response (and ui/update-theme runtime
+   * notifications) and sets `document.documentElement.dataset.theme`
+   * accordingly; every rule below uses the same `var(--…)` reference, so
+   * a theme flip re-skins the whole UI with zero per-rule CSS edits.
+   *
+   * Authoring rule: NEVER hardcode a hex colour outside this :root block.
+   * The MCP App spec's hostContext.theme channel is how forks tell the
+   * artefact "match the host shell"; honouring it is the whole point of
+   * sandbox-proxy embedding.
+   */
+  :root[data-theme="dark"] {
+    --bg: #0b0d12;
+    --fg: #f5f5f4;
+    --muted: #a8a29e;
+    --border: #292524;
+    --accent: #60a5fa;
+    --accent-soft: rgba(96, 165, 250, 0.15);
+    --hidden: #44403c;
+    --panel-bg: #1c1917;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    font-size: 14px; line-height: 1.4;
+  }
+  body { padding: 12px; }
+  header { margin-bottom: 8px; }
+  header h1 { font-size: 15px; margin: 0 0 2px; font-weight: 600; }
+  header .params { color: var(--muted); font-size: 12px; }
+  main {
+    display: grid; grid-template-columns: 1fr; gap: 10px;
+  }
+  @media (min-width: 720px) {
+    main { grid-template-columns: 2fr 1fr; }
+  }
+  .canvas-wrap {
+    background: var(--panel-bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px;
+  }
+  canvas { width: 100%; height: auto; display: block; touch-action: none; }
+  .panel {
+    background: var(--panel-bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px;
+  }
+  .panel h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--muted); margin: 0 0 8px; font-weight: 600;
+  }
+  .controls .row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+  .controls label { font-size: 12px; min-width: 30px; }
+  .controls input[type="range"] { flex: 1; }
+  .controls .value { font-variant-numeric: tabular-nums; min-width: 55px; text-align: right; font-size: 12px; }
+  .buttons { display: flex; gap: 6px; margin-top: 8px; }
+  button {
+    font: inherit; font-size: 12px; padding: 6px 10px;
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid transparent; border-radius: 4px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .markers .row {
+    display: flex; align-items: baseline; gap: 6px; margin: 6px 0;
+    padding: 6px; border-radius: 4px; background: #f5f5f4;
+  }
+  .markers .label { flex: 1; font-size: 12px; }
+  .markers .value {
+    font-variant-numeric: tabular-nums; font-weight: 600;
+    color: var(--hidden); min-width: 60px; text-align: right;
+  }
+  .markers .value.revealed { color: var(--accent); }
+  .markers button.vis {
+    font-size: 11px; padding: 3px 8px;
+    background: transparent; color: var(--muted); border: 1px solid var(--border);
+  }
+  .markers button.vis.revealed { color: var(--accent); border-color: var(--accent); }
+  .pedagogy {
+    margin-top: 8px; padding: 8px;
+    background: #fef3c7; border-left: 3px solid #f59e0b;
+    font-size: 11px; color: #78350f;
+    border-radius: 0 4px 4px 0;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>{{ARTEFACT_TITLE}}</h1>
+  <div class="params">
+    <!-- TODO: list the problem's given parameters -->
+    param₁ = X &nbsp;·&nbsp; param₂ = Y
+  </div>
+</header>
+<main>
+  <section class="canvas-wrap">
+    <canvas id="viz" width="600" height="320" aria-label="Visualisation"></canvas>
+  </section>
+  <aside>
+    <div class="panel controls">
+      <h2>Controls</h2>
+      <!-- TODO: sliders for adjustable parameters -->
+      <div class="row">
+        <label for="p1">p₁</label>
+        <input id="p1" type="range" min="0" max="100" value="50">
+        <span class="value" id="p1-out">50</span>
+      </div>
+      <div class="buttons">
+        <button id="play" type="button">▶ Play</button>
+        <button id="pause" type="button" class="ghost">⏸ Pause</button>
+        <button id="reset" type="button" class="ghost">↺ Reset</button>
+      </div>
+    </div>
+    <div class="panel markers" style="margin-top: 10px;">
+      <h2>Results</h2>
+      <!-- TODO: one row per answer-marker. data-marker is the postMessage key. -->
+      <div class="row">
+        <span class="label">Example result</span>
+        <span class="value" data-value-for="example">—</span>
+        <button class="vis" type="button" data-marker="example">Show</button>
+      </div>
+      <p class="pedagogy">
+        Values are hidden intentionally. Calculate them first — then reveal to check.
+      </p>
+    </div>
+  </aside>
+</main>
+<script>
+  "use strict";
+
+  // ─── MCP Apps JSON-RPC helpers (DO NOT REMOVE) ──────────────────────────
+  // Implements the MCP Apps spec wire format (JSON-RPC 2.0 over postMessage).
+  // Per spec line 426: "Note that you don't need an SDK to talk MCP with
+  // the host" — these ~30 lines are all you need.
+  //
+  // The sandbox proxy has a real origin (allow-same-origin on its iframe).
+  // Auth is origin-based on the host side; we send to "*" here because we
+  // don't know the host origin from inside the sandbox.
+  const ARTEFACT_NAME = "{{ARTEFACT_NAME}}";
+  let _nextId = 1;
+  // Queue of notifications to replay after ui/initialize completes.
+  const _pendingNotifications = [];
+  let _initialized = false;
+
+  function rpcNotify(method, params) {
+    const msg = { jsonrpc: "2.0", method, params };
+    if (!_initialized && method !== "ui/initialize") {
+      _pendingNotifications.push(msg);
+      return;
+    }
+    try { window.parent.postMessage(msg, "*"); } catch (_) {}
+  }
+
+  function rpcRequest(method, params) {
+    const id = _nextId++;
+    return new Promise((resolve, reject) => {
+      const listener = (e) => {
+        if (!e.data || e.data.id !== id) return;
+        window.removeEventListener("message", listener);
+        if (e.data.error) reject(new Error(e.data.error.message || "rpc error"));
+        else resolve(e.data.result);
+      };
+      window.addEventListener("message", listener);
+      try { window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*"); }
+      catch (err) { window.removeEventListener("message", listener); reject(err); }
+    });
+  }
+
+  function rpcOnNotification(method, handler) {
+    window.addEventListener("message", (e) => {
+      if (!e.data || e.data.jsonrpc !== "2.0") return;
+      if (e.data.method !== method) return;
+      handler(e.data.params ?? {});
+    });
+  }
+
+  // Ping responder — spec line 508 requires responding to ping.
+  rpcOnNotification("ping", () => {});
+  window.addEventListener("message", (e) => {
+    if (!e.data || e.data.jsonrpc !== "2.0" || e.data.method !== "ping") return;
+    if (e.data.id == null) return;
+    try { window.parent.postMessage({ jsonrpc: "2.0", id: e.data.id, result: {} }, "*"); }
+    catch (_) {}
+  });
+
+  // G35 (template-mcp-apps-artefact-quality.md): theme handler.
+  // Applies hostContext.theme to <html data-theme="…">, which flips the
+  // CSS-variable palette in the :root[data-theme="dark"] block above.
+  // Default to "light" when the host doesn't provide one (graceful
+  // degradation — host may not know its own theme during the first paint).
+  function applyTheme(theme) {
+    const t = theme === "dark" ? "dark" : "light";
+    document.documentElement.dataset.theme = t;
+  }
+
+  // G35 runtime channel: host emits ui/update-theme when its own theme
+  // flips mid-session (user toggle, system preference change). The
+  // notification is a JSON-RPC notification with params: { theme: "light"|"dark" }.
+  rpcOnNotification("ui/update-theme", (params) => {
+    applyTheme(params.theme);
+  });
+
+  // ─── Cross-host bridge (SEP-1865 postMessage ↔ OpenAI window.openai) ──────
+  // rpcNotify above speaks the SEP-1865 postMessage bridge — what this
+  // platform's sandbox host, Claude Desktop and MCP Inspector consume.
+  // ChatGPT does NOT listen to those `ui/*` postMessages; its Apps SDK injects
+  // a `window.openai` object instead (Microsoft 365 Copilot honours BOTH). A
+  // widget that only posts `ui/update-model-context` renders in ChatGPT but
+  // leaves the model blind to every interaction. So route the model-context
+  // channel through BOTH. Detect at call time (the object can arrive after
+  // load) and guard every call (unsupported window.openai APIs are `undefined`).
+  // See docs/workshop/protocol-gotchas.md trap #12.
+  function openaiHost() {
+    return typeof window !== "undefined" ? window.openai : undefined;
+  }
+
+  // Channel 1 — report state to the model (silent; the model sees it on its
+  // NEXT turn). ChatGPT → window.openai.setWidgetState · else → the
+  // ui/update-model-context postMessage. USE THIS instead of rpcNotify for
+  // model-context updates.
+  //
+  // Emit BOTH `content` and `structuredContent` (v6.19.0, AIPLA #38).
+  // They have DIFFERENT AUDIENCES: per SEP-1624 `content` is model-facing
+  // natural language ("preferred for direct model prompting") and
+  // `structuredContent` is machine-oriented data for programmatic use.
+  //
+  // Emitting only `structuredContent` works here *solely because this platform
+  // is both the MCP server AND the host* — our bridge reads structuredContent
+  // and composes the model prompt server-side. A conformant external host does
+  // not do that: it feeds `content` to its model and treats structuredContent
+  // as app data. So with no `content`, the model sees NOTHING. Verified
+  // downstream against ChatGPT developer mode: the sim rendered, and the model
+  // replied "I can see you interacted but didn't receive the interaction data."
+  //
+  // `summary` is derived from the SAME state as structuredContent by the
+  // caller, so the two cannot drift apart semantically. When omitted we fall
+  // back to a JSON rendering — worse prose, but never an empty model context.
+  function emitModelContext(structuredContent, summary) {
+    const oa = openaiHost();
+    if (oa && typeof oa.setWidgetState === "function") {
+      try { oa.setWidgetState(structuredContent); } catch (_) {}
+    }
+    const text = typeof summary === "string" && summary.trim()
+      ? summary
+      : "Widget state: " + JSON.stringify(structuredContent);
+    // Always emit on the postMessage bridge too — a no-op in ChatGPT (ignored),
+    // the live channel in the platform host / Claude / Inspector.
+    rpcNotify("ui/update-model-context", {
+      content: [{ type: "text", text: text }],
+      structuredContent: structuredContent,
+    });
+  }
+
+  // Channel 2 (wire to a button if your artefact mutates server state) — the
+  // MUTATION round-trip: the widget calls a server tool, the server mutates +
+  // returns, and the result lands in the widget AND the model's context. The
+  // tool must carry `_meta["openai/widgetAccessible"]: true`. Returns the tool
+  // result, or undefined on a host with no tool-call bridge.
+  function callServerTool(name, args) {
+    const oa = openaiHost();
+    if (oa && typeof oa.callTool === "function") return oa.callTool(name, args);
+    if (oa && oa.mcp && typeof oa.mcp.callTool === "function") return oa.mcp.callTool(name, args);
+    // SEP-1865 widget→tools/call is not hand-rolled here — confirm the wire
+    // method against the vendored MCP Apps spec before wiring it.
+    return Promise.resolve(undefined);
+  }
+  // (Channel 3 — an explicit "ask the tutor" chat turn — is
+  //  window.openai.sendFollowUpMessage({prompt}) on ChatGPT, or the ui/message
+  //  REQUEST on SEP-1865 hosts. Left unwired; add it if your artefact has a
+  //  deliberate submit action.)
+
+  // ui/initialize handshake (must complete before sending application notifications).
+  rpcRequest("ui/initialize", {
+    protocolVersion: "2026-01-26",
+    capabilities: {},
+    clientInfo: { name: ARTEFACT_NAME, version: "1.0.0" },
+  }).then((result) => {
+    _initialized = true;
+    rpcNotify("ui/notifications/initialized", { clientInfo: { name: ARTEFACT_NAME, version: "1.0.0" } });
+    // Flush any notifications that were queued before init completed.
+    _pendingNotifications.forEach((msg) => {
+      try { window.parent.postMessage(msg, "*"); } catch (_) {}
+    });
+    _pendingNotifications.length = 0;
+    // G35: honour the host's theme from the handshake response. The
+    // hostContext block also carries displayMode + locale; extend
+    // applyTheme() / add per-locale formatting as your artefact needs.
+    if (result && result.hostContext) {
+      applyTheme(result.hostContext.theme);
+    }
+  }).catch((err) => {
+    console.error("[artefact] ui/initialize failed:", err);
+    _initialized = true; // degrade gracefully
+  });
+
+  // ─── State ──────────────────────────────────────────────────────────────
+  let p1 = 50;
+  let t = 0;
+  let playing = false;
+  let lastFrameMs = 0;
+  const revealed = { example: false };
+
+  // ─── Physics / computation ──────────────────────────────────────────────
+  // TODO: replace with the actual physics for the problem.
+  function compute(t, params) {
+    return { x: t, y: Math.sin(t) * params.p1 };
+  }
+  function results(params) {
+    // TODO: return the answer-markers as a {key: value} dict.
+    return { example: params.p1 * 0.42 };
+  }
+
+  // ─── DOM ────────────────────────────────────────────────────────────────
+  const canvas = document.getElementById("viz");
+  const ctx = canvas.getContext("2d");
+  const p1Out = document.getElementById("p1-out");
+
+  function fitCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.width * 0.55 * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function drawWorld() {
+    // TODO: replace with the actual visualisation.
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = "#1e40af";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i <= 200; i++) {
+      const tt = i / 20;
+      const p = compute(tt, { p1 });
+      const px = (i / 200) * w;
+      const py = h / 2 - p.y;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+
+  function updateMarkers() {
+    const r = results({ p1 });
+    document.querySelectorAll(".markers [data-value-for]").forEach((el) => {
+      const m = el.dataset.valueFor;
+      if (!revealed[m]) { el.textContent = "—"; el.classList.remove("revealed"); }
+      else { el.textContent = r[m].toFixed(2); el.classList.add("revealed"); }
+    });
+    document.querySelectorAll(".markers button.vis").forEach((b) => {
+      const m = b.dataset.marker;
+      b.classList.toggle("revealed", !!revealed[m]);
+      b.textContent = revealed[m] ? "Hide" : "Show";
+    });
+  }
+
+  function render() {
+    fitCanvas();
+    drawWorld();
+    p1Out.textContent = p1.toString();
+  }
+
+  // ─── Animation loop ─────────────────────────────────────────────────────
+  function tick(ms) {
+    if (!lastFrameMs) lastFrameMs = ms;
+    const dt = (ms - lastFrameMs) / 1000;
+    lastFrameMs = ms;
+    if (playing) { t += dt; render(); }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // ─── Event wiring ───────────────────────────────────────────────────────
+  document.getElementById("p1").addEventListener("input", (e) => {
+    p1 = parseFloat(e.target.value);
+    // RULE: dragging a slider resets revealed values so the student must
+    // recompute per parameter set. Don't remove without explicit consent.
+    Object.keys(revealed).forEach((k) => { revealed[k] = false; });
+    updateMarkers();
+    render();
+    emitModelContext(
+      { kind: "param.change", param: "p1", value: p1 },
+      // Model-facing text, derived from the SAME value — see emitModelContext.
+      "The user set p1 to " + p1 + ".",
+    );
+  });
+  document.getElementById("play").addEventListener("click", () => {
+    playing = true; lastFrameMs = 0;
+    emitModelContext({ kind: "play" }, "The user started the simulation.");
+  });
+  document.getElementById("pause").addEventListener("click", () => {
+    playing = false;
+    emitModelContext({ kind: "pause" }, "The user paused the simulation.");
+  });
+  document.getElementById("reset").addEventListener("click", () => {
+    t = 0; playing = false; lastFrameMs = 0; render();
+    emitModelContext({ kind: "reset" });
+  });
+  document.querySelectorAll(".markers button.vis").forEach((b) => {
+    b.addEventListener("click", () => {
+      const m = b.dataset.marker;
+      revealed[m] = !revealed[m];
+      updateMarkers(); render();
+      emitModelContext({
+        kind: "show_value",
+        marker: m,
+        revealed: revealed[m],
+        value: revealed[m] ? results({ p1 })[m] : null,
+      });
+    });
+  });
+  window.addEventListener("resize", render);
+  render();
+  updateMarkers();
+  emitModelContext({ kind: "open" });
+
+  // ─── Self-test (URL: ?test=1) ───────────────────────────────────────────
+  // Load with ?test=1 and check `document.title` for "TEST PASS".
+  // The smoke script (if configured) checks this path per artefact.
+  if (new URLSearchParams(window.location.search).get("test") === "1") {
+    const r = results({ p1: 50 });
+    const expected = 21; // TODO: replace with the actual expected value
+    const ok = Math.abs(r.example - expected) < 0.01;
+    document.title = ok ? "TEST PASS — {{ARTEFACT_TITLE}}" : "TEST FAIL — {{ARTEFACT_TITLE}}";
+    if (!ok) console.error("Self-test failed: example=" + r.example + " expected " + expected);
+    else console.log("Self-test PASS: example=" + r.example);
+  }
+</script>
+</body>
+</html>

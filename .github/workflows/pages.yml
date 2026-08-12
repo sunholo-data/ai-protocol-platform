@@ -1,0 +1,44 @@
+name: Deploy mockups to GitHub Pages
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'frontend/public/mockups/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build pages directory
+        run: |
+          mkdir -p _site
+          cp -r frontend/public/mockups/* _site/
+          # Add a simple index that redirects to the workspace mockup
+          cat > _site/index.html << 'REDIRECT'
+          <!doctype html>
+          <meta http-equiv="refresh" content="0;url=document-workspace.html">
+          <a href="document-workspace.html">Aitana v6 Workspace</a>
+          REDIRECT
+
+      - uses: actions/upload-pages-artifact@v3
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

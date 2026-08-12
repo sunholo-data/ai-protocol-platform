@@ -1,0 +1,15 @@
+{
+  "result": {
+    "_meta": {
+      "viewUUID": "b2c124ec-096a-4d59-802a-8dcabd6b0024"
+    },
+    "content": [
+      {
+        "type": "text",
+        "text": "Displaying globe at: W:11.4000, S:48.0000, E:11.7000, N:48.2000 (Munich)"
+      }
+    ]
+  },
+  "jsonrpc": "2.0",
+  "id": 3
+}

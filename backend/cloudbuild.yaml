@@ -1,0 +1,323 @@
+# Aitana Platform v6 -- Backend standalone Cloud Build configuration
+#
+# ============================================================================
+# DELETE THIS FILE IF YOUR FORK ONLY SERVES A CHAT UI.
+#
+# This file deploys a SECOND Cloud Run service (`platform-backend`,
+# IAM-protected) in addition to the public `platform-frontend` service that
+# the root cloudbuild.yaml deploys. The backend is ALSO present as a sidecar
+# inside `platform-frontend` -- intentional duplication to keep chat-path
+# latency on the loopback hop while still offering a standalone endpoint for
+# non-UI callers.
+#
+# You only need the standalone service if at least one of these is real for
+# your fork:
+#   - Channel webhooks (Telegram / email / WhatsApp) hitting a non-Firebase
+#     auth path
+#   - External A2A crawlers (Gemini Enterprise) following the rewritten `url`
+#     field on your agent card
+#   - External MCP callers reaching your backend as an MCP server
+#   - Internal SA-to-SA Cloud Run callers without Firebase sessions
+#
+# If none of those apply: delete this file, disable the trigger
+# `trigger-<env>-platform-backend` in your Cloud Build project, and remove
+# the standalone service + its Terraform refs. Full recipe + symptom table:
+# docs/ops/deployment-models.md
+# ============================================================================
+#
+# Branch-based deployment: main -> dev, test -> test, prod -> production
+# Substitutions managed by Terraform (see multivac-aitana infrastructure repo).
+
+substitutions:
+  # MODEL-RELIABILITY M3: deployment residency gate for the STANDALONE
+  # backend (A2A surface — it builds agents too). Same semantics as the
+  # frontend/sidecar pipeline: dev = unrestricted, test/prod triggers
+  # override to eu-strict. models.yaml default_policy: eu-strict is the
+  # fail-safe when nothing is wired.
+  _MODEL_RESIDENCY_POLICY: "unrestricted"
+  # 1e second-pass compaction. Default OFF — dev opts in via run_client.tfvars
+  # trigger substitutions; test/prod branches never set them, so promotion
+  # carries the flag off until deliberately enabled. The queue path and OIDC SA
+  # are derived from project/region below; only the target URL (run.app hash)
+  # needs an explicit per-env value.
+  _COMPACTION_SECOND_PASS: ""
+  _COMPACTION_TASKS_TARGET_URL: ""
+  _SERVICE_NAME: platform-backend
+  _REGION: terraform_managed
+  _ARTIFACT_REGISTRY_REPO_URL_CLIENT: terraform_managed
+  _PROJECT_ID: terraform_managed
+  _FIREBASE_BUCKET: '${_PROJECT_ID}.firebasestorage.app'
+  # Comma-separated allowlist of service-account emails permitted to call
+  # /api/admin/seed-platform-skills. Terraform sets this to the Cloud Build
+  # SA for each environment. See docs/ops/platform-skills.md.
+  _ADMIN_SEED_ALLOWED_SAS: terraform_managed
+  # G17 (template-fork-ergonomics.md): include the workshop demo skills?
+  # `true` for the platform's own deploys; sanitize-for-template flips
+  # it to `false` so forks start with a clean slate. See platform_seed.py.
+  _INCLUDE_DEMO_SKILLS: 'true'
+  # Platform admin email that owns seeded skills. Required by
+  # platform_seed._resolve_owner_email() in non-LOCAL_MODE — an empty
+  # value fails the seed loudly rather than shipping Aitana-owned skills.
+  # The platform's own deploys set the real value via the Cloud Build
+  # TRIGGER substitution (kept out of source); forks set their own.
+  _PLATFORM_OWNER_EMAIL: ''
+  # #6 (template-cloudbuild-hardening.md): Cloud Build log bucket.
+  # Defaults to a project-local bucket so forks don't hit the
+  # Aitana-owned your-deploy-project-id-logging-bucket. The bucket is
+  # created by scripts/bootstrap-gcp-project.sh during initial setup.
+  _LOG_BUCKET: 'gs://${_PROJECT_ID}-cloudbuild-logs'
+
+tags: ['${_PROJECT_ID}', '${_SERVICE_NAME}']
+
+options:
+  logging: GCS_ONLY
+logsBucket: '${_LOG_BUCKET}'
+
+steps:
+  # --- Build backend image ---
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-backend
+    dir: backend
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'FIREBASE_BUCKET=${_FIREBASE_BUCKET}'
+      - '--build-arg'
+      - 'GOOGLE_CLOUD_PROJECT=${_PROJECT_ID}'
+      - '--build-arg'
+      - 'GOOGLE_CLOUD_LOCATION=${_REGION}'
+      - '-t'
+      - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/backend:${SHORT_SHA}'
+      - '.'
+
+  # --- Push image ---
+  # Writes /workspace/image_backend (the DIGEST reference) for the deploy step.
+  # Same contract as the root pipeline — see its push steps for the reasoning
+  # on the -n TAG_NAME guard and on failing loud instead of falling back.
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-backend
+    waitFor: ['build-backend']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        REPO="${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/backend"
+        docker push "$${REPO}:${SHORT_SHA}"
+        if [ -n "${BRANCH_NAME}" ]; then
+          docker tag "$${REPO}:${SHORT_SHA}" "$${REPO}:${BRANCH_NAME}"
+          docker push "$${REPO}:${BRANCH_NAME}"
+        fi
+        if [ -n "${TAG_NAME}" ]; then
+          docker tag "$${REPO}:${SHORT_SHA}" "$${REPO}:${TAG_NAME}"
+          docker push "$${REPO}:${TAG_NAME}"
+        fi
+        DIGEST=$$(docker inspect --format='{{index .RepoDigests 0}}' "$${REPO}:${SHORT_SHA}" || true)
+        if [ -z "$${DIGEST}" ]; then
+          echo "FATAL: could not resolve digest for $${REPO}" >&2
+          exit 1
+        fi
+        echo "$${DIGEST}" > /workspace/image_backend
+        echo "backend -> $${DIGEST}"
+
+  # --- Deploy to Cloud Run (single container) ---
+  # Runs through bash ONLY so the image can be pinned by digest (v6.20.0,
+  # AIPLA #47). The gcloud arg list below is passed through untouched as "$@"
+  # and the resolved digest is appended — deliberately avoiding a transcription
+  # of ~40 flags, which is where a quoting mistake would silently drop a secret
+  # or an env var. The only removed line is the old `--image=…:${BRANCH_NAME}`.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    waitFor: ['push-backend']
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        IMAGE=$$(cat /workspace/image_backend)
+        echo "Deploying backend=$${IMAGE}"
+        exec gcloud "$$@" --image="$${IMAGE}"
+      - 'deploy-standalone-backend'
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE_NAME}'
+      - '--region=${_REGION}'
+      - '--project=${_PROJECT_ID}'
+      - '--platform=managed'
+      - '--no-allow-unauthenticated'         # internal API, SA-invoked only
+      - '--max-instances=3'
+      # --image is appended by the wrapper script above, pinned to the digest.
+      - '--port=8080'
+      - '--memory=4Gi'
+      - '--cpu=2'
+      # Secrets
+      - '--set-secrets=GOOGLE_API_KEY=GOOGLE_API_KEY:latest'
+      - '--set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest'
+      # OpenAI (multi-model): the OpenAI-tier skills (gpt-5.4 reasoner) need the
+      # key; OPENAI_API_BASE routes to the configured endpoint. Unrestricted
+      # deploys only (dev / non-EU) — eu-strict rejects non-EU providers at
+      # resolve_model_chain, so a pinned gpt/claude skill fails loudly there.
+      - '--set-secrets=OPENAI_API_KEY=OPENAI_API_KEY:latest'
+      - '--set-secrets=OPENAI_API_BASE=OPENAI_API_BASE:latest'
+      - '--set-secrets=TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest'
+      - '--set-secrets=TWILIO_ACCOUNT_SID=TWILIO_ACCOUNT_SID:latest'
+      - '--set-secrets=TWILIO_AUTH_TOKEN=TWILIO_AUTH_TOKEN:latest'
+      - '--set-secrets=MAILGUN_API_KEY=MAILGUN_API_KEY:latest'
+      - '--set-secrets=MAILGUN_WEBHOOK_SECRET=MAILGUN_WEBHOOK_SECRET:latest'
+      - '--set-secrets=AGENT_ENGINE_ID=AGENT_ENGINE_ID:latest'
+      # Maps Grounding Lite (v6.23.0 MAPS-GROUNDING). Consumed indirectly: the
+      # mcp_servers/maps-grounding-lite registry row carries the header value
+      # "${MAPS_GROUNDING_API_KEY}" and tools/mcp/registry.py resolves it from
+      # this env var. Missing secret = the toolset refuses to build and any skill
+      # declaring the server fails loudly (G42), so an unseeded env is obvious.
+      - '--set-secrets=MAPS_GROUNDING_API_KEY=MAPS_GROUNDING_API_KEY:latest'
+      # Env vars
+      - '--set-env-vars=TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886'
+      - '--set-env-vars=GOOGLE_CLOUD_PROJECT=${_PROJECT_ID}'
+      - '--set-env-vars=GOOGLE_CLOUD_LOCATION=${_REGION}'
+      - '--set-env-vars=GOOGLE_GENAI_USE_VERTEXAI=True'
+      - '--set-env-vars=MODEL_RESIDENCY_POLICY=${_MODEL_RESIDENCY_POLICY}'
+      - '--set-env-vars=COMPACTION_SECOND_PASS_ENABLED=${_COMPACTION_SECOND_PASS}'
+      - '--set-env-vars=COMPACTION_TASKS_QUEUE=projects/${_PROJECT_ID}/locations/${_REGION}/queues/platform-compaction'
+      - '--set-env-vars=COMPACTION_TASKS_OIDC_SA=platform-tasks@${_PROJECT_ID}.iam.gserviceaccount.com'
+      - '--set-env-vars=COMPACTION_TASKS_TARGET_URL=${_COMPACTION_TASKS_TARGET_URL}'
+      - '--set-env-vars=ADK_ARTIFACT_BUCKET=${_PROJECT_ID}-artifacts'
+      - '--set-env-vars=LOGS_BUCKET_NAME=${_PROJECT_ID}-platform-logs'
+      # Vertex AI Search — platform-default `ai_search` datastore (aitana3) +
+      # the search-infra project/location used to expand bare datastore ids.
+      # Lives in the dedicated aitana-ai-search project, NOT the compute project;
+      # the runtime SA needs roles/discoveryengine.viewer there. No commas in
+      # these values, so plain --set-env-vars is safe.
+      - '--set-env-vars=VERTEX_AI_SEARCH_DATASTORE_ID=projects/aitana-ai-search/locations/eu/collections/default_collection/dataStores/aitana3'
+      - '--set-env-vars=VERTEX_AI_SEARCH_PROJECT=aitana-ai-search'
+      - '--set-env-vars=VERTEX_AI_SEARCH_LOCATION=eu'
+      # NB: AI_SEARCH_SOURCE_BUCKET_OVERRIDE (v6.15.0 gs://-source open/preview
+      # remap) is set ONLY on the frontend service (root cloudbuild.yaml), which
+      # serves the workbench Sources tab + import-by-reference. This standalone
+      # A2A backend renders no workbench, so it needs no source-bucket override.
+      # Observability
+      - '--set-env-vars=GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true'
+      - '--set-env-vars=OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true'
+      # Set as a process env var (not just telemetry.py's late setdefault) so the
+      # GenAI auto-instrumentation sees it at init — required for Agent Engine
+      # trace export (Gemini Enterprise "write traces" contract). Content stays
+      # NO_CONTENT (telemetry.py coerces `true`) — we deliberately do NOT use
+      # EVENT_ONLY, which would put confidential contract text into traces.
+      - '--set-env-vars=OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental'
+      # Admin seed allowlist (Cloud Build SA must be in this list to call
+      # /api/admin/seed-platform-skills from the seed step below).
+      # G18 (template-fork-ergonomics.md): `^|^` delimiter override — value
+      # is a comma-separated SA list; default `--set-env-vars=` parser treats
+      # comma as KEY=VAL separator and silently corrupts the second entry.
+      # Rule for ALL future env-var additions: use `^|^` for any var whose
+      # value could ever contain a comma. Single values are safe.
+      - "--set-env-vars=^|^ADMIN_SEED_ALLOWED_SAS=${_ADMIN_SEED_ALLOWED_SAS}"
+      - "--set-env-vars=_INCLUDE_DEMO_SKILLS=${_INCLUDE_DEMO_SKILLS}"
+      # Single email value, no comma — plain --set-env-vars is safe.
+      - "--set-env-vars=PLATFORM_OWNER_EMAIL=${_PLATFORM_OWNER_EMAIL}"
+
+  # --- Post-deploy smoke: standalone backend is IAM-protected, so use an
+  # identity token from the Cloud Build SA. Cloud Build SA needs run.invoker
+  # on this service (already granted via Terraform common tfvars line ~304).
+  # Laptop equivalent: `./scripts/smoke-deployed.sh dev backend` (see
+  # docs/ops/deployed-urls.md for URL list and verification).
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: smoke-backend
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -e
+        URL=$(gcloud run services describe ${_SERVICE_NAME} \
+          --project=${_PROJECT_ID} --region=${_REGION} \
+          --format='value(status.url)')
+        echo "Smoking $${URL}/health (authenticated)"
+        # #13 (template-cloudbuild-hardening.md): mint the identity token
+        # via the GCE metadata server, NOT `gcloud auth print-identity-token`.
+        # The gcloud command fails under a user-managed Cloud Build SA
+        # (which post-2024 projects MUST use) with "No identity token can
+        # be obtained from the current credentials." Metadata server works
+        # under any SA. `include_email=true` puts the email claim on the
+        # token so the backend's admin-allowlist check succeeds (#14).
+        TOKEN=$(curl -sS --max-time 10 \
+          -H "Metadata-Flavor: Google" \
+          "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$${URL}&format=full&include_email=true")
+        # Cold-start tolerance (2026-06-11): /health on a fresh revision
+        # can take ~10-30s while ADK initialises + the Vertex Agent Engine
+        # client warms. Retry with backoff before failing the build.
+        code=000
+        for attempt in 1 2 3; do
+          code=$(curl -sS -o /tmp/body -w '%{http_code}' --max-time 60 \
+            -H "Authorization: Bearer $${TOKEN}" "$${URL}/health") || code=000
+          [ "$${code}" = "200" ] && break
+          echo "  retry $${attempt}/3 (got $${code})"
+          sleep 5
+        done
+        body=$(head -c 200 /tmp/body)
+        if [ "$${code}" = "200" ]; then
+          echo "OK   /health -> 200 body=$${body}"
+        else
+          echo "FAIL /health -> $${code} body=$${body}"
+          exit 1
+        fi
+
+  # --- Platform-skill seed + MCP-registry gate. Populates the default skills
+  # with ownerId=aitana-platform so every tenant has something to run.
+  # Idempotent (skips already-present names) so re-runs are free. A seed
+  # HICCUP (network, 5xx) stays non-fatal — not worth blocking a good deploy.
+  # But a 200 response whose `mcp_missing` is non-empty FAILS THE BUILD:
+  # it means a SKILL.md declares an MCP server this env's mcp_servers/
+  # registry can't satisfy, and every such skill would hard-500 at agent
+  # build (G42) the moment a user opens it — exactly how web-researcher
+  # broke for the ONE team on test (2026-07-21, issue #14). Fix with
+  # scripts/seed_mcp_servers.py --env <env> [--public-url …] or drop the
+  # declaration. Docs: docs/ops/platform-skills.md
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: seed-platform-skills
+    waitFor: ['smoke-backend']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set +e
+        URL=$(gcloud run services describe ${_SERVICE_NAME} \
+          --project=${_PROJECT_ID} --region=${_REGION} \
+          --format='value(status.url)')
+        # #13 (template-cloudbuild-hardening.md): metadata-server identity
+        # token, NOT gcloud auth print-identity-token. See smoke-backend
+        # step above for the rationale. include_email=true is what makes
+        # the backend's admin-allowlist check pass (#14).
+        TOKEN=$(curl -sS --max-time 10 \
+          -H "Metadata-Flavor: Google" \
+          "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$${URL}&format=full&include_email=true")
+        code=$(curl -sS -o /tmp/seed -w '%{http_code}' --max-time 60 \
+          -X POST -H "Authorization: Bearer $${TOKEN}" \
+          "$${URL}/api/admin/seed-platform-skills") || code=000
+        body=$(head -c 300 /tmp/seed)
+        echo "seed-platform-skills -> $${code} body=$${body}"
+        # MCP-registry gate (issue #14): only evaluated on a successful seed
+        # response — transient seed failures remain non-fatal as before.
+        if [ "$${code}" != "200" ]; then
+          exit 0
+        fi
+        if ! python3 - <<'PYGATE'
+        import json, sys
+        d = json.load(open("/tmp/seed"))
+        for w in d.get("mcp_warnings") or []:
+            print(f"MCP-REGISTRY WARNING: {w}")
+        missing = d.get("mcp_missing") or []
+        if missing:
+            print("MCP-REGISTRY GATE FAILED - this env's mcp_servers/ registry cannot")
+            print("satisfy servers declared in seeded skills; each is a hard-500 skill (G42):")
+            for m in missing:
+                print(f"  MISSING: {m}")
+            sys.exit(1)
+        print("mcp-registry gate: OK")
+        PYGATE
+        then
+          echo "Fix: uv run python scripts/seed_mcp_servers.py --env <env> [--public-url <url>]"
+          echo "  or remove the toolConfigs.mcp.servers declaration from the template."
+          exit 1
+        fi
+        exit 0
+
+timeout: '1800s'

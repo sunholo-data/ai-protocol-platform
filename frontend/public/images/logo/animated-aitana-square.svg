@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@500');
+      
+      .col1 { animation: blink1 4s infinite; }
+      .col2 { animation: blink2 3.7s infinite; }
+      .col3 { animation: blink3 3.4s infinite; }
+      .col4 { animation: blink4 3.1s infinite; }
+      .col5 { animation: blink5 2.8s infinite; }
+      .col6 { animation: blink6 2.5s infinite; }
+      
+      @keyframes blink1 { 
+        0%, 100% { opacity: 0.0; } 
+        50% { opacity: 0.3; } 
+      }
+      @keyframes blink2 { 
+        0%, 100% { opacity: 0.0; } 
+        50% { opacity: 0.4; } 
+      }
+      @keyframes blink3 { 
+        0%, 100% { opacity: 0.1; } 
+        50% { opacity: 0.7; } 
+      }
+      @keyframes blink4 { 
+        0%, 100% { opacity: 0.1; } 
+        50% { opacity: 1.0; } 
+      }
+      @keyframes blink5 { 
+        0%, 100% { opacity: 0.8; } 
+        50% { opacity: 1.0; } 
+      }
+      @keyframes blink6 { 
+        0%, 100% { opacity: 0.9; } 
+        50% { opacity: 1.0; } 
+      }
+    </style>
+  </defs>
+
+  <!-- Complete grid with all squares and animations -->
+  <g>
+    <!-- Column 1 (leftmost) -->
+    <rect class="col1" x="100" y="150" width="25" height="25" fill="#FFB088" style="animation-delay: 0.5s; opacity: 0" />
+    <rect class="col1" x="100" y="175" width="25" height="25" fill="#FFB088" style="animation-delay: 1.8s; opacity: 0.2" />
+    <rect class="col1" x="100" y="200" width="25" height="25" fill="#FFB088" style="animation-delay: 0.9s; opacity: 0" />
+    <rect class="col1" x="100" y="225" width="25" height="25" fill="#FFB088" style="animation-delay: 1.5s; opacity: 0.1" />
+
+    <!-- Column 2 -->
+    <rect class="col2" x="125" y="125" width="25" height="25" fill="#FFB088" style="animation-delay: 1.4s; opacity: 0.2" />
+    <rect class="col2" x="125" y="150" width="25" height="25" fill="#FFB088" style="animation-delay: 0.2s; opacity: 0" />
+    <rect class="col2" x="125" y="175" width="25" height="25" fill="#FFB088" style="animation-delay: 1.6s; opacity: 0.3" />
+    <rect class="col2" x="125" y="200" width="25" height="25" fill="#FFB088" style="animation-delay: 0.8s; opacity: 0" />
+    <rect class="col2" x="125" y="225" width="25" height="25" fill="#FFB088" style="animation-delay: 1.3s; opacity: 0.2" />
+    <rect class="col2" x="125" y="250" width="25" height="25" fill="#FFB088" style="animation-delay: 0.4s; opacity: 0" />
+
+    <!-- Column 3 -->
+    <rect class="col3" x="150" y="100" width="25" height="25" fill="#FFB088" style="animation-delay: 0.3s; opacity: 0.3" />
+    <rect class="col3" x="150" y="125" width="25" height="25" fill="#FFB088" style="animation-delay: 1.5s; opacity: 0" />
+    <rect class="col3" x="150" y="150" width="25" height="25" fill="#FFB088" style="animation-delay: 0.6s; opacity: 0.4" />
+    <rect class="col3" x="150" y="175" width="25" height="25" fill="#FFB088" style="animation-delay: 1.2s; opacity: 0.1" />
+    <rect class="col3" x="150" y="200" width="25" height="25" fill="#FFB088" style="animation-delay: 0.4s; opacity: 0.5" />
+    <rect class="col3" x="150" y="225" width="25" height="25" fill="#FFB088" style="animation-delay: 1.8s; opacity: 0" />
+    <rect class="col3" x="150" y="250" width="25" height="25" fill="#FFB088" style="animation-delay: 0.7s; opacity: 0.3" />
+    <rect class="col3" x="150" y="275" width="25" height="25" fill="#FFB088" style="animation-delay: 1.4s; opacity: 0.2" />
+
+    <!-- Column 4 -->
+    <rect class="col4" x="175" y="100" width="25" height="25" fill="#FFB088" style="animation-delay: 0.2s; opacity: 0.4" />
+    <rect class="col4" x="175" y="125" width="25" height="25" fill="#FFB088" style="animation-delay: 1.6s; opacity: 0.1" />
+    <rect class="col4" x="175" y="150" width="25" height="25" fill="#FFB088" style="animation-delay: 0.5s; opacity: 0.6" />
+    <rect class="col4" x="175" y="175" width="25" height="25" fill="#FFB088" style="animation-delay: 1.3s; opacity: 0.2" />
+    <rect class="col4" x="175" y="200" width="25" height="25" fill="#FFB088" style="animation-delay: 0.7s; opacity: 0.7" />
+    <rect class="col4" x="175" y="225" width="25" height="25" fill="#FFB088" style="animation-delay: 1.7s; opacity: 0.3" />
+    <rect class="col4" x="175" y="250" width="25" height="25" fill="#FFB088" style="animation-delay: 0.4s; opacity: 0.5" />
+    <rect class="col4" x="2175" y="275" width="25" height="25" fill="#FFB088" style="animation-delay: 1.5s; opacity: 0.4" />
+
+    <!-- Column 5 -->
+    <rect class="col5" x="200" y="100" width="25" height="25" fill="#FFB088" style="animation-delay: 0.1s; opacity: 0.8" />
+    <rect class="col5" x="200" y="125" width="25" height="25" fill="#FFB088" style="animation-delay: 1.4s; opacity: 0.5" />
+    <rect class="col5" x="200" y="150" width="25" height="25" fill="#FFB088" style="animation-delay: 0.3s; opacity: 0.9" />
+    <rect class="col5" x="200" y="175" width="25" height="25" fill="#FFB088" style="animation-delay: 1.6s; opacity: 0.6" />
+    <rect class="col5" x="200" y="200" width="25" height="25" fill="#FFB088" style="animation-delay: 0.5s; opacity: 1.0" />
+    <rect class="col5" x="200" y="225" width="25" height="25" fill="#FFB088" style="animation-delay: 1.8s; opacity: 0.7" />
+    <rect class="col5" x="200" y="250" width="25" height="25" fill="#FFB088" style="animation-delay: 0.2s; opacity: 0.9" />
+    <rect class="col5" x="200" y="275" width="25" height="25" fill="#FFB088" style="animation-delay: 1.5s; opacity: 0.8" />
+
+    <!-- Column 6 -->
+    <rect class="col6" x="225" y="100" width="25" height="25" fill="#FFB088" style="animation-delay: 0s; opacity: 1.0" />
+    <rect class="col6" x="225" y="125" width="25" height="25" fill="#FFB088" style="animation-delay: 1.3s; opacity: 0.8" />
+    <rect class="col6" x="225" y="150" width="25" height="25" fill="#FFB088" style="animation-delay: 0.4s; opacity: 1.0" />
+    <rect class="col6" x="225" y="175" width="25" height="25" fill="#FFB088" style="animation-delay: 1.5s; opacity: 0.9" />
+    <rect class="col6" x="225" y="200" width="25" height="25" fill="#FFB088" style="animation-delay: 0.2s; opacity: 1.0" />
+    <rect class="col6" x="225" y="225" width="25" height="25" fill="#FFB088" style="animation-delay: 1.7s; opacity: 0.9" />
+    <rect class="col6" x="225" y="250" width="25" height="25" fill="#FFB088" style="animation-delay: 0.6s; opacity: 1.0" />
+    <rect class="col6" x="225" y="275" width="25" height="25" fill="#FFB088" style="animation-delay: 1.4s; opacity: 0.9" />
+
+    <!-- Column 7 (rightmost) -->
+    <rect class="col6" x="250" y="100" width="25" height="25" fill="#FFB088" style="animation-delay: 0s; opacity: 1.0" />
+    <rect class="col6" x="250" y="125" width="25" height="25" fill="#FFB088" style="animation-delay: 1.3s" />
+    <rect class="col6" x="250" y="150" width="25" height="25" fill="#FFB088" style="animation-delay: 0.4s" />
+    <rect class="col6" x="250" y="175" width="25" height="25" fill="#FFB088" style="animation-delay: 1.5s" />
+    <rect class="col6" x="250" y="200" width="25" height="25" fill="#FFB088" style="animation-delay: 0.2s" />
+    <rect class="col6" x="250" y="225" width="25" height="25" fill="#FFB088" style="animation-delay: 1.7s" />
+    <rect class="col6" x="250" y="250" width="25" height="25" fill="#FFB088" style="animation-delay: 0.6s" />
+    <rect class="col6" x="250" y="275" width="25" height="25" fill="#FFB088" style="animation-delay: 1.4s; opactiy: 1.0" />
+  </g>
+
+  <!-- Orange circle -->
+  <circle cx="275" cy="200" r="100" fill="#FF9966">
+    <animate attributeName="opacity" values="0;1" dur="1s" fill="freeze" />
+  </circle>
+
+  <!-- Logo text -->
+  <text x="215" y="230" font-family="Montserrat, sans-serif" font-size="120" font-weight="500">
+    <tspan fill="white">ai</tspan><tspan fill="#3f4d62"></tspan>
+    <animate attributeName="opacity" values="0;1" dur="1.5s" fill="freeze" />
+  </text>
+</svg>

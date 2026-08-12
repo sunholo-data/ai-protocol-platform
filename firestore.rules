@@ -1,0 +1,290 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==================
+    // Helper Functions
+    // ==================
+
+    // Authenticated = any Firebase sign-in method, including anonymous
+    // (workshop shared-tier). Cross-user isolation is enforced downstream
+    // via uid matches; anonymous users have no email so they automatically
+    // fail any path that needs domain/specific/admin checks.
+    function isAuthenticated() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    // Email-bearing auth — for paths that need an identifiable real user
+    // (admin, domain/specific access-control evaluation).
+    function isIdentified() {
+      return isAuthenticated() && request.auth.token.email != null;
+    }
+
+    // Platform super-admin. Driven by the signed `aitana-admin` group-tag claim
+    // (v6.9.0 unified admin identity — mirrors auth/admin_roles.is_platform_admin,
+    // so the rules-admin and backend-admin can no longer diverge).
+    //
+    // The hardcoded email is a TRANSITIONAL fallback, retained ONLY until the
+    // `aitana-admin` tag is bootstrapped onto the platform admin(s) — removing it
+    // before then would lock out an admin who doesn't yet hold the claim. Drop it
+    // in a follow-up once every current admin holds the claim (admin-completion M1).
+    function isAdmin() {
+      return isIdentified() &&
+             ((request.auth.token.groupTags != null &&
+               request.auth.token.groupTags.hasAny(['aitana-admin'])) ||
+              request.auth.token.email == 'owner@yourcompany.com');
+    }
+
+    // Generic 5-type access-control evaluator.
+    //
+    // `ac` is the resource's accessControl map (type + optional domain/emails/tags).
+    // `ownerId` is the resource's ownerId field.
+    //
+    // Mirror of backend/auth/access_context.py::can_access — keep the two in
+    // sync. Firestore rules don't support set-intersection, so `tagged` uses
+    // hasAny() against the caller's JWT groupTags claim.
+    function canAccessResource(ac, ownerId) {
+      return ac != null &&
+             (
+               // Public: anyone, no auth required
+               ac.type == 'public' ||
+
+               // Owner always wins (covers private + every other type).
+               // This works for anonymous workshop users too — their uid
+               // matches their own resources.
+               (isAuthenticated() && request.auth.uid == ownerId) ||
+
+               // The rest require an email-bearing identity. Anonymous
+               // workshop users fail here, which is intentional —
+               // domain/specific/tagged claims have no meaning without
+               // an identifiable user.
+               (isIdentified() &&
+                (
+                  // Admin bypass
+                  isAdmin() ||
+                  // Domain match
+                  (ac.type == 'domain' &&
+                   request.auth.token.email.matches('.*@' + ac.domain)) ||
+                  // Specific email list
+                  (ac.type == 'specific' &&
+                   request.auth.token.email in ac.emails) ||
+                  // Tagged: caller's groupTags claim must overlap ac.tags
+                  (ac.type == 'tagged' &&
+                   request.auth.token.groupTags != null &&
+                   request.auth.token.groupTags.hasAny(ac.tags))
+                ))
+             );
+    }
+
+    function isSkillOwner(skillId) {
+      return isAuthenticated() &&
+             (get(/databases/$(database)/documents/skills/$(skillId)).data.ownerId == request.auth.uid);
+    }
+
+    function canAccessSkill(skillId) {
+      let skillDoc = get(/databases/$(database)/documents/skills/$(skillId));
+      return skillDoc != null &&
+             skillDoc.data != null &&
+             canAccessResource(skillDoc.data.accessControl, skillDoc.data.ownerId);
+    }
+
+    function isBucketOwner(bucketId) {
+      return isAuthenticated() &&
+             (get(/databases/$(database)/documents/buckets/$(bucketId)).data.ownerId == request.auth.uid);
+    }
+
+    // ==================
+    // Skills Collection
+    // ==================
+
+    match /skills/{skillId} {
+      allow read: if canAccessSkill(skillId);
+      // Skills are visible platform-wide via the marketplace; anon workshop
+      // users can't create them (they'd pollute the public listing). Real
+      // signed-in users can.
+      allow create: if isIdentified();
+      allow update, delete: if isSkillOwner(skillId) || isAdmin();
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow read: if canAccessSkill(skillId);
+        allow create: if isIdentified() && canAccessSkill(skillId);
+        allow update, delete: if isSkillOwner(skillId) || isAdmin();
+      }
+    }
+
+    // ==================
+    // Buckets Collection
+    // ==================
+    // Buckets are logical namespaces backed by GCS. Access is evaluated
+    // against `resource.data.accessControl` + `resource.data.ownerId` via
+    // canAccessResource. Folders (subcollection) use `effectiveAccess`,
+    // pre-computed by the API on every write — rules never recurse to the
+    // parent bucket at read time.
+
+    match /buckets/{bucketId} {
+      allow read: if canAccessResource(resource.data.accessControl, resource.data.ownerId);
+      allow create: if isAuthenticated() &&
+                       request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isBucketOwner(bucketId) || isAdmin();
+
+      match /folders/{folderId} {
+        allow read: if canAccessResource(resource.data.effectiveAccess, resource.data.ownerId);
+        allow create: if isAuthenticated() &&
+                         request.resource.data.ownerId == request.auth.uid &&
+                         request.resource.data.effectiveAccess != null;
+        allow update: if (isBucketOwner(bucketId) ||
+                         request.auth.uid == resource.data.ownerId ||
+                         isAdmin()) &&
+                        request.resource.data.effectiveAccess != null;
+        allow delete: if isBucketOwner(bucketId) ||
+                         request.auth.uid == resource.data.ownerId ||
+                         isAdmin();
+      }
+    }
+
+    // ========================
+    // Chat Sessions Collection
+    // ========================
+    // Index rows mirroring ADK Agent Engine session metadata.
+    // Events/state live in Agent Engine; this collection is the queryable
+    // substrate (list, filter, share). Access reuses canAccessResource().
+    // Soft-delete: archivedAt is set by PATCH; rows are never hard-deleted.
+
+    match /chat_sessions/{sessionId} {
+      allow read: if canAccessResource(resource.data.accessControl, resource.data.ownerUid);
+      allow create: if isAuthenticated() &&
+                       request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isAuthenticated() &&
+                       (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow delete: if false;  // soft-delete only via PATCH archivedAt
+    }
+
+    // ==================
+    // Skill Templates
+    // ==================
+
+    match /skill_templates/{templateId} {
+      allow read: if true;  // Templates are public
+      allow write: if isAdmin();
+    }
+
+    // ==================
+    // User Profiles
+    // ==================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && request.auth.uid == userId;
+      allow delete: if false;
+
+      // Document folders — user-facing organisation of uploaded files.
+      // Distinct from /buckets (storage ACL); these are just metadata.
+      match /folders/{folderId} {
+        allow read, write: if isAuthenticated() && request.auth.uid == userId;
+
+        // Documents subcollection mirrors parsed_documents but is keyed
+        // under the folder for convenience (used by list endpoint).
+        match /documents/{docId} {
+          allow read, write: if isAuthenticated() && request.auth.uid == userId;
+        }
+      }
+    }
+
+    // ========================
+    // Parsed Documents
+    // ========================
+    // Flat collection written by the upload pipeline. Frontend queries by
+    // userId + folderId for the active folder's live document list.
+
+    match /parsed_documents/{docId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if false;  // backend-only writes
+      allow update: if false;  // backend-only writes
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // ==================
+    // Tags
+    // ==================
+
+    match /tags/{tagId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    // ==================
+    // Tool Permissions
+    // ==================
+
+    match /tool_permissions/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ==================
+    // Channel Identities  (channels framework v6.1.0 sprint 1.6)
+    // ==================
+    // Maps a channel-native user ID (Telegram user id, email address,
+    // Discord snowflake) to a Firebase UID. Document ID is
+    // `{channel}_{channel_user_id}` for deterministic lookups.
+    //
+    // Reads/writes go through the backend's `IdentityResolver` only —
+    // no client-side direct access. Channel webhooks authenticate via
+    // signed payloads (Mailgun / Ed25519 / Telegram secret token), not
+    // Firebase Auth, so admin-only Firestore access is the right gate.
+
+    match /channel_identities/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ==================
+    // User Settings  (channels framework — default skill, future prefs)
+    // ==================
+    // `user_settings/{firebase_uid}` carries per-user preferences set via
+    // channel commands (e.g., `/skill <name>` writes `default_skill_id`).
+    // Owner can read; backend writes via channel framework.
+
+    match /user_settings/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if isAdmin();
+    }
+
+    // ==================
+    // Channel Routes  (channels framework M2 — per-guild/per-room access)
+    // ==================
+    // `channel_routes/{channel}_{guild_id}` (e.g., `discord_842...`) carries
+    // the per-guild allowlist and default skill mapping for a channel.
+    // Schema:
+    //   allowed_user_ids: ["847239...", ...]
+    //   default_firebase_uid: "..." (optional shared identity)
+    //   default_skill_id: "..." (optional per-guild skill default)
+    //
+    // Admin writes the route docs; the backend reads them via Admin SDK
+    // (which bypasses these rules), so clients only need read access if
+    // we ever expose a settings UI — keep admin-only for now.
+
+    match /channel_routes/{routeId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ==================
+    // Bot State  (channels framework M2 — slash-command registration locks)
+    // ==================
+    // `bot_state/{channel}_{guild_id}` carries channel-side state that
+    // the backend coordinates across instances. Today's only consumer is
+    // the Discord slash-command registration TTL lock written by
+    // `DiscordChannel.register_slash_commands(...)`. Schema:
+    //   registered_at: ISO 8601 timestamp
+    //   guild_id: "..."
+    //
+    // Admin-only — clients never touch this directly.
+
+    match /bot_state/{stateId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

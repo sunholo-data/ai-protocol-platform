@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300">
+  <!-- Base circles - all the same size -->
+  <!-- Bottom layer -->
+  <circle cx="107" cy="150" r="80" fill="#f9a697" opacity="0.3" />
+  
+  <!-- Middle layer -->
+  <circle cx="130" cy="150" r="80" fill="#e73c17" opacity="0.3" />
+  
+  <!-- Top layer - fully opaque -->
+  <circle cx="153" cy="150" r="80" fill="#e73c17" />
+</svg>

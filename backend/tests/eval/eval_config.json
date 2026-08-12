@@ -1,0 +1,25 @@
+{
+  "criteria": {
+    "rubric_based_final_response_quality_v1": {
+      "threshold": 0.8,
+      "judgeModelOptions": {
+        "judgeModel": "gemini-2.5-flash",
+        "numSamples": 1
+      },
+      "rubrics": [
+        {
+          "rubricId": "relevance",
+          "rubricContent": { "textProperty": "The response directly addresses the user's query." }
+        },
+        {
+          "rubricId": "helpfulness",
+          "rubricContent": { "textProperty": "The response is helpful and provides useful information." }
+        },
+        {
+          "rubricId": "tool_usage",
+          "rubricContent": { "textProperty": "The agent uses appropriate tools when needed and does not hallucinate tool results." }
+        }
+      ]
+    }
+  }
+}

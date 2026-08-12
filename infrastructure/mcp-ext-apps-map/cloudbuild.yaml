@@ -1,0 +1,94 @@
+# Aitana — Cloud Build configuration for `mcp-ext-apps-map` Cloud Run service.
+#
+# Builds the Dockerfile in this directory (which clones modelcontextprotocol/
+# ext-apps at a pinned commit and produces a runnable map-server image),
+# pushes to Artifact Registry, deploys to Cloud Run.
+#
+# Branch-based deployment: dev -> your-project-id (only env this sprint;
+# test/prod follow the same shape when they're cut). Substitutions
+# managed by Terraform — see multivac-aitana infrastructure repo.
+
+substitutions:
+  _SERVICE_NAME: mcp-ext-apps-map
+  _REGION: terraform_managed
+  _ARTIFACT_REGISTRY_REPO_URL_CLIENT: terraform_managed
+  _PROJECT_ID: terraform_managed
+
+tags: ['${_PROJECT_ID}', '${_SERVICE_NAME}']
+
+options:
+  logging: GCS_ONLY
+  # Bun + node + git + npm install of the ext-apps monorepo is heavier than
+  # a pure-Node build. E2_HIGHCPU_8 keeps the image build under ~5 minutes.
+  machineType: E2_HIGHCPU_8
+logsBucket: gs://your-deploy-project-id-logging-bucket
+
+steps:
+  # --- Build the map-server image (clones ext-apps at pinned commit) ---
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-mcp-ext-apps-map
+    dir: infrastructure/mcp-ext-apps-map
+    args:
+      - 'build'
+      - '-t'
+      - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/server:${BRANCH_NAME}'
+      - '.'
+    timeout: 600s
+
+  # --- Push image ---
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-mcp-ext-apps-map
+    waitFor: ['build-mcp-ext-apps-map']
+    args:
+      - 'push'
+      - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/server:${BRANCH_NAME}'
+
+  # --- Deploy to Cloud Run (single container, public — used by both
+  #     the agent's McpToolset on the backend AND the iframe in the browser
+  #     via the host MCP Client. allUsers + per-skill allowlist on the
+  #     backend proxy gates access from the browser path) ---
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    waitFor: ['push-mcp-ext-apps-map']
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE_NAME}'
+      - '--region=${_REGION}'
+      - '--project=${_PROJECT_ID}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--max-instances=3'
+      - '--image=${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/server:${BRANCH_NAME}'
+      - '--port=8080'
+      - '--memory=1Gi'
+      - '--cpu=1'
+
+  # --- Smoke probe: hit /mcp with a tools/list and require 200 ---
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: smoke
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        sleep 10
+        URL=$(gcloud run services describe ${_SERVICE_NAME} \
+          --region=${_REGION} --project=${_PROJECT_ID} \
+          --format='value(status.url)')
+        if [ -z "$$URL" ]; then
+          echo "ERROR: Could not resolve service URL" >&2
+          exit 1
+        fi
+        echo "Probing $${URL}/mcp ..."
+        STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+          -X POST "$${URL}/mcp" \
+          -H 'Content-Type: application/json' \
+          -H 'Accept: application/json, text/event-stream' \
+          -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}')
+        echo "Status: $${STATUS}"
+        if [ "$${STATUS}" != "200" ]; then
+          echo "ERROR: $${URL}/mcp returned $${STATUS} (expected 200)" >&2
+          exit 1
+        fi
+
+timeout: 1200s

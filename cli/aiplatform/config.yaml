@@ -1,0 +1,38 @@
+# CLI default backend URLs per environment.
+# Forks: update these values after deploying your own Cloud Run services.
+# Override at runtime with env vars: AIPLATFORM_API_URL (global) or
+# AIPLATFORM_API_URL_{ENV} (per-env, e.g. AIPLATFORM_API_URL_DEV).
+environments:
+  local: "http://localhost:1956"
+  dev: "https://your-service-url.example/api/proxy"
+  # Run URLs, not custom domains: test.yourcompany.com also fronts test, but the Run
+  # URL keeps working through a DNS cutover. Prod's custom domain (app.yourcompany.com)
+  # still points at v5, so a custom-domain default there would target the wrong
+  # stack entirely.
+  test: "https://your-service-url.example/api/proxy"
+  prod: "https://your-service-url.example/api/proxy"
+
+# Cloud Run log locations for `aiplatform logs`. The v6 backend runs as the
+# `sidecar` container inside the platform-frontend Cloud Run service (the
+# Next.js UI is `main`). Forks: update the project ids + service name.
+logging:
+  service: platform-frontend
+  containers:
+    backend: sidecar   # FastAPI + ADK
+    ui: main           # Next.js
+  projects:
+    dev: your-project-id
+    test: your-project-id-test
+    prod: your-project-id-prod
+
+# Deployment / promotion targets for `aiplatform deploy` (v6.20.0, AIPLA #47).
+# `deploy status` reads these to report the live revision + image digests per
+# env; digest equality across two envs is what proves a promotion COPIED the
+# tested bytes rather than rebuilding them. Forks: update project ids + region.
+deploy:
+  service: platform-frontend
+  region: europe-west1
+  projects:
+    dev: your-project-id
+    test: your-project-id-test
+    prod: your-project-id-prod

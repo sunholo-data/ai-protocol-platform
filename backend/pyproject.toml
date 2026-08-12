@@ -1,0 +1,121 @@
+[project]
+name = "ai-protocol-platform"
+version = "6.0.0"
+description = "Open-source AI protocol platform — Skills + AG-UI + A2UI + MCP Apps + A2A on Google ADK"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    # Google ADK — agent orchestration. PINNED (v6.17.0 adk-contract-conformance):
+    # our custom layer rides ADK's control-flow contracts (is_final_response,
+    # per-member model stamping, callback signatures), so a silent minor bump
+    # moves the ground under us. Upgrades are a deliberate PR gated by
+    # `make adk-conformance`. (>=1.28.0 also required by a2ui-agent-sdk.)
+    "google-adk==1.31.1",
+    # Core framework
+    "fastapi>=0.115.8,<1.0.0",
+    "uvicorn>=0.35.0,<1.0.0",
+    # AI model providers
+    "google-genai>=1.19",
+    "anthropic>=0.52.0",
+    "openai>=1.59.0",
+    # Firebase / GCP
+    "google-cloud-firestore>=2.20.2",
+    "google-cloud-storage>=2.18.0",
+    "google-cloud-logging>=3.12.0,<4.0.0",
+    # Read-aloud / TTS (v6.6.0 M2 voice provider abstraction)
+    "google-cloud-texttospeech>=2.16.0,<3.0.0",
+    "google-cloud-aiplatform[evaluation]>=1.130.0",
+    "firebase-admin>=6.0.0",
+    "gcsfs>=2024.11.0",
+    # AILANG Parse — deterministic document parsing
+    "ailang-parse[gcs]>=0.7.1",
+    # MCP
+    "mcp>=1.7.1",
+    # AG-UI protocol bridge (ADK -> AG-UI events over SSE)
+    "ag-ui-adk>=0.6.0,<1.0.0",
+    # HTTP client
+    "httpx>=0.28.0",
+    # Observability — OpenTelemetry first (ADK native)
+    "opentelemetry-instrumentation-google-genai>=0.1.0,<1.0.0",
+    # Cloud Trace span export (issue #39). Was present transitively and used by
+    # nothing; declared explicitly now that the request path depends on it.
+    "opentelemetry-exporter-gcp-trace>=1.11.0,<2.0.0",
+    # Utilities
+    "rich>=14.0.0",
+    "markdown>=3.8",
+    "json-repair>=0.46.2",
+    "tiktoken>=0.11.0",
+    "email-validator>=2.0.0",
+    "psutil>=7.0.0",
+    "pydantic>=2.11.4",
+    # Channels
+    "twilio>=8.0.0",
+    "requests>=2.31.0",
+    # Discord channel (M2): gateway client + Ed25519 webhook signatures
+    "discord-py>=2.3.0,<3.0.0",
+    "pynacl>=1.5.0,<2.0.0",
+    # DB sessions
+    "asyncpg>=0.30.0,<1.0.0",
+    "a2ui-agent-sdk>=0.2.1",
+    "a2a-sdk<1.0.0",
+    "python-telegram-bot>=22.7",
+    "pypdfium2>=5.11.0",
+    "pillow>=12.3.0",
+    "google-cloud-tasks>=2.24.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4,<9.0.0",
+    "pytest-asyncio>=0.23.8,<1.0.0",
+    "pytest-mock>=3.14.0",
+    "pytest-cov>=6.1.1",
+    "nest-asyncio>=1.6.0,<2.0.0",
+    # Enables uvicorn's WatchFilesReload (efficient FS events) instead of the
+    # StatReload poller. Only WatchFilesReload honors --reload-exclude, which
+    # scripts/dev.sh uses to keep test/script edits from restarting the server
+    # mid-agent-turn. Dev-only: production runs without --reload.
+    "watchfiles>=0.24.0",
+]
+
+[project.optional-dependencies]
+eval = [
+    # Pinned in lockstep with the core google-adk pin above (v6.17.0).
+    "google-adk[eval]==1.31.1",
+]
+lint = [
+    "ruff>=0.4.6,<1.0.0",
+    "ty>=0.0.1a0",
+    "codespell>=2.2.0,<3.0.0",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "C", "B", "UP", "RUF"]
+ignore = ["E501", "C901", "B006"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["skills", "adk", "tools", "channels", "protocols", "auth", "db", "observability"]
+
+[tool.pytest.ini_options]
+pythonpath = "."
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks tests requiring external services",
+    "adk_contract: hermetic 'real ADK flow' guard for a custom<->ADK contract (make adk-conformance); see docs/design/v6.17.0/adk-contract-checklist.md",
+]
+
+[tool.codespell]
+skip = ".venv,uv.lock"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["skills", "adk", "tools", "channels", "protocols", "auth", "db", "observability"]

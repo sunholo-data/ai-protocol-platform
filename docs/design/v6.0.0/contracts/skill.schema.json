@@ -1,0 +1,254 @@
+{
+  "$defs": {
+    "AccessControl": {
+      "properties": {
+        "type": {
+          "default": "private",
+          "title": "Type",
+          "type": "string"
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain"
+        },
+        "emails": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Emails"
+        }
+      },
+      "title": "AccessControl",
+      "type": "object"
+    },
+    "ProtocolConfig": {
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "ProtocolConfig",
+      "type": "object"
+    },
+    "Protocols": {
+      "properties": {
+        "mcp": {
+          "$ref": "#/$defs/ProtocolConfig",
+          "default": {
+            "enabled": false
+          }
+        },
+        "a2a": {
+          "$ref": "#/$defs/ProtocolConfig",
+          "default": {
+            "enabled": false
+          }
+        },
+        "agui": {
+          "$ref": "#/$defs/ProtocolConfig",
+          "default": {
+            "enabled": true
+          }
+        },
+        "a2ui": {
+          "$ref": "#/$defs/ProtocolConfig",
+          "default": {
+            "enabled": false
+          }
+        },
+        "mcpApps": {
+          "$ref": "#/$defs/ProtocolConfig",
+          "default": {
+            "enabled": false
+          }
+        }
+      },
+      "title": "Protocols",
+      "type": "object"
+    },
+    "SkillMetadata": {
+      "description": "Agent Skills spec metadata field \u2014 platform-specific config stored in SKILL.md frontmatter.",
+      "properties": {
+        "author": {
+          "default": "aitana",
+          "title": "Author",
+          "type": "string"
+        },
+        "version": {
+          "default": "1.0",
+          "title": "Version",
+          "type": "string"
+        },
+        "model": {
+          "default": "gemini-2.5-flash",
+          "title": "Model",
+          "type": "string"
+        },
+        "thinkingModel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Thinkingmodel"
+        },
+        "tools": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "toolConfigs": {
+          "additionalProperties": true,
+          "title": "Toolconfigs",
+          "type": "object"
+        },
+        "subSkills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Subskills",
+          "type": "array"
+        }
+      },
+      "title": "SkillMetadata",
+      "type": "object"
+    }
+  },
+  "description": "Firestore document model for a skill.\n\nLayer 1 (Agent Skills spec): name, description, instructions,\nskill_metadata, references, assets.\n\nLayer 2 (Aitana metadata): skill_id, display_name, avatar,\nowner_email, access_control, protocols, tags, etc.",
+  "properties": {
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+    },
+    "instructions": {
+      "default": "",
+      "title": "Instructions",
+      "type": "string"
+    },
+    "skillMetadata": {
+      "$ref": "#/$defs/SkillMetadata"
+    },
+    "references": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "References",
+      "type": "object"
+    },
+    "assets": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Assets",
+      "type": "object"
+    },
+    "skillId": {
+      "title": "Skillid",
+      "type": "string"
+    },
+    "displayName": {
+      "default": "",
+      "title": "Displayname",
+      "type": "string"
+    },
+    "avatar": {
+      "default": "",
+      "title": "Avatar",
+      "type": "string"
+    },
+    "ownerEmail": {
+      "default": "",
+      "title": "Owneremail",
+      "type": "string"
+    },
+    "ownerId": {
+      "default": "",
+      "title": "Ownerid",
+      "type": "string"
+    },
+    "accessControl": {
+      "$ref": "#/$defs/AccessControl"
+    },
+    "protocols": {
+      "$ref": "#/$defs/Protocols"
+    },
+    "initialMessage": {
+      "default": "",
+      "title": "Initialmessage",
+      "type": "string"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "featured": {
+      "default": false,
+      "title": "Featured",
+      "type": "boolean"
+    },
+    "usageCount": {
+      "default": 0,
+      "title": "Usagecount",
+      "type": "integer"
+    },
+    "createdAt": {
+      "title": "Createdat",
+      "type": "number"
+    },
+    "updatedAt": {
+      "title": "Updatedat",
+      "type": "number"
+    },
+    "v5AssistantId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "V5Assistantid"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "SkillConfig",
+  "type": "object"
+}

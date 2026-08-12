@@ -1,0 +1,87 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/.venv/
+cli/.venv/
+cli/dist/
+cli/build/
+__pycache__/
+*.pyc
+
+# Build
+frontend/.next/
+frontend/out/
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+frontend/.env.local
+backend/.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+.coverage.*
+frontend/coverage/
+backend/.coverage*
+
+# Firebase
+firebase_local/
+
+# SSL certs (local dev)
+backend/certs/
+*.crt
+*.key
+*.pem
+
+# Ruff cache
+backend/.ruff_cache/
+
+# TypeScript
+tsconfig.tsbuildinfo
+
+# Claude Code local settings
+**/.claude/settings.local.json
+
+# Debug
+/debug_images/
+.claude/scheduled_tasks.lock
+backend/aitana_platform/
+
+# Locked agent worktrees from parallel sub-agent execution. The harness
+# manages these; they're never committed and shouldn't block sanitize.
+.claude/worktrees/
+
+# AILANG WASM runtime + deontic engine, fetched by scripts/fetch-ailang-wasm.sh
+# into the ppa-obligation-analysis artefact (7.6). The ~40 MB ailang.wasm is
+# NEVER committed — CI/local reconstitutes it from the pinned release. (Also
+# ignored by the artefact's own assets/.gitignore; duplicated here for
+# discoverability + defense-in-depth.)
+infrastructure/mcp-sandbox/artefacts/*/v1/assets/ailang.wasm
+infrastructure/mcp-sandbox/artefacts/*/v1/assets/ailang.wasm.br
+infrastructure/mcp-sandbox/artefacts/*/v1/assets/wasm_exec.js
+infrastructure/mcp-sandbox/artefacts/*/v1/assets/ailang-repl.js
+infrastructure/mcp-sandbox/artefacts/*/v1/assets/engine/
+infrastructure/mcp-sandbox/artefacts/*/v1/assets/.ailang-version
+
+# MCP Toolbox binary for local dev (make toolbox-install) — never commit the 150MB binary
+.bin/

@@ -1,0 +1,251 @@
+# cloudbuild.promote.yaml — build-once artifact promotion (copy-by-digest).
+#
+# v6.20.0, AIPLA #46/#47. Runs in the TARGET project. Promotes a released
+# ${_VERSION} from ${_SOURCE_PROJECT} by COPYING the tested backend + toolbox
+# images (no rebuild — bit-identical to what passed the source env's CI gate)
+# and rebuilding ONLY the frontend from the same tagged source with the
+# TARGET env's config. See
+# docs/design/v6.20.0/build-once-artifact-promotion.md.
+#
+# Invoked by `scripts/promote-env.sh` -> `gcloud builds triggers run
+# <target>-promote --tag=vX.Y.Z`. Running it as a TRIGGER (never
+# `gcloud builds submit`) is the point: Cloud Build checks the repo out AT
+# THE TAG, so the frontend is rebuilt from tagged source rather than from
+# whatever happens to be on the operator's laptop, and the two-identity /
+# storage.objectViewer trap of `builds submit` (#46) never arises. Same
+# mechanism as sunholo-data/docparse `release.sh promote`.
+#
+# NO ci-gate here: the copied artifacts are frozen and were already gated at
+# the source env's build (cloudbuild.yaml's ci-gate-backend/ci-gate-frontend).
+# Re-gating a frozen, already-tested artifact would just re-run the same
+# checks against the same bytes.
+#
+# The deploy step assumes the target Cloud Run service ALREADY EXISTS with
+# its env vars / secrets / volumes set at env-cut (Terraform). Promotion only
+# swaps images via `gcloud run services update --image=... --container=...`,
+# which changes nothing else on the service — see M2's tests for the assertion
+# that no --set-env-vars / --set-secrets appears in this file.
+
+# REGISTRY TOPOLOGY (verified 2026-07-31 against the live services) — this
+# repo runs ONE SHARED Artifact Registry, not per-env registries:
+#
+#   dev  -> …/your-deploy-project-id/llm-ops/platform-frontend/ui@sha256:…
+#   test -> …/your-deploy-project-id/llm-ops/platform-frontend/ui:test
+#   prod -> …/your-deploy-project-id/llm-ops/platform-frontend/ui:prod
+#
+# All three env projects pull the SAME repo in the deploy project; they are
+# distinguished by TAG. Consequences, both easy to get wrong:
+#
+#   * The copy below is a NO-OP HERE (source and destination resolve to the
+#     same repo) and needs NO cross-project artifactregistry.reader grant. The
+#     step is kept because it is what makes the pipeline correct for a fork
+#     with per-env registries (AIPLA's `aipla-<env>-2026/cphu/…` shape), and
+#     because the digest-equality assertion is the thing that proves a
+#     promotion promoted. Set the two substitutions to the same value here.
+#   * What actually moves an env forward in THIS topology is the deploy step
+#     pinning the tested digest onto the target service.
+substitutions:
+  _SOURCE_PROJECT: terraform_managed          # e.g. your-project-id-test (promote FROM)
+  _TARGET_PROJECT: terraform_managed          # e.g. your-project-id-prod (this build's project)
+  _SOURCE_ARTIFACT_REGISTRY_REPO_URL: terraform_managed  # source env's AR repo prefix (== target's, here)
+  _ARTIFACT_REGISTRY_REPO_URL_CLIENT: terraform_managed  # target env's AR repo prefix (matches cloudbuild.yaml's name)
+  _VERSION: ''                                # release tag, e.g. v6.20.0 (required)
+  _REGION: terraform_managed
+  _SERVICE_NAME: platform-frontend
+  _FIREBASE_TAG: dev
+  # Frontend rebuild needs the TARGET env's baked-in config — same two
+  # explicit overrides cloudbuild.yaml's build-frontend step passes; every
+  # other NEXT_PUBLIC_* comes from get-firebase-config.sh against
+  # _TARGET_PROJECT, so it is already the target's own secret, not the
+  # source's.
+  _MCP_SANDBOX_URL: ''
+  _ENABLE_SKILL_STUDIO: 'true'
+  _LOG_BUCKET: 'gs://${_TARGET_PROJECT}-cloudbuild-logs'
+
+tags: ['${_TARGET_PROJECT}', '${_SERVICE_NAME}', 'promote']
+
+options:
+  logging: GCS_ONLY
+logsBucket: '${_LOG_BUCKET}'
+
+steps:
+  # --- Guard: a version is mandatory. A promote without a frozen tag is a
+  # rebuild wearing a promote's clothes. ---
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'guard-version'
+    waitFor: ['-']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        if [ -z "${_VERSION}" ]; then
+          echo "FATAL: _VERSION is required — a promote without a frozen tag is a rebuild" >&2
+          exit 1
+        fi
+        echo "Promoting ${_VERSION}: ${_SOURCE_PROJECT} -> ${_TARGET_PROJECT}"
+
+  # --- Backend + Toolbox: COPY the tested images by digest (no rebuild) ---
+  # `crane`, not `gcloud artifacts docker images copy` — that command DOES NOT
+  # EXIST (verified against SDK 557.0.0: the gcloud subcommand only offers
+  # delete/describe/get-operation/list/list-vulnerabilities/scan). AIPLA's
+  # promote pipeline referenced it, sat committed and reviewed for six weeks,
+  # and failed on its first real run for exactly this reason. `crane copy`
+  # moves bytes registry-to-registry by digest without pulling layers to
+  # local disk — the right tool for "same bytes, new home", and materially
+  # faster than docker pull/tag/push for a multi-hundred-MB image.
+  #
+  # Digest is resolved from source FIRST (it is the promotion's identity, and
+  # the deploy step below pins by digest, never by tag), then re-read at the
+  # destination and compared — a copy that silently retagged something else
+  # would otherwise deploy unverified bytes to the target env.
+  - name: 'gcr.io/go-containerregistry/crane:debug'
+    id: 'copy-backend'
+    waitFor: ['guard-version']
+    entrypoint: sh
+    args:
+      - '-c'
+      - |
+        set -eu
+        SRC="${_SOURCE_ARTIFACT_REGISTRY_REPO_URL}/${_SERVICE_NAME}/backend:${_VERSION}"
+        DST_REPO="${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/backend"
+        DST="$${DST_REPO}:${_VERSION}"
+        DIGEST=$(crane digest "$$SRC")
+        echo "Copying tested backend $$SRC ($$DIGEST) -> $$DST"
+        crane copy "$$SRC" "$$DST"
+        DST_DIGEST=$(crane digest "$$DST")
+        if [ "$$DIGEST" != "$$DST_DIGEST" ]; then
+          echo "FATAL: backend digest changed in transit ($$DIGEST -> $$DST_DIGEST)" >&2
+          exit 1
+        fi
+        # Canonical repo@digest — NOT repo:tag@digest. Both are accepted by the
+        # docker CLI, but the tagged-and-digested form is not what we want to
+        # hand `gcloud run services update --image`, and it is not the form the
+        # equivalent validated pipeline downstream uses. Deploying is the last
+        # place to discover a reference-parsing disagreement.
+        echo "$${DST_REPO}@$${DIGEST}" > /workspace/image_backend
+        echo "backend -> $$DIGEST"
+
+  - name: 'gcr.io/go-containerregistry/crane:debug'
+    id: 'copy-toolbox'
+    waitFor: ['guard-version']
+    entrypoint: sh
+    args:
+      - '-c'
+      - |
+        set -eu
+        SRC="${_SOURCE_ARTIFACT_REGISTRY_REPO_URL}/${_SERVICE_NAME}/toolbox:${_VERSION}"
+        DST_REPO="${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/toolbox"
+        DST="$${DST_REPO}:${_VERSION}"
+        DIGEST=$(crane digest "$$SRC")
+        echo "Copying tested toolbox $$SRC ($$DIGEST) -> $$DST"
+        crane copy "$$SRC" "$$DST"
+        DST_DIGEST=$(crane digest "$$DST")
+        if [ "$$DIGEST" != "$$DST_DIGEST" ]; then
+          echo "FATAL: toolbox digest changed in transit ($$DIGEST -> $$DST_DIGEST)" >&2
+          exit 1
+        fi
+        # Canonical repo@digest — see the equivalent note in copy-backend.
+        echo "$${DST_REPO}@$${DIGEST}" > /workspace/image_toolbox
+        echo "toolbox -> $$DIGEST"
+
+  # --- Frontend: REBUILD from the tagged source with TARGET env config ---
+  # NEXT_PUBLIC_* is compile-time-inlined and env-specific (Firebase project,
+  # backend URL, sandbox URL, auth mode), so the frontend cannot be copied —
+  # a copied UI would ship the SOURCE env's identity into the TARGET env.
+  # Rebuilt from the same immutable ${_VERSION} tag Cloud Build checked out
+  # for this whole promote build, so the source is identical to what test
+  # verified; only the config differs, deliberately. Same mechanism as
+  # cloudbuild.yaml's build-frontend step — see get-firebase-config.sh for why
+  # docker_args is a value-less `--build-arg KEY` list.
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'get-firebase-config'
+    waitFor: ['guard-version']
+    entrypoint: 'bash'
+    args:
+      - './get-firebase-config.sh'
+    env:
+      - '_PROJECT_ID=${_TARGET_PROJECT}'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-frontend'
+    waitFor: ['get-firebase-config']
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        while IFS='=' read -r key val; do
+          [[ -z "$$key" || "$${key:0:1}" == "#" ]] && continue
+          export "$$key=$$val"
+        done < .env.local
+        ARGS=$$(cat /workspace/docker_args)
+        docker build $$ARGS \
+          --build-arg NEXT_PUBLIC_MCP_SANDBOX_URL=${_MCP_SANDBOX_URL} \
+          --build-arg NEXT_PUBLIC_ENABLE_SKILL_STUDIO=${_ENABLE_SKILL_STUDIO} \
+          -t ${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/ui:${_VERSION} \
+          -f frontend/Dockerfile \
+          frontend/
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-frontend'
+    waitFor: ['build-frontend']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        REPO="${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/ui"
+        docker push "$${REPO}:${_VERSION}"
+        DIGEST=$$(docker inspect --format='{{index .RepoDigests 0}}' "$${REPO}:${_VERSION}" || true)
+        if [ -z "$${DIGEST}" ]; then
+          echo "FATAL: could not resolve digest for $${REPO}" >&2
+          exit 1
+        fi
+        echo "$${DIGEST}" > /workspace/image_ui
+        echo "ui -> $${DIGEST}"
+
+  # --- Deploy: swap ONLY the images on the EXISTING target service ---
+  # `services update` (not `run deploy`) is load-bearing: cloudbuild.yaml's
+  # deploy step re-asserts ~25 env vars + the full secret set on every deploy.
+  # Re-asserting that surface here from a second pipeline would duplicate it
+  # and invite drift. `services update --container X --image Y` changes ONLY
+  # the named container's image and leaves everything else — set at env-cut
+  # and owned by Terraform — untouched. All three images are pinned by digest.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy'
+    waitFor: ['copy-backend', 'copy-toolbox', 'push-frontend']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        BACKEND_IMAGE=$$(cat /workspace/image_backend)
+        TOOLBOX_IMAGE=$$(cat /workspace/image_toolbox)
+        UI_IMAGE=$$(cat /workspace/image_ui)
+        echo "Deploying ui=$${UI_IMAGE} backend=$${BACKEND_IMAGE} toolbox=$${TOOLBOX_IMAGE}"
+        gcloud run services update ${_SERVICE_NAME} \
+          --project=${_TARGET_PROJECT} --region=${_REGION} \
+          --container=main --image=$${UI_IMAGE} \
+          --container=sidecar --image=$${BACKEND_IMAGE} \
+          --container=toolbox --image=$${TOOLBOX_IMAGE}
+
+  # --- Smoke: fail the promotion if the target isn't healthy ---
+  # Same probe set as cloudbuild.yaml's post-deploy smoke / scripts/smoke-deployed.sh.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'smoke'
+    waitFor: ['deploy']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -e
+        URL=$$(gcloud run services describe ${_SERVICE_NAME} \
+          --project=${_TARGET_PROJECT} --region=${_REGION} --format='value(status.url)')
+        echo "Smoking $${URL}"
+        fail=0
+        for path in "/" "/api/health" "/api/proxy/health" "/api/proxy/api/skills/marketplace"; do
+          code=$$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$${URL}$${path}") || code=000
+          if [ "$${code}" = "200" ]; then echo "OK   $${path} -> 200"; else echo "FAIL $${path} -> $${code}"; fail=1; fi
+        done
+        exit $${fail}

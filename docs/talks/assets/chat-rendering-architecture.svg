@@ -1,0 +1,258 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 680" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+
+  <!-- Background -->
+  <rect width="1020" height="680" fill="#F8FAFC" rx="14"/>
+
+  <!-- ─────────────────────────────────────────────────────
+       TITLE
+  ───────────────────────────────────────────────────────── -->
+  <text x="510" y="36" text-anchor="middle" font-size="16" font-weight="700" fill="#0F172A">
+    Chat Message Rendering — Protocol Convergence
+  </text>
+  <text x="510" y="54" text-anchor="middle" font-size="11" fill="#64748B">
+    Workshop W8 · AG-UI events drive the component tree · A2UIRenderer (W6) and MCPAppFrame (W7) are leaf nodes
+  </text>
+
+  <!-- ─────────────────────────────────────────────────────
+       AG-UI EVENT STREAM HEADER BAND
+  ───────────────────────────────────────────────────────── -->
+  <rect x="20" y="68" width="980" height="56" rx="8" fill="#1E293B"/>
+  <text x="36" y="91" font-size="10" font-weight="600" fill="#94A3B8" letter-spacing="1">AG-UI EVENT STREAM</text>
+
+  <!-- Event chips -->
+  <!-- RUN_STARTED -->
+  <rect x="36" y="97" width="100" height="20" rx="4" fill="#2563EB" opacity="0.85"/>
+  <text x="86" y="111" text-anchor="middle" font-size="10" font-weight="500" fill="#FFFFFF">RUN_STARTED</text>
+  <!-- TEXT_MESSAGE_* -->
+  <rect x="144" y="97" width="120" height="20" rx="4" fill="#2563EB" opacity="0.85"/>
+  <text x="204" y="111" text-anchor="middle" font-size="10" font-weight="500" fill="#FFFFFF">TEXT_MESSAGE_*</text>
+  <!-- TOOL_CALL_* -->
+  <rect x="272" y="97" width="108" height="20" rx="4" fill="#2563EB" opacity="0.85"/>
+  <text x="326" y="111" text-anchor="middle" font-size="10" font-weight="500" fill="#FFFFFF">TOOL_CALL_*</text>
+  <!-- STATE_SNAPSHOT -->
+  <rect x="388" y="97" width="116" height="20" rx="4" fill="#475569" opacity="0.75"/>
+  <text x="446" y="111" text-anchor="middle" font-size="10" font-weight="500" fill="#FFFFFF">STATE_SNAPSHOT</text>
+  <!-- RUN_FINISHED -->
+  <rect x="512" y="97" width="110" height="20" rx="4" fill="#475569" opacity="0.75"/>
+  <text x="567" y="111" text-anchor="middle" font-size="10" font-weight="500" fill="#FFFFFF">RUN_FINISHED</text>
+
+  <!-- ─────────────────────────────────────────────────────
+       HELPERS: arrow marker definitions
+  ───────────────────────────────────────────────────────── -->
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#94A3B8"/>
+    </marker>
+    <marker id="arr-blue" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#2563EB"/>
+    </marker>
+    <marker id="arr-green" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#059669"/>
+    </marker>
+    <marker id="arr-amber" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#D97706"/>
+    </marker>
+    <!-- W-badge clip -->
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#0F172A" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- ─────────────────────────────────────────────────────
+       COLUMN 1: useSkillAgent → ChatMessageList
+  ───────────────────────────────────────────────────────── -->
+
+  <!-- useSkillAgent -->
+  <rect x="30" y="144" width="180" height="58" rx="8" fill="#FFFFFF" stroke="#DBEAFE" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="30" y="144" width="180" height="22" rx="8" fill="#2563EB"/>
+  <rect x="30" y="157" width="180" height="9" fill="#2563EB"/><!-- cover bottom radius of header -->
+  <text x="120" y="160" text-anchor="middle" font-size="11" font-weight="700" fill="#FFFFFF">useSkillAgent()</text>
+  <text x="42" y="178" font-size="10" fill="#475569">messages[]  isLoading</text>
+  <text x="42" y="192" font-size="9" fill="#94A3B8">error  clearError  stop</text>
+  <!-- W5d badge -->
+  <rect x="155" y="147" width="48" height="16" rx="4" fill="#2563EB"/>
+  <text x="179" y="159" text-anchor="middle" font-size="9" font-weight="700" fill="#FFFFFF">W5d</text>
+
+  <!-- arrow down -->
+  <line x1="120" y1="202" x2="120" y2="228" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="126" y="219" font-size="9" fill="#94A3B8">messages[], isLoading</text>
+
+  <!-- ChatMessageList -->
+  <rect x="30" y="230" width="180" height="52" rx="8" fill="#FFFFFF" stroke="#DBEAFE" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="30" y="230" width="180" height="22" rx="8" fill="#2563EB"/>
+  <rect x="30" y="243" width="180" height="9" fill="#2563EB"/>
+  <text x="120" y="246" text-anchor="middle" font-size="11" font-weight="700" fill="#FFFFFF">ChatMessageList</text>
+  <text x="42" y="264" font-size="10" fill="#475569">auto-scroll · keyed by messageId</text>
+  <text x="42" y="276" font-size="9" fill="#94A3B8">dedup · ↓ New message badge</text>
+  <!-- W5 badge -->
+  <rect x="155" y="233" width="48" height="16" rx="4" fill="#2563EB"/>
+  <text x="179" y="245" text-anchor="middle" font-size="9" font-weight="700" fill="#FFFFFF">W5</text>
+
+  <!-- ─────────────────────────────────────────────────────
+       HORIZONTAL SPINE from ChatMessageList → 4 children
+  ───────────────────────────────────────────────────────── -->
+  <!-- Vertical line down from ChatMessageList -->
+  <line x1="120" y1="282" x2="120" y2="310" stroke="#94A3B8" stroke-width="1.5"/>
+  <!-- Horizontal spine -->
+  <line x1="120" y1="310" x2="870" y2="310" stroke="#94A3B8" stroke-width="1.5"/>
+
+  <!-- Drops to children -->
+  <!-- ContextBanner drop -->
+  <line x1="160" y1="310" x2="160" y2="330" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+  <!-- MessageBubble drop -->
+  <line x1="340" y1="310" x2="340" y2="330" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+  <!-- StreamingBubble drop -->
+  <line x1="590" y1="310" x2="590" y2="330" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+  <!-- TypingIndicator drop -->
+  <line x1="800" y1="310" x2="800" y2="330" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ─────────────────────────────────────────────────────
+       ContextBanner
+  ───────────────────────────────────────────────────────── -->
+  <rect x="90" y="332" width="140" height="52" rx="8" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="160" y="352" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">ContextBanner</text>
+  <text x="160" y="368" text-anchor="middle" font-size="9" fill="#64748B">active doc/folder</text>
+  <text x="160" y="380" text-anchor="middle" font-size="9" fill="#64748B">hidden when null</text>
+
+  <!-- ─────────────────────────────────────────────────────
+       MessageBubble
+  ───────────────────────────────────────────────────────── -->
+  <rect x="260" y="332" width="160" height="68" rx="8" fill="#FFFFFF" stroke="#DBEAFE" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="260" y="332" width="160" height="22" rx="8" fill="#2563EB"/>
+  <rect x="260" y="345" width="160" height="9" fill="#2563EB"/>
+  <text x="340" y="348" text-anchor="middle" font-size="11" font-weight="700" fill="#FFFFFF">MessageBubble</text>
+  <text x="272" y="367" font-size="10" fill="#475569">bot: orange border</text>
+  <text x="272" y="380" font-size="10" fill="#475569">user: teal border</text>
+  <text x="272" y="393" font-size="9" fill="#94A3B8">avatar · name · timestamp</text>
+  <!-- W5 badge -->
+  <rect x="374" y="335" width="38" height="16" rx="4" fill="#2563EB"/>
+  <text x="393" y="347" text-anchor="middle" font-size="9" font-weight="700" fill="#FFFFFF">W5</text>
+
+  <!-- ─────────────────────────────────────────────────────
+       StreamingBubble
+  ───────────────────────────────────────────────────────── -->
+  <rect x="510" y="332" width="160" height="68" rx="8" fill="#FFFFFF" stroke="#DBEAFE" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="510" y="332" width="160" height="22" rx="8" fill="#2563EB"/>
+  <rect x="510" y="345" width="160" height="9" fill="#2563EB"/>
+  <text x="590" y="348" text-anchor="middle" font-size="11" font-weight="700" fill="#FFFFFF">StreamingBubble</text>
+  <text x="522" y="367" font-size="10" fill="#475569">accumulates tokens</text>
+  <text x="522" y="380" font-size="10" fill="#475569">blinking cursor</text>
+  <text x="522" y="393" font-size="9" fill="#94A3B8">→ MessageBubble on END</text>
+  <!-- W5 badge -->
+  <rect x="624" y="335" width="38" height="16" rx="4" fill="#2563EB"/>
+  <text x="643" y="347" text-anchor="middle" font-size="9" font-weight="700" fill="#FFFFFF">W5</text>
+
+  <!-- ─────────────────────────────────────────────────────
+       TypingIndicator
+  ───────────────────────────────────────────────────────── -->
+  <rect x="726" y="332" width="148" height="52" rx="8" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="800" y="352" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">TypingIndicator</text>
+  <text x="800" y="368" text-anchor="middle" font-size="9" fill="#64748B">three-dot animation</text>
+  <text x="800" y="380" text-anchor="middle" font-size="9" fill="#64748B">RUN_STARTED → first token</text>
+
+  <!-- ─────────────────────────────────────────────────────
+       MessageBubble → text/a2ui split
+  ───────────────────────────────────────────────────────── -->
+  <!-- Line down from MessageBubble -->
+  <line x1="340" y1="400" x2="340" y2="424" stroke="#94A3B8" stroke-width="1.5"/>
+  <!-- Horizontal fork -->
+  <line x1="340" y1="424" x2="560" y2="424" stroke="#94A3B8" stroke-width="1.5"/>
+  <!-- Left drop (text) -->
+  <line x1="340" y1="424" x2="340" y2="444" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="278" y="421" font-size="9" fill="#94A3B8">text segment</text>
+  <!-- Right drop (a2ui) -->
+  <line x1="560" y1="424" x2="560" y2="444" stroke="#059669" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="488" y="421" font-size="9" fill="#059669">```a2ui segment</text>
+
+  <!-- ChatMarkdown -->
+  <rect x="260" y="446" width="160" height="52" rx="8" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="340" y="466" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">ChatMarkdown</text>
+  <text x="340" y="480" text-anchor="middle" font-size="9" fill="#64748B">markdown → React</text>
+  <text x="340" y="492" text-anchor="middle" font-size="9" fill="#64748B">detects aitana:// links</text>
+
+  <!-- A2UIRenderer -->
+  <rect x="480" y="446" width="160" height="52" rx="8" fill="#FFFFFF" stroke="#6EE7B7" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="480" y="446" width="160" height="22" rx="8" fill="#059669"/>
+  <rect x="480" y="459" width="160" height="9" fill="#059669"/>
+  <text x="560" y="462" text-anchor="middle" font-size="11" font-weight="700" fill="#FFFFFF">A2UIRenderer</text>
+  <text x="492" y="480" font-size="10" fill="#475569">spec → A2UIViewer</text>
+  <text x="492" y="492" font-size="9" fill="#94A3B8">fallback: &lt;pre&gt;{JSON}&lt;/pre&gt;</text>
+  <!-- W6 badge -->
+  <rect x="596" y="449" width="37" height="16" rx="4" fill="#059669"/>
+  <text x="614" y="461" text-anchor="middle" font-size="9" font-weight="700" fill="#FFFFFF">W6</text>
+
+  <!-- InlineCitation -->
+  <line x1="340" y1="498" x2="340" y2="516" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="260" y="518" width="160" height="40" rx="8" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="340" y="535" text-anchor="middle" font-size="10" font-weight="600" fill="#334155">InlineCitation</text>
+  <text x="340" y="549" text-anchor="middle" font-size="9" fill="#64748B">aitana:// chip · navigateToBlock</text>
+
+  <!-- A2UIViewer -->
+  <line x1="560" y1="498" x2="560" y2="516" stroke="#059669" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <rect x="480" y="518" width="160" height="40" rx="8" fill="#F0FDF4" stroke="#6EE7B7" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="560" y="535" text-anchor="middle" font-size="10" font-weight="600" fill="#065F46">A2UIViewer</text>
+  <text x="560" y="549" text-anchor="middle" font-size="9" fill="#059669">@a2ui/react · forms · tables · charts</text>
+
+  <!-- ─────────────────────────────────────────────────────
+       TOOL CALL PATH — right side vertical
+  ───────────────────────────────────────────────────────── -->
+
+  <!-- Divider -->
+  <line x1="700" y1="420" x2="980" y2="420" stroke="#E2E8F0" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="840" y="416" text-anchor="middle" font-size="9" fill="#94A3B8">TOOL_CALL_START / END</text>
+
+  <!-- ToolCallChip -->
+  <line x1="840" y1="420" x2="840" y2="444" stroke="#2563EB" stroke-width="1.5" marker-end="url(#arr-blue)"/>
+  <rect x="756" y="446" width="168" height="52" rx="8" fill="#FFFFFF" stroke="#DBEAFE" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="756" y="446" width="168" height="22" rx="8" fill="#2563EB"/>
+  <rect x="756" y="459" width="168" height="9" fill="#2563EB"/>
+  <text x="840" y="462" text-anchor="middle" font-size="11" font-weight="700" fill="#FFFFFF">ToolCallChip</text>
+  <text x="768" y="480" font-size="10" fill="#475569">spinner → ✓ done / ✗ error</text>
+  <text x="768" y="492" font-size="9" fill="#94A3B8">tool name · 32-char truncation</text>
+  <!-- W5 badge -->
+  <rect x="878" y="449" width="38" height="16" rx="4" fill="#2563EB"/>
+  <text x="897" y="461" text-anchor="middle" font-size="9" font-weight="700" fill="#FFFFFF">W5</text>
+
+  <!-- ui:// branch label + arrow -->
+  <line x1="840" y1="498" x2="840" y2="516" stroke="#D97706" stroke-width="1.5" marker-end="url(#arr-amber)"/>
+  <text x="847" y="510" font-size="9" fill="#D97706">ui:// result</text>
+
+  <!-- MCPAppFrame -->
+  <rect x="756" y="518" width="168" height="58" rx="8" fill="#FFFFFF" stroke="#FDE68A" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="756" y="518" width="168" height="22" rx="8" fill="#D97706"/>
+  <rect x="756" y="531" width="168" height="9" fill="#D97706"/>
+  <text x="840" y="534" text-anchor="middle" font-size="11" font-weight="700" fill="#FFFFFF">MCPAppFrame</text>
+  <text x="768" y="552" font-size="10" fill="#475569">sandbox="allow-scripts"</text>
+  <text x="768" y="565" font-size="9" fill="#94A3B8">no allow-same-origin</text>
+  <!-- W7 badge -->
+  <rect x="878" y="521" width="38" height="16" rx="4" fill="#D97706"/>
+  <text x="897" y="533" text-anchor="middle" font-size="9" font-weight="700" fill="#FFFFFF">W7</text>
+
+  <!-- iframe box -->
+  <line x1="840" y1="576" x2="840" y2="594" stroke="#D97706" stroke-width="1.5" marker-end="url(#arr-amber)"/>
+  <rect x="756" y="596" width="168" height="36" rx="8" fill="#FFFBEB" stroke="#FDE68A" stroke-width="1.5"/>
+  <text x="840" y="612" text-anchor="middle" font-size="10" font-weight="500" fill="#92400E">&lt;iframe sandbox&gt;</text>
+  <text x="840" y="625" text-anchor="middle" font-size="9" fill="#B45309">3rd-party widget · postMessage</text>
+
+  <!-- ─────────────────────────────────────────────────────
+       LEGEND
+  ───────────────────────────────────────────────────────── -->
+  <rect x="30" y="600" width="640" height="62" rx="8" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="44" y="618" font-size="10" font-weight="600" fill="#334155">Legend</text>
+
+  <!-- W5 -->
+  <rect x="44" y="624" width="28" height="14" rx="3" fill="#2563EB"/>
+  <text x="58" y="635" text-anchor="middle" font-size="9" font-weight="700" fill="#FFFFFF">W5</text>
+  <text x="80" y="635" font-size="10" fill="#475569">AG-UI Transport (useSkillAgent, ChatMessageList, StreamingBubble, ToolCallChip)</text>
+
+  <!-- W6 -->
+  <rect x="44" y="642" width="28" height="14" rx="3" fill="#059669"/>
+  <text x="58" y="653" text-anchor="middle" font-size="9" font-weight="700" fill="#FFFFFF">W6</text>
+  <text x="80" y="653" font-size="10" fill="#475569">A2UI Declarative UI (A2UIRenderer → A2UIViewer)</text>
+
+  <!-- W7 -->
+  <rect x="300" y="642" width="28" height="14" rx="3" fill="#D97706"/>
+  <text x="314" y="653" text-anchor="middle" font-size="9" font-weight="700" fill="#FFFFFF">W7</text>
+  <text x="336" y="653" font-size="10" fill="#475569">MCP Apps (MCPAppFrame → sandboxed iframe)</text>
+
+</svg>

@@ -1,0 +1,314 @@
+{
+  "$defs": {
+    "Block": {
+      "additionalProperties": true,
+      "description": "A single parsed document block.\n\nIntentionally permissive \u2014 the ailang-parse Block is a union-shaped\ndataclass and its concrete fields vary by block type. We pin the\ndiscriminator (`type`) and the common `text` field, and bag the rest\ninto `properties` so Firestore round-trip is lossless.",
+      "properties": {
+        "type": {
+          "enum": [
+            "heading",
+            "paragraph",
+            "text",
+            "table",
+            "image",
+            "audio",
+            "video",
+            "change",
+            "list",
+            "section"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "Properties"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Block",
+      "type": "object"
+    },
+    "DocMetadata": {
+      "description": "Document metadata extracted by ailang-parse (all optional).",
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author"
+        },
+        "created": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created"
+        },
+        "modified": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Modified"
+        },
+        "pageCount": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pagecount"
+        }
+      },
+      "title": "DocMetadata",
+      "type": "object"
+    },
+    "DocSummary": {
+      "description": "Aggregate counts produced by ailang-parse.",
+      "properties": {
+        "totalBlocks": {
+          "default": 0,
+          "title": "Totalblocks",
+          "type": "integer"
+        },
+        "headings": {
+          "default": 0,
+          "title": "Headings",
+          "type": "integer"
+        },
+        "tables": {
+          "default": 0,
+          "title": "Tables",
+          "type": "integer"
+        },
+        "images": {
+          "default": 0,
+          "title": "Images",
+          "type": "integer"
+        },
+        "changes": {
+          "default": 0,
+          "title": "Changes",
+          "type": "integer"
+        }
+      },
+      "title": "DocSummary",
+      "type": "object"
+    },
+    "EditedBlock": {
+      "description": "A user edit overlaid onto an original parsed block.",
+      "properties": {
+        "originalText": {
+          "title": "Originaltext",
+          "type": "string"
+        },
+        "editedText": {
+          "title": "Editedtext",
+          "type": "string"
+        },
+        "editedAt": {
+          "format": "date-time",
+          "title": "Editedat",
+          "type": "string"
+        },
+        "editedBy": {
+          "title": "Editedby",
+          "type": "string"
+        }
+      },
+      "required": [
+        "originalText",
+        "editedText",
+        "editedAt",
+        "editedBy"
+      ],
+      "title": "EditedBlock",
+      "type": "object"
+    }
+  },
+  "description": "Firestore document shape for `parsed_documents/{docId}`.\n\nMirrors the schema at docs/design/v6.0.0/document-ui.md:291-336.",
+  "properties": {
+    "skillId": {
+      "title": "Skillid",
+      "type": "string"
+    },
+    "userId": {
+      "title": "Userid",
+      "type": "string"
+    },
+    "sourceUrl": {
+      "title": "Sourceurl",
+      "type": "string"
+    },
+    "sourceFormat": {
+      "title": "Sourceformat",
+      "type": "string"
+    },
+    "originalFilename": {
+      "title": "Originalfilename",
+      "type": "string"
+    },
+    "storagePath": {
+      "title": "Storagepath",
+      "type": "string"
+    },
+    "status": {
+      "default": "pending",
+      "enum": [
+        "pending",
+        "parsing",
+        "parsed",
+        "failed",
+        "edited"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "parsedAt": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parsedat"
+    },
+    "metadata": {
+      "$ref": "#/$defs/DocMetadata"
+    },
+    "summary": {
+      "$ref": "#/$defs/DocSummary"
+    },
+    "blocks": {
+      "items": {
+        "$ref": "#/$defs/Block"
+      },
+      "title": "Blocks",
+      "type": "array"
+    },
+    "a2uiRoot": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "A2Uiroot"
+    },
+    "a2uiComponents": {
+      "anyOf": [
+        {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "A2Uicomponents"
+    },
+    "editedBlocks": {
+      "additionalProperties": {
+        "$ref": "#/$defs/EditedBlock"
+      },
+      "title": "Editedblocks",
+      "type": "object"
+    },
+    "createdAt": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Createdat"
+    },
+    "updatedAt": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updatedat"
+    }
+  },
+  "required": [
+    "skillId",
+    "userId",
+    "sourceUrl",
+    "sourceFormat",
+    "originalFilename",
+    "storagePath"
+  ],
+  "title": "ParsedDocument",
+  "type": "object",
+  "$comment": "Generated from backend/db/models/document.py. Regenerate with: cd backend && uv run python -c \"import json; from db.models.document import ParsedDocument; print(json.dumps(ParsedDocument.model_json_schema(by_alias=True), indent=2))\" > ../docs/design/v6.0.0/contracts/document.schema.json"
+}

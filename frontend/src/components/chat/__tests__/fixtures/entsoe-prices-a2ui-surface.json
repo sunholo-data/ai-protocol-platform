@@ -1,0 +1,141 @@
+{
+  "surfaceId": "entsoe_prices",
+  "artifact": {
+    "kind": "prices",
+    "title": "DE_LU prices",
+    "description": "ENTSO-E day-ahead prices from BigQuery"
+  },
+  "messages": [
+    {
+      "version": "v0.9",
+      "createSurface": {
+        "surfaceId": "entsoe_prices",
+        "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json"
+      }
+    },
+    {
+      "version": "v0.9",
+      "updateComponents": {
+        "surfaceId": "entsoe_prices",
+        "components": [
+          {
+            "component": "Text",
+            "text": "DE_LU day-ahead prices",
+            "variant": "h4",
+            "id": "px-1"
+          },
+          {
+            "component": "Text",
+            "text": "5 hourly prices",
+            "id": "px-2"
+          },
+          {
+            "component": "Text",
+            "text": "2026-07-01 \u2192 2026-07-01",
+            "id": "px-3"
+          },
+          {
+            "component": "Text",
+            "text": "Average 31.88 EUR/MWh",
+            "id": "px-4"
+          },
+          {
+            "component": "Text",
+            "text": "Low -7.60 EUR/MWh",
+            "id": "px-5"
+          },
+          {
+            "component": "Text",
+            "text": "High 44.00 EUR/MWh",
+            "id": "px-6"
+          },
+          {
+            "component": "List",
+            "children": [
+              "px-2",
+              "px-3",
+              "px-4",
+              "px-5",
+              "px-6"
+            ],
+            "id": "px-7"
+          },
+          {
+            "component": "Column",
+            "children": [
+              "px-1",
+              "px-7"
+            ],
+            "id": "px-8"
+          },
+          {
+            "component": "Card",
+            "child": "px-8",
+            "id": "px-9"
+          },
+          {
+            "id": "root",
+            "component": "Column",
+            "children": [
+              "px-9"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "version": "v0.9",
+      "updateDataModel": {
+        "surfaceId": "entsoe_prices",
+        "value": {
+          "kind": "series",
+          "title": "DE_LU day-ahead prices",
+          "x": {
+            "key": "ts",
+            "label": "Time",
+            "type": "time"
+          },
+          "y": [
+            {
+              "key": "price_eur_mwh",
+              "label": "Price",
+              "unit": "EUR/MWh"
+            }
+          ],
+          "rows": [
+            {
+              "ts": "2026-07-01T00:00:00+00:00",
+              "price_eur_mwh": 40.0
+            },
+            {
+              "ts": "2026-07-01T01:00:00+00:00",
+              "price_eur_mwh": 41.0
+            },
+            {
+              "ts": "2026-07-01T02:00:00+00:00",
+              "price_eur_mwh": 42.0
+            },
+            {
+              "ts": "2026-07-01T03:00:00+00:00",
+              "price_eur_mwh": -7.6
+            },
+            {
+              "ts": "2026-07-01T04:00:00+00:00",
+              "price_eur_mwh": 44.0
+            }
+          ],
+          "stats": {
+            "avg": 31.880000000000003,
+            "min": -7.6,
+            "max": 44.0
+          },
+          "sourceUri": "bq://entsoe.day_ahead",
+          "biddingZone": "DE_LU",
+          "startDate": "2026-07-01",
+          "endDate": "2026-07-01",
+          "rowCount": 5
+        }
+      }
+    }
+  ]
+}

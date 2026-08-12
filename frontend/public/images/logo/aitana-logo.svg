@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Aitana">
+  <!-- Aitana mark: warm salmon-orange disc with a lowercase "ai" wordmark.
+       Uses a system geometric-sans stack so it renders crisply everywhere
+       without an embedded webfont. Swap this file to update the logo. -->
+  <circle cx="256" cy="256" r="256" fill="#E8926A" />
+  <!-- Optically centred on the disc — see aitana-mark.svg for why the tracking
+       is a <tspan dx> rather than letter-spacing (letter-spacing skews
+       text-anchor="middle" by half the tracking) and why y is nudged off the
+       geometric centre. Measured from rendered pixels, not eyeballed. -->
+  <text
+    x="258" y="250"
+    text-anchor="middle" dominant-baseline="central"
+    font-family="'Euclid Circular A', 'Montserrat', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    font-size="290" font-weight="600" fill="#ffffff"
+  >a<tspan dx="-10">i</tspan></text>
+</svg>

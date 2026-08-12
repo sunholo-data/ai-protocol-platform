@@ -1,0 +1,88 @@
+Sprint 2.13 ARTEFACT-REVIEW-HOOK — smoke evidence
+===================================================
+Date: 2026-05-19
+Branch: dev
+Commits: 88d2932 (M1) + c1e9e5a (M2) + 99766be (M3) + (M4)
+
+This sprint's "smoke" is the test suite, not a chrome screenshot.
+The hook is a backend-driven gate with deterministic frontend
+rendering from typed errors; a chrome screenshot would re-prove
+what the tests already prove AND require fork-side reviewer setup
+(registering a reviewer at bootstrap, configuring a skill) that's
+documented in the howto's "smoke testing locally" section.
+
+What the tests prove end-to-end:
+
+1. frontend/src/components/protocols/__tests__/ArtefactReviewer.test.ts (10 tests)
+   - Permissive default approves everything (back-compat)
+   - Registry get/set/clear
+   - setArtefactReviewer rejects invalid shapes (fail-loud at bootstrap)
+   - Registering twice replaces; previous never called
+   - ArtefactDecision discriminated union narrowing
+   - ArtefactReview field set matches Python mirror
+
+2. frontend/src/components/protocols/__tests__/MCPAppToolCallRouter.review.test.tsx (6 tests)
+   - 4 paths: approve / warn / block / reviewer-crash
+   - Block path fires audit POST on mount
+   - Slow-reviewer (>500ms) degrades to approve + warn log; lingering
+     reviewer Promise's eventual decision is discarded (no zombie
+     state mutation)
+
+3. frontend/src/components/protocols/__tests__/ArtefactRefused.test.tsx (8 tests)
+   - Message rendered verbatim
+   - Reason code chip
+   - aria-live='assertive'
+   - Appeal link present/absent
+   - Audit POST fires when sessionId set
+   - Audit POST skipped when sessionId null (pre-first-turn safety)
+   - Idempotent under React 18 Strict-Mode double-mount
+
+4. frontend/src/components/protocols/__tests__/ArtefactWarningStripe.test.tsx (3 tests)
+   - Message + reason code chip
+   - Child renders below stripe
+   - aria-live='polite'
+
+5. backend/tests/unit/test_artefact_review.py (11 tests)
+   - Protocol shape + runtime_checkable + isinstance against duck types
+   - Registry behaviour + register rejects sync review() via
+     asyncio.iscoroutinefunction
+   - Field-name set matches TS mirror
+   - BlockedArtefactError carries decision
+
+6. backend/tests/api_tests/test_mcp_proxy_artefact_review.py (8 tests)
+   - Back-compat: no reviewer registered → byte-identical to upstream
+   - Approve path: forwards unchanged
+   - Block path: 403 with {type, message, reason_code, appeal_url}
+   - Scope guard: non-resources/read methods NOT inspected
+   - Scope guard: non-HTML mime NOT inspected
+   - Fail-open: reviewer crash forwards original response
+   - Malformed body short-circuits to pass-through
+
+End-to-end coverage:
+  fork-side reviewer registered →
+  MCP App tool call →
+  readResource consults the reviewer (or proxy intercepts on
+  backend if registered there) →
+  decision.action drives render:
+    approve → AppRenderer unchanged
+    warn → ArtefactWarningStripe wraps AppRenderer
+    block → ArtefactRefused (no iframe) + audit POST
+
+Each link in the chain has dedicated tests. The
+test_mcp_proxy_artefact_review.py block-path test is the single
+artifact that proves the server-side wire path end-to-end without
+mocking the boundary.
+
+Test count summary (post M3, before M4):
+  Backend:  1269 passed (was 1250 at sprint start, +19)
+  Frontend: 506 passed (was 489 at sprint start, +17)
+
+CI parity verified at every milestone close:
+  cd backend && make lint && make test-fast    # green
+  cd frontend && npm run quality:check          # green
+
+Back-compat preserved:
+  - Existing MCPAppToolCallRouter.test.tsx fixtures still pass
+    (Cesium-map demo renders unchanged under permissive default)
+  - Existing test_mcp_proxy.py regression suite still passes
+    (dumb-forwarder contract preserved when no reviewer registered)

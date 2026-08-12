@@ -1,0 +1,32 @@
+{
+  "name": "@aitana/mcp-sandbox",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aitana MCP App sandbox proxy — separate-origin double-iframe service per MCP Apps spec",
+  "type": "module",
+  "scripts": {
+    "build:script": "esbuild src/sandbox.ts --bundle --format=esm --target=es2022 --outfile=public/sandbox.js",
+    "build:html": "node -e \"require('fs').copyFileSync('sandbox.html','public/sandbox.html')\"",
+    "build": "mkdir -p public && npm run build:script && npm run build:html",
+    "dev": "npm run build && tsx watch serve.ts",
+    "start": "node --experimental-strip-types serve.ts",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  },
+  "//": "@modelcontextprotocol/ext-apps used to live here; src/sandbox.ts now inlines the small bits we use (RESOURCE_READY method name + buildAllowAttribute helper) to keep the browser bundle tiny (~3.5 KB instead of ~350 KB). serve.ts uses a structural import-equivalent (McpUiResourceCsp) and pulls types only via a local .d.ts shim — see McpUiResourceCsp type below if/when one is added.",
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "@types/supertest": "^7.2.0",
+    "esbuild": "^0.24.0",
+    "supertest": "^7.2.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

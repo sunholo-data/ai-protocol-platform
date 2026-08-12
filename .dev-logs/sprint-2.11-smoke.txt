@@ -1,0 +1,10 @@
+=== Sprint 2.11 anonymous-group-id-auth end-to-end smoke ===
+Date: 2026-05-19
+Backend: localhost:1956 (LOCAL_MODE, GROUP_AUTH_SIGNING_SECRET set via dev-local.sh)
+
+--- Teacher creates group (Firebase auth via LOCAL_MODE stub) ---
+$ curl -s -X POST http://localhost:1956/api/auth/group/create \
+    -H 'Authorization: Bearer local-mode-stub-token' \
+    -H 'Content-Type: application/json' \
+    -d '{"title":"Smoke test","skill_ids":["demo-researcher"],"ttl_days":1}'
+Response: {"detail":[{"type":"json_invalid","loc":["body",1],"msg":"JSON decode error","input":{},"ctx":{"error":"Expecting property name enclosed in double quotes"}}]}

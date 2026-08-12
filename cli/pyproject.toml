@@ -1,0 +1,41 @@
+[project]
+name = "aiplatform"
+version = "0.1.0"
+description = "`aiplatform` CLI — bucket/folder/groups/access/skill admin for the v6 platform"
+requires-python = ">=3.11,<3.14"
+authors = [{ name = "Holosun ApS" }]
+dependencies = [
+    "click>=8.1.7",
+    "httpx>=0.28.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+aiplatform = "aiplatform.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "respx>=0.22.0",
+    "ruff>=0.8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["aiplatform"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"

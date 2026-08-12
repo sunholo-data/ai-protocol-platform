@@ -1,0 +1,112 @@
+# MCP Toolbox config — GENERIC EXAMPLE (safe to publish).
+#
+# This file ships in the public template. The real deployment's `tools.yaml`
+# holds client-specific queries and is excluded from the template by
+# scripts/sanitize-for-template.sh (which renames THIS file over it).
+#
+# It queries `bigquery-public-data.usa_names` — a public dataset — so a fresh
+# fork can boot the Toolbox sidecar and see it work before writing its own
+# queries. Replace it with your own `tools.yaml`.
+#
+# ── THE TWO RULES THAT MATTER (learned the hard way) ─────────────────────────
+# Verified against Toolbox v1.7.0 on 2026-07-17:
+#
+#   `templateParameters` + `allowedValues` is NOT a security control. The
+#   allowedValues check is a SUBSTRING match, not equality — any input that
+#   CONTAINS an allowed value passes and is then interpolated RAW into your SQL.
+#   And `allowedDatasets` does NOT gate hand-authored `bigquery-sql` tools (only
+#   the generic `bigquery-execute-sql` one), so nothing catches it downstream.
+#   The connecting service account's IAM is your only real backstop.
+#
+# Therefore, never put caller input in an identifier position:
+#
+#   C2  — choosing a COLUMN? Use CASE on a BOUND param, columns literal:
+#           SELECT CASE @tech WHEN 'solar' THEN `Solar Price`
+#                             WHEN 'wind'  THEN `Wind Price` END AS price
+#
+#   C2b — choosing a TABLE? Use UNION ALL with a LITERAL label, filter on a
+#         BOUND param (demonstrated below):
+#           WITH t AS (SELECT 'a' AS src, * FROM `proj.ds.table_a`
+#                      UNION ALL SELECT 'b', * FROM `proj.ds.table_b`)
+#           SELECT * FROM t WHERE src = @source
+#
+# Both rules are enforced in CI by
+# backend/tests/tool_tests/test_toolbox_config_safety.py — it fails the build if
+# any tools*.yaml reintroduces `templateParameters`.
+
+kind: source
+name: example-public
+type: bigquery
+# Your project — BILLS the query (not the data's project; that is in each table's
+# FQN). Always give a colon-DEFAULT: Toolbox exits(1) on an unset variable, and
+# because this runs as a Cloud Run sidecar that parse failure fails the startup
+# probe and takes the whole revision Ready:False. With a default you instead get
+# a clear "project not found" at query time, which is recoverable.
+# The syntax is {VAR:default} — NOT shell's {VAR:-default}, which Toolbox reads
+# as a default of "-your-project-id" (BigQuery rejects the leading dash).
+project: ${GOOGLE_CLOUD_PROJECT:your-project-id}
+location: US                          # must match the dataset's region
+writeMode: blocked                    # Toolbox DEFAULTS to "allowed" (arbitrary DML)
+maxQueryResultRows: 100
+
+---
+kind: tool
+name: popular_baby_names
+type: bigquery-sql
+source: example-public
+description: >
+  Most popular US baby names for a given year and sex, from the public
+  bigquery-public-data.usa_names dataset. Demonstrates fully bound-parameter
+  querying — no identifier ever comes from caller input.
+statement: |
+  SELECT name, gender, SUM(number) AS total
+  FROM `bigquery-public-data.usa_names.usa_1910_current`
+  WHERE year = @year AND gender = @gender
+  GROUP BY name, gender
+  ORDER BY total DESC
+  LIMIT 10
+parameters:
+  - name: year
+    type: integer
+    description: Calendar year, e.g. 2000.
+  - name: gender
+    type: string
+    description: "M or F."
+
+---
+kind: tool
+name: names_by_decade_source
+type: bigquery-sql
+source: example-public
+description: >
+  Top names for a decade, selected from one of two pre-defined slices. This
+  exists to demonstrate the C2b UNION ALL pattern for choosing between TABLES
+  safely — note the table names are literal and @slice is a bound parameter, so
+  a malicious @slice simply matches no branch and returns zero rows.
+statement: |
+  WITH slices AS (
+    SELECT 'recent' AS slice, name, gender, number, year
+    FROM `bigquery-public-data.usa_names.usa_1910_current`
+    WHERE year >= 2000
+    UNION ALL
+    SELECT 'historic', name, gender, number, year
+    FROM `bigquery-public-data.usa_names.usa_1910_current`
+    WHERE year < 2000
+  )
+  SELECT name, gender, SUM(number) AS total
+  FROM slices
+  WHERE slice = LOWER(TRIM(@slice))
+  GROUP BY name, gender
+  ORDER BY total DESC
+  LIMIT 10
+parameters:
+  - name: slice
+    type: string
+    description: "Either 'recent' (2000+) or 'historic' (pre-2000)."
+
+---
+kind: toolset
+name: example
+tools:
+  - popular_baby_names
+  - names_by_decade_source

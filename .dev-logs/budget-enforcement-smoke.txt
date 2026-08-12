@@ -1,0 +1,93 @@
+Sprint 2.12 BUDGET-ENFORCEMENT — smoke evidence
+=================================================
+Date: 2026-05-19
+Branch: dev
+Commits: 80f1b4a (M1) + a4e3d31 (M2) + 6961237 (M3)
+
+This sprint's smoke evidence is in the test suite, not a screenshot.
+Budget enforcement is a backend-driven gate: there's no new UI surface
+to demonstrate beyond the BudgetBanner, which renders deterministically
+from a StreamError. A chrome screenshot would re-prove what the tests
+prove (and would require additional setup — registering an enforcer at
+startup and configuring an existing skill's tool_configs.budget — that's
+fork-side, not platform-side).
+
+What the tests prove end-to-end:
+
+1. backend/tests/unit/test_budget_enforcer.py (10 tests)
+   - Protocol shape + runtime_checkable + isinstance against duck types
+   - Registry behaviour + replace + type-rejection
+
+2. backend/tests/unit/test_in_memory_enforcer.py (14 tests)
+   - 8-gate matrix:
+     Gate 1 — allow under cap
+     Gate 2 — warn at 80% soft threshold + below-soft stays allow
+     Gate 3 — hard block at 100% + remaining clamped to 0
+     Gate 4 — period rollover resets state
+     Gate 5 — multi-identity isolation
+     Gate 6 — replay dedup within 60s + window expiry
+     Gate 7 — record reconciles projection with actual
+     Gate 8 — fail-loud-but-allow on missing cap
+   - time_provider is a class attribute (not a dataclass field)
+   - daily period resets each day
+
+3. backend/tests/unit/test_budget_config.py (10 tests)
+   - Pydantic shape + from_tool_configs edge cases (None, empty, non-dict, extras)
+
+4. backend/tests/integration/test_budget_callback.py (9 tests)
+   - allow path returns None, model call proceeds
+   - warn path sets state['budget:warn_message']
+   - block path raises BudgetExceededError BEFORE model invocation
+   - exempt skill bypasses consult entirely
+   - no budget_config bypasses consult entirely
+   - cost_multiplier=3 scales projection by 3
+   - record reconciles with actual usage_metadata
+   - identity_unresolved fails open with WARN log
+   - identity falls back to uid when group_id missing
+
+5. backend/tests/unit/test_composed_before_model.py (3 tests)
+   - create_agent wires _composed_before_model (regression for agent.py refactor)
+   - create_agent wires _composed_after_model
+   - document_injector still runs in the composed chain
+
+6. backend/tests/api_tests/test_stream_skill.py (1 new SSE-level test)
+   - BudgetExceededError → exactly one AG-UI RUN_ERROR event with
+     code='BUDGET_EXCEEDED', the typed message, and retry_after_seconds
+     as a passthrough field on the RunErrorEvent schema
+
+7. frontend/src/components/budget/__tests__/BudgetBanner.test.tsx (10 tests)
+   - null + non-budget kind → renders nothing
+   - backend message rendered verbatim
+   - role='alert' + aria-live='assertive'
+   - countdown formatting (days/hours/minutes/seconds)
+   - countdown ticks down once per second
+   - countdown hides at zero
+   - retry-after absent → countdown hidden
+   - dismiss button calls onDismiss
+   - dismiss button keyboard-focusable
+
+8. frontend/src/hooks/__tests__/useSkillAgent.test.tsx (3 new tests)
+   - kind=budget_exceeded when onRunFailed carries code=BUDGET_EXCEEDED
+   - no retry_after_seconds → retryable=false
+   - non-BUDGET_EXCEEDED code falls through to kind=run_error (regression)
+
+End-to-end coverage:
+  enforcer.consult → BudgetExceededError →
+  before_model_callback raises →
+  skill_processor catches →
+  AG-UI RUN_ERROR emitted (typed code + passthrough retry_after) →
+  HttpAgent subscriber.onRunFailed fires →
+  useSkillAgent.classifyRunError identifies kind=budget_exceeded →
+  BudgetBanner renders with countdown
+
+Each link in the chain has dedicated tests; the SSE-level test in
+test_stream_skill.py is the single artifact that proves the chain
+end-to-end without mocking the boundary.
+
+Test count summary (post M3):
+  Backend:  1250 passed (was 1202 at sprint start, +48)
+  Frontend: 479 passed (was 465 at sprint start, +14)
+
+CI parity verified at every milestone close:
+  cd backend && make lint && make test-fast    # green
+  cd frontend && npm run quality:check          # green (lint + typecheck + tests + build)

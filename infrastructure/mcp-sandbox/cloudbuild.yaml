@@ -1,0 +1,136 @@
+# Aitana MCP App sandbox proxy — Cloud Build configuration.
+#
+# Single-container Cloud Run service. Mirrors the shape of
+# backend/cloudbuild.yaml (the simpler platform-backend pattern) without
+# secrets, without GCS volume mounts, and with public access — the
+# sandbox iframe is loaded by the browser from this URL on a SEPARATE
+# origin from the host frontend (per MCP Apps spec, see sprint 1.24).
+#
+# Branch-based deployment: dev -> your-project-id (only env this
+# sprint; test/prod follow the same shape when they're cut). Substitutions
+# managed by Terraform — see multivac-aitana infrastructure repo.
+
+substitutions:
+  _SERVICE_NAME: mcp-sandbox
+  _REGION: terraform_managed
+  _ARTIFACT_REGISTRY_REPO_URL_CLIENT: terraform_managed
+  _PROJECT_ID: terraform_managed
+  # Comma-separated origins permitted to embed this sandbox as an iframe.
+  # Validated against document.referrer in sandbox.ts on every load. The
+  # trigger substitution for this var is NOT set (terraform leaves it unset,
+  # same as _AILANG_VERSION), so THIS default is the effective allowlist for
+  # every env — dev now, test/prod on branch promotion. All three Aitana
+  # frontends are listed so any of them can embed any env's sandbox:
+  #   - platform-frontend-…-ew.a.run.app  → dev Cloud Run frontend URL
+  #   - test.yourcompany.com                     → test custom domain
+  #   - app.yourcompany.com                      → prod custom domain
+  # NB: origins only (scheme+host, no trailing slash) — sandbox.ts anchors the
+  # pattern and appends (:|/|$), so the referrer's trailing slash still matches.
+  _ALLOWED_HOST_ORIGINS: 'https://your-service-url.example,https://test.yourcompany.com,https://app.yourcompany.com'
+  # #6 (template-cloudbuild-hardening.md): project-local log bucket.
+  # Created by scripts/bootstrap-gcp-project.sh; forks don't hit the
+  # Aitana-owned your-deploy-project-id-logging-bucket.
+  _LOG_BUCKET: 'gs://${_PROJECT_ID}-cloudbuild-logs'
+  # Pinned AILANG WASM runtime for the ppa-obligation-analysis artefact (7.6).
+  # Bump in a reviewed one-liner; mirrors the root Makefile AILANG_VERSION var.
+  _AILANG_VERSION: 'v0.29.0'
+  _DEONTIC_VERSION: '0.1.2'
+
+tags: ['${_PROJECT_ID}', '${_SERVICE_NAME}']
+
+options:
+  logging: GCS_ONLY
+logsBucket: '${_LOG_BUCKET}'
+
+steps:
+  # --- Fetch the pinned AILANG WASM runtime + deontic engine ---
+  # The ~40 MB ailang.wasm is git-ignored and reconstituted here from the
+  # pinned release, checksum-verified, and brotli-precompressed INTO the
+  # artefact assets dir so the docker build below bakes it into the image.
+  # Must run before build-mcp-sandbox (its Dockerfile COPYs artefacts/).
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: fetch-ailang-wasm
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        apt-get update -qq && apt-get install -y -qq brotli >/dev/null
+        AILANG_VERSION='${_AILANG_VERSION}' DEONTIC_VERSION='${_DEONTIC_VERSION}' \
+          bash scripts/fetch-ailang-wasm.sh
+
+  # --- Build the sandbox image ---
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-mcp-sandbox
+    dir: infrastructure/mcp-sandbox
+    waitFor: ['fetch-ailang-wasm']
+    args:
+      - 'build'
+      - '-t'
+      - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/sandbox:${BRANCH_NAME}'
+      - '.'
+
+  # --- Push image ---
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-mcp-sandbox
+    waitFor: ['build-mcp-sandbox']
+    args:
+      - 'push'
+      - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/sandbox:${BRANCH_NAME}'
+
+  # --- Deploy to Cloud Run (single container, public) ---
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    waitFor: ['push-mcp-sandbox']
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE_NAME}'
+      - '--region=${_REGION}'
+      - '--project=${_PROJECT_ID}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'           # browser-loaded iframe; allUsers
+      - '--max-instances=3'
+      - '--image=${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/sandbox:${BRANCH_NAME}'
+      - '--port=8080'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      # Custom delimiter (^@^): the value is a COMMA-separated origin list, and
+      # --set-env-vars uses commas to split KEY=VALUE pairs. ^@^ makes '@' the
+      # pair delimiter so the commas stay inside the single ALLOWED_HOST_ORIGINS
+      # value (no '@' appears in any origin). Without this the deploy exits 2.
+      - '--set-env-vars=^@^ALLOWED_HOST_ORIGINS=${_ALLOWED_HOST_ORIGINS}'
+
+  # --- Smoke probe ---
+  # cloud-sdk image has both gcloud + curl. Resolve the service URL after
+  # deploy (Cloud Run assigns a deterministic *.run.app URL but we can't
+  # hardcode it — the project/region prefix is terraform-managed). Fail
+  # the build if /healthz is anything other than 200.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: smoke
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        sleep 10
+        URL=$(gcloud run services describe ${_SERVICE_NAME} \
+          --region=${_REGION} --project=${_PROJECT_ID} \
+          --format='value(status.url)')
+        if [ -z "$$URL" ]; then
+          echo "ERROR: Could not resolve service URL" >&2
+          exit 1
+        fi
+        # Probe /sandbox.html, NOT /healthz — Cloud Run's GFE intercepts
+        # /healthz for its own internal liveness probes; user containers
+        # never see those requests. /sandbox.html is the actual path the
+        # iframe loads in production, so this is also a more meaningful
+        # smoke than a synthetic health endpoint.
+        echo "Probing $${URL}/sandbox.html ..."
+        STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$${URL}/sandbox.html")
+        echo "Status: $${STATUS}"
+        if [ "$${STATUS}" != "200" ]; then
+          echo "ERROR: $${URL}/sandbox.html returned $${STATUS} (expected 200)" >&2
+          exit 1
+        fi
+
+timeout: 600s

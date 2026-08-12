@@ -1,0 +1,24 @@
+{
+  "name": "mcp-artefact-test",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Serve one platform artefact as a ui:// resource so you can test it in an EXTERNAL host (ChatGPT/Copilot/Claude/Inspector). Run: ARTEFACT=<name> npm start, or scripts/test-artefact-in-host.sh <name>.",
+  "scripts": {
+    "start": "tsx serve.ts",
+    "dev": "tsx watch serve.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.0"
+  }
+}

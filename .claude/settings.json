@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__adk-mcp__read_docs",
+      "mcp__adk-mcp__search_code",
+      "WebFetch(domain:www.copilotkit.ai)",
+      "WebFetch(domain:dojo.ag-ui.com)",
+      "WebFetch(domain:mcpui.dev)",
+      "WebFetch(domain:ai.google.dev)",
+      "WebFetch(domain:docs.claude.com)",
+      "WebFetch(domain:prefab.prefect.io)",
+      "Bash(uv run python -c ':*)",
+      "Bash(uv run:*)",
+      "mcp__google-dev-knowledge__answer_query",
+      "Bash(npx tsc *)",
+      "Bash(npx vitest *)",
+      "Bash(.claude/skills/aiplatform-cli/scripts/:*)",
+      "Skill(aiplatform-cli)",
+      "Bash(bun --watch main.ts)",
+      "Bash(.claude/skills/aiplatform-cli/scripts/mint-token.sh)",
+      "WebFetch(domain:docs.copilotkit.ai)",
+      "Bash(aiplatform:*)",
+      "Bash(bash scripts/sanitize-for-template.sh /tmp/ai-protocol-platform)"
+    ],
+    "ask": [
+      "Bash(git push*)",
+      "Bash(git stash*)"
+    ],
+    "additionalDirectories": []
+  }
+}

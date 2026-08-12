@@ -1,0 +1,175 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  /* Hide the native scrollbar while keeping the element scrollable — used by
+     the Workbench tab strip (the native bar was big + ugly with many tabs). */
+  .no-scrollbar {
+    -ms-overflow-style: none; /* IE/Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/WebKit */
+  }
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 24 95% 53%;
+    --primary: 24 95% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 100% 50%;
+    --destructive-foreground: 210 40% 98%;
+    --radius: 0.5rem;
+    /* A2UI renderer accent — the @a2ui/react basic catalog reads this var for
+       Tabs active indicators, primary Buttons, and selected ChoicePicker chips
+       (its only themable hook; borders/cards stay SDK defaults). Point it at the
+       app's primary so tool-result surfaces match the rest of the app. */
+    --a2ui-primary-color: hsl(var(--primary));
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 24 95% 53%;
+    --primary: 24 95% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+}
+
+/* ── A2UI elicitation form skin (7.8) ────────────────────────────────────────
+   The @a2ui/react Basic catalog hardcodes crude, light-mode-only INLINE styles:
+   white Cards + drop shadows, native <h3>/<h5> with big default margins, #ccc
+   borders, and an 8px margin on every leaf. Rendered raw that reads as the
+   "wall of text / can't see anything" the obligation elicitation form showed.
+   The SDK exposes no class hooks, so we scope a tighter, theme-aware skin to
+   `.chat-a2ui-form` (set on the A2UISurfaceMount that renders chat-placement
+   forms). Author `!important` is the ONE thing that overrides an element's own
+   inline style — necessary here, not sloppiness. This is the reusable PRODUCTION
+   skin for A2UI elicitation surfaces, not a one-off. */
+.chat-a2ui-form :is(h1, h2, h3, h4, h5) {
+  margin: 0 0 0.125rem !important;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.chat-a2ui-form h3 {
+  font-size: 0.95rem; /* the form's own title */
+}
+.chat-a2ui-form h5 {
+  /* section headings ("Required to run the analysis", "Optional …") */
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  color: hsl(var(--muted-foreground));
+  margin-top: 0.5rem !important;
+}
+.chat-a2ui-form label {
+  font-size: 0.8125rem !important;
+  font-weight: 600 !important;
+}
+.chat-a2ui-form span {
+  /* body text: the terse help + "Used to derive: …" disclosure lines. Kept
+     small + tight so each field stays a compact label→input→hint stack rather
+     than a paragraph (the compactness the user asked for). */
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.3;
+}
+.chat-a2ui-form input,
+.chat-a2ui-form textarea {
+  margin: 0.25rem 0 0 !important;
+  padding: 0.375rem 0.5rem !important;
+  border: 1px solid hsl(var(--input)) !important;
+  border-radius: var(--radius) !important;
+  background: hsl(var(--background)) !important;
+  color: hsl(var(--foreground)) !important;
+  font-size: 0.875rem !important;
+}
+.chat-a2ui-form input:focus,
+.chat-a2ui-form textarea:focus {
+  outline: 2px solid hsl(var(--ring)) !important;
+  outline-offset: 1px;
+  border-color: hsl(var(--ring)) !important;
+}
+/* Cards: the SDK forces a white bg + shadow. Make them flat, theme-aware
+   sections so the Required / Optional groups read as gentle panels — not
+   floating white slabs (and legible in dark mode). Matches React's serialised
+   inline colour (`#fff` → `rgb(255, 255, 255)`). */
+.chat-a2ui-form [style*="255, 255, 255"] {
+  background: hsl(var(--muted) / 0.35) !important;
+  box-shadow: none !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: var(--radius) !important;
+  margin: 0.1875rem 0 0.375rem !important;
+  padding: 0.4375rem 0.5625rem !important;
+}
+/* The elicitation transform emits a single `variant="primary"` submit button
+   (Proceed / Submit) — the card's one call to action. The SDK renders it as a
+   passive outline, so we force a filled, full-width primary CTA that reads as
+   "click here". */
+.chat-a2ui-form button {
+  display: block !important;
+  width: 100% !important;
+  margin: 0.875rem 0 0 !important;
+  padding: 0.5625rem 1rem !important;
+  border: 0 !important;
+  border-radius: var(--radius) !important;
+  background: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.08) !important;
+  transition: filter 0.15s ease !important;
+}
+.chat-a2ui-form button:hover {
+  filter: brightness(0.94) !important;
+}
+.chat-a2ui-form button:focus-visible {
+  outline: 2px solid hsl(var(--ring)) !important;
+  outline-offset: 2px !important;
+}
+/* Plain confirm (no fields): a compact card, not a full-width form. The single
+   "Proceed" CTA hugs its label and sits at the right edge (a confirm-dialog
+   idiom) instead of a full-width block that dwarfs a one-line ask
+   (2026-07-15 user report: "please confirm is a very big component"). */
+.chat-a2ui-form--confirm button {
+  /* shrink-to-fit block + margin-left:auto right-aligns robustly whether the
+     A2UI column renders as flex or plain block (auto margins on inline boxes
+     are ignored, so avoid inline-flex here). */
+  display: block !important;
+  width: fit-content !important;
+  min-width: 7rem !important;
+  margin: 0.625rem 0 0 auto !important;
+  padding: 0.4375rem 1.125rem !important;
+}

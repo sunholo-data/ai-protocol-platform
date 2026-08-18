@@ -78,13 +78,30 @@ def test_smart_tier_resolves_to_gemini_under_eu_strict(monkeypatch):
     assert chain[0].startswith("gemini-")
 
 
-def test_lite_tier_gets_eu_chain_with_region_rung(monkeypatch):
+def test_lite_tier_gets_eu_multiregion_chain(monkeypatch):
+    # 2026-08-13: lite's eu-strict primary (gemini-3-5-flash-lite-eu) has no
+    # single-region EU option at all (live-probed — see models.yaml), so it
+    # has no cross-region rung; it's pinned to the "eu" jurisdictional
+    # multi-region endpoint instead. See test_gemini_3_5_flash_eu_gets_
+    # cross_region_rung below for the (still-alive) same-model-different-
+    # region rung pattern, which gemini-3-5-flash-eu uses instead.
     monkeypatch.setenv("MODEL_RESIDENCY_POLICY", "eu-strict")
     model = resolve_model_chain("lite")
     assert isinstance(model, ResilientLlm)
+    primary = model.chain[0]
+    assert isinstance(primary, RegionalGemini)
+    assert primary.location == "eu"
+
+
+def test_gemini_3_5_flash_eu_gets_cross_region_rung():
     # Tier 1a: same model, different EU region — a RegionalGemini member.
+    # gemini-3.5-flash is the one 3.x model with genuine EU single-region
+    # availability (europe-west2 AND europe-west3, live-probed 2026-08-13),
+    # so it keeps the classic cross-region-rung shape 2.x-era entries use.
+    model = resolve_model_chain("gemini-3-5-flash-eu")
+    assert isinstance(model, ResilientLlm)
     regional = [m for m in model.chain if isinstance(m, RegionalGemini)]
-    assert regional, "expected a cross-region rung in the lite chain"
+    assert regional, "expected a cross-region rung in the gemini-3-5-flash-eu chain"
     assert all(loc.startswith("europe-") for loc in [m.location for m in regional])
 
 

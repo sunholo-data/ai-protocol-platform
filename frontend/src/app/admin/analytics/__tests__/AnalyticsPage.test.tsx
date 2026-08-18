@@ -24,7 +24,7 @@ const SESSIONS = {
       skill_id: "one-ppa-expert",
       skill_label: "Contract Expert",
       owner_uid: "u1",
-      owner_email: "dv@acme-energy.example",
+      owner_email: "dv@acmeenergy.com",
       owner_name: "Dana Vega",
       title: "DK1 electricity prices",
       turn_count: 2,
@@ -51,7 +51,7 @@ const SESSIONS = {
     },
   ],
   owners: [
-    { uid: "u1", email: "dv@acme-energy.example", name: "Dana Vega", sessions: 5, last_active: "2026-08-09" },
+    { uid: "u1", email: "dv@acmeenergy.com", name: "Dana Vega", sessions: 5, last_active: "2026-08-09" },
     { uid: "u2", email: "owner@yourcompany.com", name: "Mark", sessions: 3, last_active: "2026-08-08" },
   ],
   skills: [
@@ -66,7 +66,7 @@ const TRACE = {
   skill_id: "one-ppa-expert",
   skill_label: "Contract Expert",
   owner_uid: "u1",
-  owner_email: "dv@acme-energy.example",
+  owner_email: "dv@acmeenergy.com",
   owner_name: "Dana Vega",
   title: "DK1 electricity prices",
   turn_count: 2,

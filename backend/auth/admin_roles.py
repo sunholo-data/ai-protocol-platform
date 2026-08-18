@@ -36,7 +36,7 @@ from collections.abc import Iterable
 # Platform super-admin — unrestricted across every tenant.
 PLATFORM_ADMIN_TAG = "aitana-admin"
 
-# Prefix for the per-tenant admin claim shape, e.g. ``tenant-admin:acme-energy.example``.
+# Prefix for the per-tenant admin claim shape, e.g. ``tenant-admin:acmeenergy.com``.
 TENANT_ADMIN_PREFIX = "tenant-admin:"
 
 # Tags that grant skill-management (edit/delete a skill you don't own). A

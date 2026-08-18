@@ -1,6 +1,6 @@
 # Event-Driven Skills (Pub/Sub + Scheduler Pattern)
 
-**Status**: Planned — surfaced by [Shepherd / an internal-tools fork](../forks/internal-tools-fork/v0.1.0/scope.md) (contract-watch) and re-confirmed by [a tutoring fork](../forks/tutoring-fork/v0.1.0/scope.md) (stuck-detection)
+**Status**: Planned — surfaced by an internal-tools fork (contract-watch) and re-confirmed by a tutoring fork (that fork's own repo) (stuck-detection)
 **Priority**: P1 — both forks-in-flight need it; generic template-level abstraction
 **Scope**: Backend skill abstraction + Terraform module + Cloud Run worker pattern
 **Dependencies**: [skills-data-model](../v6.0.0/implemented/skills-data-model.md), [agent-factory](../v6.0.0/implemented/agent-factory.md)
@@ -10,7 +10,7 @@
 
 Template skills are currently **request/response only** — a user message arrives, an agent runs, a reply streams back. Both early forks need something different:
 
-- **Shepherd** wants `contract-watch` to scan Drive every morning and ping Discord when a renewal is approaching
+- **the internal-tools fork** wants `contract-watch` to scan Drive every morning and ping Discord when a renewal is approaching
 - **a tutoring fork** wants `stuck-detection` to run periodically over active sessions and update the teacher dashboard
 
 This is the same shape: **a skill fires from a non-user trigger, produces a result, and routes the result to a configured destination**. The patterns to implement this already exist in `sunholo/ailang-multivac/terraform/` (Pub/Sub topics, Cloud Scheduler, eventarc, Cloud Run jobs) but they're customer-specific and not abstracted into the template. The work is to lift them into a reusable module + a new skill trigger type.
@@ -48,10 +48,10 @@ class SkillTrigger(BaseModel):
     timezone: str = "Europe/Copenhagen"
 
     # for pubsub
-    topic: str | None = None               # template-namespaced: "shepherd.contract-events"
+    topic: str | None = None               # template-namespaced: "the internal-tools fork.contract-events"
 
     # output routing
-    output_channel: str | None = None      # "discord:#shepherds-and-sheep" or "email:team@the internal-tools fork.org"
+    output_channel: str | None = None      # "discord:#the internal-tools forks-and-sheep" or "email:team@the internal-tools fork.org"
 
     # idempotency
     dedupe_window_minutes: int = 60        # for Pub/Sub message replay
@@ -161,6 +161,6 @@ In `LOCAL_MODE=1`:
 - [Skills data model](../v6.0.0/implemented/skills-data-model.md) — the abstraction this extends
 - [Agent factory](../v6.0.0/implemented/agent-factory.md) — runner used inside the worker job
 - [Audit log + analytics](audit-log-and-analytics.md) — companion extension
-- [an internal-tools fork scope](../forks/internal-tools-fork/v0.1.0/scope.md) — first consumer (contract-watch)
-- [a tutoring fork scope](../forks/tutoring-fork/v0.1.0/scope.md) — second consumer (stuck-detection)
+- an internal-tools fork scope (that fork's own repo) — first consumer (contract-watch)
+- a tutoring fork scope (that fork's own repo) — second consumer (stuck-detection)
 - Source patterns: `sunholo/ailang-multivac/terraform/pubsub.tf`, `eventarc.tf`, `cloud_run_jobs.tf`

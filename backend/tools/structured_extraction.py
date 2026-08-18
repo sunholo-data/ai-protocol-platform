@@ -42,7 +42,9 @@ from tools.resilient_genai import generate_content_resilient
 
 log = logging.getLogger(__name__)
 
-_EXTRACTION_MODEL = os.environ.get("EXTRACTION_MODEL", "gemini-2.5-flash")
+# `lite` tier (not a raw api name) so this tracks the registry automatically —
+# 2026-08-13: was a hardcoded gemini-2.5-flash, which EOLs 2026-10-16.
+_EXTRACTION_MODEL = os.environ.get("EXTRACTION_MODEL", "lite")
 _LARGE_OUTPUT_THRESHOLD = 50_000
 
 

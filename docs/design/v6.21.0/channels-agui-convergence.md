@@ -1,7 +1,7 @@
 # Channels AG-UI Convergence — one renderer, N transports
 
 **Status**: Planned
-**Priority**: P1 (unblocks the an internal-tools fork's Discord UX; pays down the same tax as the frontend convergence doc)
+**Priority**: P1 (unblocks an internal-tools fork's Discord UX; pays down the same tax as the frontend convergence doc)
 **Estimated**: ~3 days (0.5 wire + 1 renderer + 1 A2UI projection + 0.5 identity)
 **Scope**: Backend (`backend/channels/`) + CLI affordance
 **Dependencies**: None hard. Shares the reducer-convergence *pattern* with [agui-event-consumption-convergence.md](../v6.7.0/agui-event-consumption-convergence.md) (frontend, Planned) — neither blocks the other.

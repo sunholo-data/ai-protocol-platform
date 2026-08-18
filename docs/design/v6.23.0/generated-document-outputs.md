@@ -259,6 +259,6 @@ code execution.
 
 ## Related Documents
 
-- [UAT source record](../../feedback/platform-uat-2026-08-06.md)
+- UAT source record (internal notes)
 - [`backend/adk/CLAUDE.md`](../../../backend/adk/CLAUDE.md) — A2UI mapping, offload exemption, optional-params finding
 - [tool-results-as-a2ui.md](../v6.7.0/implemented/tool-results-as-a2ui.md) — the artifact mapping model

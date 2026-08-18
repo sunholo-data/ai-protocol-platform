@@ -35,6 +35,17 @@ class ModelEntry(BaseModel):
     # MODEL-RELIABILITY M3: where this model's inference egresses. Default
     # "us" is deliberate fail-safe — an untagged entry never passes eu-strict.
     residency: Literal["eu", "us", "global"] = "us"
+    # Optional Vertex location override for the PRIMARY (fallback rungs use
+    # ChainLink.location instead). Unset -> bare Gemini(), which relies on
+    # GOOGLE_CLOUD_LOCATION (europe-west1) for `residency: eu` entries, or the
+    # "global" special-case in adk.agent.resolve_model for `residency: global`.
+    # Set this when an entry needs a DIFFERENT pin — e.g. a Gemini 3.x model
+    # whose EU availability is a jurisdictional multi-region endpoint
+    # (location="eu", not a specific europe-west* region) rather than the
+    # classic single-region pin 2.x-era EU entries use. Verified per-model via
+    # a live probe (see individual entry comments) — Vertex region/endpoint
+    # availability is NOT uniform across the Gemini generations.
+    location: str | None = None
     fallbacks: list[ChainLink] = []
 
 

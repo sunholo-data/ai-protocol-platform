@@ -57,7 +57,7 @@ Mark caught the leak within minutes ("err these ppas should not be public?"). Mi
 - **Live monitoring / DLP scanning of bucket content**. That addresses a different threat (data-at-rest classification); out of scope.
 - **Network-level egress controls (VPC Service Controls)**. Bigger infra change; relevant for future hardening but blocks too much legitimate ops to ship for this incident class alone.
 - **Audit-after-the-fact tooling**. Useful but reactive; doesn't prevent the next leak from going public for the time-to-detect window.
-- **Cross-project / cross-tenant content sharing controls**. Forks and tenants are separate trust boundaries handled by the per-deploy branding model (see [multi-tenant-demo-readiness.md](../v6.4.0/multi-tenant-demo-readiness.md)); not in scope here.
+- **Cross-project / cross-tenant content sharing controls**. Forks and tenants are separate trust boundaries handled by the per-deploy branding model (see the deployment's demo-readiness doc (deployment-private)); not in scope here.
 - **Replacing CLAUDE.md guidance**. The rule stays — this doc adds enforcement layers underneath it, not a replacement.
 
 ## Axiom Alignment

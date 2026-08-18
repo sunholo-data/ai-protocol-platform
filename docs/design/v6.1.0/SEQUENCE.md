@@ -58,7 +58,7 @@
 - **Document workspace UI** — `DocumentViewer`, `DocumentPanel`, split-pane layout, `BlocksRenderer` (BlockADT direct render) ✅ done
 - `aitana` local dev CLI (dev server, auth, skill/doc/session/docs commands)
 - Skill-friendly URLs (`/chat/@{uid}/slug`, owner-scoped, 301 from UUID) ✅ done
-- **Channels framework** ✅ — `BaseChannel` ABC + `ChannelRegistry` + shared command parser / attachment pipeline / identity resolver + 4 production adapters (Discord, Email, Telegram, WhatsApp) + CLI demo (worked example for the howto) + Cloud Run TF module. New-channel cost: ~4h documented at [docs/integrations/channels-adapter-howto.md](../../integrations/channels-adapter-howto.md). Shepherd / an internal-tools fork unblocked; event-driven skill output routing has a stable `ChannelRegistry.get(name).send()` API.
+- **Channels framework** ✅ — `BaseChannel` ABC + `ChannelRegistry` + shared command parser / attachment pipeline / identity resolver + 4 production adapters (Discord, Email, Telegram, WhatsApp) + CLI demo (worked example for the howto) + Cloud Run TF module. New-channel cost: ~4h documented at [docs/integrations/channels-adapter-howto.md](../../integrations/channels-adapter-howto.md). an internal-tools fork unblocked; event-driven skill output routing has a stable `ChannelRegistry.get(name).send()` API.
 - MCP App integrations: geo tool + A2UI `<UIResourceRenderer>` routing
 - MCP App `ui/update-model-context` — bidirectional iframe ↔ agent state, closes the spec's second iframe→host RPC channel (1.25, P0 for workshop W7)
 - MCP App render UX — snapshot history + pinned widget panel (1.26, P1 workshop polish)

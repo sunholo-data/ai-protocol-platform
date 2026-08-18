@@ -12,7 +12,7 @@ wildcard used to provide.
 
 Presets / flags:
 
-* ``--one`` — seed the **acme-energy.example** (ONE) domain doc. Grants ``["*"]``
+* ``--one`` — seed the **acmeenergy.com** (ONE) domain doc. Grants ``["*"]``
   by default; ``--one --explicit`` uses the ``ONE_TOOLS`` allowlist instead.
   ONE is a trusted customer tenant; the REAL access boundary is each skill's
   ``access_control: tagged [ONE]`` gate (which decides what a ONE user can even
@@ -91,8 +91,8 @@ DEFAULT_TOOLS = [
     "code_execution",
 ]
 
-# --- ONE (acme-energy.example) grant --------------------------------------------
-ONE_DOMAIN = "acme-energy.example"
+# --- ONE (acmeenergy.com) grant --------------------------------------------
+ONE_DOMAIN = "acmeenergy.com"
 
 # The explicit union of every tool a ONE user can reach — the PROD grant
 # (``--one --explicit``); dev/test use ["*"] (see the module docstring). Kept a
@@ -268,7 +268,7 @@ def _parse_args() -> argparse.Namespace:
         default="dev",
         help="Target environment (default: dev). Maps to your-project-id-<env>.",
     )
-    p.add_argument("--one", action="store_true", help="Seed the acme-energy.example (ONE) domain doc")
+    p.add_argument("--one", action="store_true", help="Seed the acmeenergy.com (ONE) domain doc")
     p.add_argument(
         "--explicit",
         action="store_true",

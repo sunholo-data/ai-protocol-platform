@@ -1,4 +1,4 @@
-.PHONY: promote sweep-test-logs dev dev-restart dev-local proxy-check logs help cli-install cli-reinstall cli-uninstall cli-doctor cli-selftest-mock cli-selftest-live cli-selftest verify-a2a setup-gemini-enterprise smoke-long-stream handoff-e2e elicitation-e2e model-fallback-e2e adk-conformance fetch-ailang-wasm gate-obligation-artefact toolbox-install
+.PHONY: promote sweep-test-logs dev dev-restart dev-local proxy-check logs help cli-install cli-reinstall cli-uninstall cli-doctor cli-selftest-mock cli-selftest-live cli-selftest verify-a2a setup-gemini-enterprise smoke-long-stream handoff-e2e elicitation-e2e model-fallback-e2e adk-conformance fetch-ailang-wasm gate-obligation-artefact toolbox-install template-parity template-triage link-check materialize-config upstream-merge check-routing
 
 # ── AILANG WASM deontic engine (ppa-obligation-analysis artefact, 7.6) ──────
 # Runtime is pinned in ONE place. Bump AILANG_VERSION in a reviewed one-liner
@@ -187,8 +187,56 @@ gate-obligation-artefact:
 sweep-test-logs:
 	@./scripts/one-test-log-sweep.sh
 
+# TEMPLATE-INVERT M1: how far is this repo from being publishable by DELETION
+# ALONE? Runs the sanitizer and reports every file that exists in both trees
+# with different CONTENT. Deletions are legal (the file just won't exist
+# upstream); rewrites are not (same path, different bytes = a permanent merge
+# conflict on every sync). Reaching 0 is the go/no-go gate for making the
+# template upstream. See docs/design/template/template-repo-topology.md
+template-parity:
+	@./scripts/template-parity.sh
+
+# Disposition worksheet for the gap: every differing file with its token
+# classes and a suggested scrub / move-downstream / config-drive call.
+template-triage:
+	@./scripts/template-triage.py
+
+# downstream feedback #11: only 20 of 55 design-doc references resolved in the published
+# template. Promoting a doc to implemented/ silently invalidates every link to
+# it, and the sanitizer deletes docs that surviving files still link to. Run
+# this against the SANITIZED tree too — a link that resolves here but not there
+# is exactly that bug.
+link-check:
+	@./scripts/link-check.py
+
+# Create the local real-valued config files from their tracked .example
+# templates (infrastructure/mcp-toolbox/tools.yaml, docs/ops/deployed-urls.md).
+# Both are gitignored: tracking them would put generic content upstream and real
+# content downstream at the same path. Idempotent; never overwrites.
+materialize-config:
+	@./scripts/materialize-config.sh
+
+# TEMPLATE-INVERT M7: pull template changes down from platform-source. Plan-only
+# by default; GO=1 commits. Prints upstream DELETIONS before you commit, because
+# git stages those with no conflict and a fork has already lost its own content
+# that way.
+upstream-merge:
+	@./scripts/upstream-merge.sh
+
+# Advisory: did this change land in the right repo? Warns when a commit touches
+# TEMPLATE content, which belongs in platform-source so every fork gets it.
+# Never blocks — prototyping here is legitimate; leaving it here is the mistake.
+check-routing:
+	@./scripts/check-upstream-routing.sh
+
 help:
 	@echo "make dev                — start backend (1956) + frontend (3456) — cloud mode (real GCP/Vertex)"
+	@echo "make template-parity    — TEMPLATE-INVERT: files the sanitizer REWRITES (goal: 0)"
+	@echo "make template-triage    — TEMPLATE-INVERT: disposition worksheet for the gap"
+	@echo "make link-check         — resolve every relative markdown link in docs/"
+	@echo "make materialize-config — create local tools.yaml / deployed-urls.md from .example"
+	@echo "make upstream-merge     — pull template changes down from platform-source (GO=1 to commit)"
+	@echo "make check-routing      — advisory: does this change belong upstream?"
 	@echo "make dev-local          — start backend + frontend in LOCAL_MODE (no GCP creds, in-memory Firestore)"
 	@echo "make logs               — stream backend logs (OTEL noise filtered out)"
 	@echo "make proxy-check        — smoke-test the proxy bridge (CI helper)"

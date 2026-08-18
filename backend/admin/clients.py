@@ -189,7 +189,7 @@ def upsert_client(
     # field the caller didn't send as its model default — so a one-field update
     # replied with `derived_group_tags: null, documents_bucket: null, …` and read
     # exactly like it had just wiped a customer's config. (2026-08-05: adding one
-    # skill to acme-energy.example's enabled_skills looked destructive; Firestore was
+    # skill to acmeenergy.com's enabled_skills looked destructive; Firestore was
     # fine.) The danger isn't the scare — it's the obvious "repair", re-PUTting
     # every field from a response that never described stored state.
     merged = get_document(_COLLECTION, domain) or data

@@ -356,4 +356,4 @@ and after rather than assuming.
 
 - [conversation-context-fidelity.md](conversation-context-fidelity.md) — the superseded root cause; tuning table still valid
 - [adk-contract-checklist.md](../v6.17.0/adk-contract-checklist.md) — the custom↔ADK seam class this belongs to
-- [UAT source record](../../feedback/platform-uat-2026-08-06.md)
+- UAT source record (internal notes)

@@ -12,9 +12,9 @@ from aiplatform.commands.logs import _build_filter
 
 
 def test_build_filter_scopes_service_container_and_grep() -> None:
-    f = _build_filter("platform-frontend", "sidecar", ("doc loader", "extract_ppa"))
+    f = _build_filter("some-service", "sidecar", ("doc loader", "extract_ppa"))
     assert 'resource.type="cloud_run_revision"' in f
-    assert 'resource.labels.service_name="platform-frontend"' in f
+    assert 'resource.labels.service_name="some-service"' in f
     assert 'labels.container_name="sidecar"' in f
     assert 'textPayload:"doc loader" OR textPayload:"extract_ppa"' in f
 
@@ -43,10 +43,14 @@ def test_logs_invokes_gcloud_with_resolved_target(mock_run, _which) -> None:
     cmd = mock_run.call_args.args[0]
     assert cmd[0:3] == ["gcloud", "logging", "read"]
     log_filter = cmd[3]
-    assert 'service_name="platform-frontend"' in log_filter
+    # The service name comes from config.yaml — the deployment's real one here,
+    # the shipped example upstream — so assert against the config, not a literal.
+    from aiplatform.commands.logs import _LOG_CFG
+
+    assert f'service_name="{_LOG_CFG["service"]}"' in log_filter
     assert 'container_name="sidecar"' in log_filter
     assert 'textPayload:"doc loader"' in log_filter
-    assert "--project=your-project-id" in cmd
+    assert f'--project={_LOG_CFG["projects"]["dev"]}' in cmd
     assert "--freshness=10m" in cmd
     assert "--limit=20" in cmd
     assert "line one" in result.output

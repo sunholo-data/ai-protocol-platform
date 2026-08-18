@@ -10,14 +10,14 @@
 
 ## Problem Statement
 
-An `acme-energy.example` (ONE) user logs straight into `one-ppa-expert` — a heavy 8-tool
+An `acmeenergy.com` (ONE) user logs straight into `one-ppa-expert` — a heavy 8-tool
 specialist with a PPA-specific greeting (`"PPA, PtX, BESS — what would you like to
 analyse?"`). There is no fast, always-ready **general** assistant as the front door, and
 the delegation machinery that could route from a light assistant to deep specialists
 (shipped in 7.1) is **wired into zero skills**.
 
 **Current State:**
-- ONE's landing skill (`clients/acme-energy.example.default_skill`) is `one-ppa-expert`
+- ONE's landing skill (`clients/acmeenergy.com.default_skill`) is `one-ppa-expert`
   (`backend/db/clients.py:98` resolves it). First token carries the weight of an 8-tool
   specialist even for "just chatting."
 - `general-assistant` exists (`lite`, 3 tools, TTFT-tuned) but is **not** in ONE's
@@ -155,7 +155,7 @@ against the target skill on the same thread.
   hand heavy work down via `request_handoff` and let the primitive handle any confirm/elicit.
 
 **Tenant config (deployed Firestore, not a repo seed):** set
-`clients/acme-energy.example.default_skill = one-assistant` and add it to `enabled_skills`
+`clients/acmeenergy.com.default_skill = one-assistant` and add it to `enabled_skills`
 (keep the specialists listed — the chooser stays) via `aiplatform client set` / admin REST
 PATCH. Mirror in `backend/db/local_fixture.py` (~L732) for `make dev`. **Cutover scope
 (decided 2026-07-14): apply to local fixture AND deployed dev** so the real landing is

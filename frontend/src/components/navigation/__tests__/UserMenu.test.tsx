@@ -68,11 +68,11 @@ describe("UserMenu", () => {
   it("reveals an Admin link for a TENANT admin (the v6.16.0 fix)", async () => {
     // The whole point of the whoami probe: this user used to see nothing,
     // because the old probe hit a platform-only endpoint and got a 403.
-    auth.user = { displayName: "Ops", email: "ops@acme-energy.example", photoURL: null };
+    auth.user = { displayName: "Ops", email: "ops@acmeenergy.com", photoURL: null };
     vi.mocked(fetchWithAuth).mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ scope: "tenant", domains: ["acme-energy.example"] }),
+      json: async () => ({ scope: "tenant", domains: ["acmeenergy.com"] }),
     } as unknown as Response);
     render(<UserMenu />);
     fireEvent.click(screen.getByLabelText("Account menu"));

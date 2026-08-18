@@ -64,7 +64,7 @@ def nonadmin_client() -> TestClient:
 
 def test_list_clients_admin_returns_200(admin_client: TestClient) -> None:
     docs = [
-        {"__id": "acme-energy.example", "documents_bucket": "one-docs", "display_name": "Acme Energy"},
+        {"__id": "acmeenergy.com", "documents_bucket": "one-docs", "display_name": "Acme Energy"},
         {"__id": "acme.com", "documents_bucket": None, "display_name": ""},
     ]
     with patch("admin.clients.query_documents", return_value=docs):
@@ -72,7 +72,7 @@ def test_list_clients_admin_returns_200(admin_client: TestClient) -> None:
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
-    assert data[0]["domain"] == "acme-energy.example"
+    assert data[0]["domain"] == "acmeenergy.com"
     assert data[0]["documents_bucket"] == "one-docs"
     assert data[1]["domain"] == "acme.com"
 
@@ -91,10 +91,10 @@ def test_list_clients_non_admin_returns_403(nonadmin_client: TestClient) -> None
 def test_get_client_known_domain_returns_200(admin_client: TestClient) -> None:
     doc = {"documents_bucket": "one-docs", "display_name": "Acme Energy"}
     with patch("admin.clients.get_document", return_value=doc):
-        resp = admin_client.get("/api/admin/clients/acme-energy.example")
+        resp = admin_client.get("/api/admin/clients/acmeenergy.com")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["domain"] == "acme-energy.example"
+    assert body["domain"] == "acmeenergy.com"
     assert body["documents_bucket"] == "one-docs"
 
 
@@ -118,20 +118,20 @@ def test_get_client_non_admin_returns_403(nonadmin_client: TestClient) -> None:
 def test_put_client_upserts_and_returns_config(admin_client: TestClient) -> None:
     payload = {"documents_bucket": "one-docs", "display_name": "Acme Energy"}
     with patch("admin.clients.set_document") as mock_set:
-        resp = admin_client.put("/api/admin/clients/acme-energy.example", json=payload)
+        resp = admin_client.put("/api/admin/clients/acmeenergy.com", json=payload)
     assert resp.status_code == 200
     mock_set.assert_called_once()
     body = resp.json()
-    assert body["domain"] == "acme-energy.example"
+    assert body["domain"] == "acmeenergy.com"
     assert body["documents_bucket"] == "one-docs"
     assert body["display_name"] == "Acme Energy"
 
 
 def test_put_client_persists_derived_group_tags(admin_client: TestClient) -> None:
-    """acme-energy.example → ['ONE'] is the demo seed: grant ONE tag to whole domain."""
+    """acmeenergy.com → ['ONE'] is the demo seed: grant ONE tag to whole domain."""
     payload = {"derived_group_tags": ["ONE"]}
     with patch("admin.clients.set_document") as mock_set:
-        resp = admin_client.put("/api/admin/clients/acme-energy.example", json=payload)
+        resp = admin_client.put("/api/admin/clients/acmeenergy.com", json=payload)
     assert resp.status_code == 200
     mock_set.assert_called_once()
     written = mock_set.call_args[0][2]
@@ -143,7 +143,7 @@ def test_put_client_empty_derived_group_tags_collapses_to_null(admin_client: Tes
     """[] is not a useful tenant state — collapse to None so the field clears."""
     payload = {"derived_group_tags": []}
     with patch("admin.clients.set_document") as mock_set:
-        resp = admin_client.put("/api/admin/clients/acme-energy.example", json=payload)
+        resp = admin_client.put("/api/admin/clients/acmeenergy.com", json=payload)
     assert resp.status_code == 200
     written = mock_set.call_args[0][2]
     assert written["derived_group_tags"] is None
@@ -155,7 +155,7 @@ def test_put_client_partial_update_only_writes_sent_fields(admin_client: TestCli
     enabled_skills / derived_group_tags / documents_bucket."""
     payload = {"default_skill": "one-ppa-expert"}
     with patch("admin.clients.set_document") as mock_set:
-        resp = admin_client.put("/api/admin/clients/acme-energy.example", json=payload)
+        resp = admin_client.put("/api/admin/clients/acmeenergy.com", json=payload)
     assert resp.status_code == 200
     written = mock_set.call_args[0][2]
     assert written["default_skill"] == "one-ppa-expert"
@@ -168,7 +168,7 @@ def test_put_client_partial_update_only_writes_sent_fields(admin_client: TestCli
 def test_put_client_default_skill_round_trips(admin_client: TestClient) -> None:
     payload = {"default_skill": "one-ppa-expert"}
     with patch("admin.clients.set_document"):
-        resp = admin_client.put("/api/admin/clients/acme-energy.example", json=payload)
+        resp = admin_client.put("/api/admin/clients/acmeenergy.com", json=payload)
     assert resp.status_code == 200
     assert resp.json()["default_skill"] == "one-ppa-expert"
 
@@ -187,9 +187,9 @@ def test_put_client_non_admin_returns_403(nonadmin_client: TestClient) -> None:
 def test_delete_client_removes_record(admin_client: TestClient) -> None:
     existing = {"documents_bucket": "one-docs", "display_name": "Acme Energy"}
     with patch("admin.clients.get_document", return_value=existing), patch("admin.clients.delete_document") as mock_del:
-        resp = admin_client.delete("/api/admin/clients/acme-energy.example")
+        resp = admin_client.delete("/api/admin/clients/acmeenergy.com")
     assert resp.status_code == 200
-    mock_del.assert_called_once_with("clients", "acme-energy.example")
+    mock_del.assert_called_once_with("clients", "acmeenergy.com")
 
 
 def test_delete_client_not_found_returns_404(admin_client: TestClient) -> None:
@@ -253,12 +253,12 @@ def test_put_client_records_audit(admin_client: TestClient) -> None:
         patch("admin.clients.set_document"),
         patch("admin.clients.record_admin_action") as mock_audit,
     ):
-        resp = admin_client.put("/api/admin/clients/acme-energy.example", json={"display_name": "ONE"})
+        resp = admin_client.put("/api/admin/clients/acmeenergy.com", json={"display_name": "ONE"})
     assert resp.status_code == 200
     mock_audit.assert_called_once()
     kwargs = mock_audit.call_args.kwargs
     assert kwargs["action"] == "upsert_client"
-    assert kwargs["target"] == "acme-energy.example"
+    assert kwargs["target"] == "acmeenergy.com"
 
 
 def test_delete_client_records_audit(admin_client: TestClient) -> None:
@@ -268,7 +268,7 @@ def test_delete_client_records_audit(admin_client: TestClient) -> None:
         patch("admin.clients.delete_document"),
         patch("admin.clients.record_admin_action") as mock_audit,
     ):
-        resp = admin_client.delete("/api/admin/clients/acme-energy.example")
+        resp = admin_client.delete("/api/admin/clients/acmeenergy.com")
     assert resp.status_code == 200
     mock_audit.assert_called_once()
     assert mock_audit.call_args.kwargs["action"] == "delete_client"
@@ -308,7 +308,7 @@ class TestUpsertReturnsMergedState:
         monkeypatch.setattr(mod, "record_admin_action", lambda **k: None)
 
         resp = admin_client.put(
-            "/api/admin/clients/acme-energy.example",
+            "/api/admin/clients/acmeenergy.com",
             json={"enabled_skills": ["one-assistant", "skill-authoring-assistant"]},
         )
 

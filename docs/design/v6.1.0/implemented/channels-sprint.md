@@ -2,7 +2,7 @@
 
 ## Summary
 
-Ship a `BaseChannel` framework + four channel adapters (Discord, Email, Telegram, WhatsApp) so any fork can wire a messaging channel through `process_skill_request()` in ~4h. Unblocks the Shepherd / an internal-tools fork (Discord) and the channel-output side of event-driven skills.
+Ship a `BaseChannel` framework + four channel adapters (Discord, Email, Telegram, WhatsApp) so any fork can wire a messaging channel through `process_skill_request()` in ~4h. Unblocks an internal-tools fork (Discord) and the channel-output side of event-driven skills.
 
 **Duration:** 4 calendar days (3.5d focused effort + 0.5d slack for workshop-polish context switches)
 **Scope:** Backend (primary) + Terraform (Cloud Run min-instances module) + ~50 LOC frontend (proxy verification only)
@@ -114,7 +114,7 @@ Ship a `BaseChannel` framework + four channel adapters (Discord, Email, Telegram
 - [ ] Slash command registration on bot start — `/ask`, `/skill`, `/skills`, `/help` (~80 LOC)
 - [ ] `on_unknown_user` — guild allowlist check against Firestore `channel_routes/discord/{guild_id}` (~30 LOC)
 - [ ] Source citation rendering as Discord embeds (~60 LOC)
-- [ ] `infrastructure/modules/cloud-run-channel/main.tf` — Cloud Run service with `min_instances` variable (~40 LOC)
+- [ ] `deploy/terraform/cloud-run-channel/main.tf` — Cloud Run service with `min_instances` variable (~40 LOC)
 - [ ] `backend/tests/channels/test_discord.py` — parse_inbound slash + on_message, verify_webhook, send chunking, on_unknown_user allowlist (~200 LOC tests)
 - [ ] `backend/tests/channels/test_discord_streaming.py` — AG-UI event → message edit transformation (~120 LOC tests)
 - [ ] `backend/tests/channels/test_discord_registration.py` — slash-command registration idempotency (~50 LOC tests)
@@ -126,9 +126,9 @@ Ship a `BaseChannel` framework + four channel adapters (Discord, Email, Telegram
 - `backend/tests/channels/test_discord.py` (new, ~200)
 - `backend/tests/channels/test_discord_streaming.py` (new, ~120)
 - `backend/tests/channels/test_discord_registration.py` (new, ~50)
-- `infrastructure/modules/cloud-run-channel/main.tf` (new, ~40)
-- `infrastructure/modules/cloud-run-channel/variables.tf` (new, ~30)
-- `infrastructure/modules/cloud-run-channel/outputs.tf` (new, ~15)
+- `deploy/terraform/cloud-run-channel/main.tf` (new, ~40)
+- `deploy/terraform/cloud-run-channel/variables.tf` (new, ~30)
+- `deploy/terraform/cloud-run-channel/outputs.tf` (new, ~15)
 
 **Files to Modify:**
 - `backend/fast_api_app.py` — `ChannelRegistry.register(DiscordChannel())` (~3 LOC)
@@ -144,7 +144,7 @@ Ship a `BaseChannel` framework + four channel adapters (Discord, Email, Telegram
 - [ ] Non-allowlisted Discord user gets rejection message, no skill invocation
 - [ ] All Discord-specific tests pass; integration test against mock Discord API green
 - [ ] CI parity clean (`make lint && make test-fast`)
-- [ ] `infrastructure/modules/cloud-run-channel/` plan applies cleanly to a test env
+- [ ] `deploy/terraform/cloud-run-channel/` plan applies cleanly to a test env
 
 **Risks:**
 - discord.py gateway connection unstable on Cloud Run → Mitigation: `min_instances=1` + reconnection loop in `start_gateway`; alarm on gateway-disconnect event count
@@ -333,7 +333,7 @@ make verify-rules                                # Firestore rules runner
 - [ ] 8 new test files; ~1670 LOC tests; 100% green on `make test-fast`
 - [ ] Frontend `/api/[...path]` catch-all forwards channel webhooks correctly (no per-channel route added)
 - [ ] CI parity gates clean throughout
-- [ ] Shepherd / an internal-tools fork can now start without channel-framework blockers
+- [ ] an internal-tools fork can now start without channel-framework blockers
 - [ ] [Event-driven skills (2.6)](../v6.2.0/event-driven-skills.md) and [audit-log-and-analytics (2.7)](../v6.2.0/audit-log-and-analytics.md) can start in parallel — `BaseChannel.handle_webhook` writes the `channel` field they consume
 
 ## Dependencies
@@ -348,7 +348,7 @@ make verify-rules                                # Firestore rules runner
 
 ## Open Questions
 
-- **Discord OAuth-vs-allowlist for `on_unknown_user`** — locked at "allowlist via Firestore" for v1 (matches Shepherd's invite-only Sheep model). Revisit if a public-facing fork needs anonymous user onboarding.
+- **Discord OAuth-vs-allowlist for `on_unknown_user`** — locked at "allowlist via Firestore" for v1 (matches the internal-tools fork's invite-only Sheep model). Revisit if a public-facing fork needs anonymous user onboarding.
 - **Streaming for non-Discord channels** — locked at "atomic send only" for v1. Discord uses `send_streaming` override. Telegram has some edit support; defer if a fork needs it.
 - **CLI demo channel as a permanent fixture** — kept in `backend/channels/_demo_cli.py` (underscore-prefixed = internal); doubles as a debugging tool and the howto's worked example.
 - **WhatsApp deployment** — Twilio sandbox is enough for the sprint gate. Production WhatsApp Business approval is out of scope; document the steps required for a fork to wire up real WhatsApp.
@@ -357,6 +357,6 @@ make verify-rules                                # Firestore rules runner
 
 - This sprint is **pure backend + Terraform + docs**; frontend changes limited to verifying the existing catch-all proxy works for new channels (no new routes).
 - Push policy follows [LOCAL-MODE-AND-FORK](local-mode-and-fork-sprint.md): commit at every milestone, do **not** push until user reviews diff between milestones, then push as batch.
-- Two forks ([Shepherd](../forks/internal-tools-fork/v0.1.0/scope.md) and [a tutoring fork](../forks/tutoring-fork/v0.1.0/scope.md)) are blocked on this sprint completing. Discord land = Shepherd unblocked; the framework alone = a tutoring fork's dashboard output routing unblocked.
+- Two forks (the internal-tools fork and a tutoring fork (that fork's own repo)) are blocked on this sprint completing. Discord land = the internal-tools fork unblocked; the framework alone = a tutoring fork's dashboard output routing unblocked.
 - Three v6.2.0 docs ([event-driven-skills](../v6.2.0/event-driven-skills.md), [audit-log-and-analytics](../v6.2.0/audit-log-and-analytics.md), [google-workspace-mcp-integration](../v6.2.0/google-workspace-mcp-integration.md)) can start in parallel with this sprint — they hook agent-factory callbacks, not channel internals.
 - Workshop critical path is unaffected — channels work is orthogonal to mcp-app-integrations (1.7), a2ui-workshop-demo (1.19), mcp-app-render-ux (1.26).

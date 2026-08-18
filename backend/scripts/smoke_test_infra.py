@@ -262,20 +262,28 @@ def test_bigquery() -> str:
 
 
 def test_gemini() -> str:
-    """Minimal generate_content against Gemini Flash via Vertex AI."""
+    """Minimal generate_content against the platform's `pro`-tier Gemini via Vertex AI."""
     env = _require_env("GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION")
     os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "True")
     from google import genai
 
+    from config.models import gemini_api_name_for
+
+    # `pro` tier (not a pinned id) so this smoke test tracks the registry
+    # automatically — 2026-08-13: was a hardcoded gemini-2.5-flash, which
+    # EOLs 2026-10-16. Probed at location="global" deliberately (not the
+    # GOOGLE_CLOUD_LOCATION env region) since the `default`/unrestricted
+    # `pro` variant is a global-endpoint-only model.
+    model = gemini_api_name_for("pro")
     client = genai.Client(vertexai=True, project=env["GOOGLE_CLOUD_PROJECT"], location="global")
     resp = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=model,
         contents="Respond with exactly one word: 'ok'.",
     )
     text = (resp.text or "").strip().lower()
     if not text:
         raise RuntimeError("empty response")
-    return f"gemini-2.5-flash responded ({len(text)} chars)"
+    return f"{model} responded ({len(text)} chars)"
 
 
 # --- Runner ------------------------------------------------------------------

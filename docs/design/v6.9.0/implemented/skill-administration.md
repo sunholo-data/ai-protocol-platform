@@ -4,7 +4,7 @@
 **Priority**: P1
 **Estimated**: 4 days
 **Scope**: Fullstack
-**Dependencies**: [administration-overview.md](administration-overview.md) (shared admin identity + audit, Phase 1), 6.0.0 auth-and-permissions ✅, 6.0.0 resource-access-control ✅, 6.6.0 one-app-fork-convergence ✅
+**Dependencies**: [administration-overview.md](administration-overview.md) (shared admin identity + audit, Phase 1), 6.0.0 auth-and-permissions ✅, 6.0.0 resource-access-control ✅, 6.6.0 fork-convergence ✅
 **Created**: 2026-07-14
 **Last Updated**: 2026-07-16
 
@@ -274,7 +274,7 @@ create a durable skill, edit live, redeploy → edit survives.
 - [administration-overview.md](administration-overview.md) (9.1 umbrella — shared admin identity + audit)
 - [user-group-administration.md](user-group-administration.md) (9.3 — tag registry the access editor consumes)
 - [auth-and-permissions.md](../v6.0.0/implemented/auth-and-permissions.md), [resource-access-control.md](../v6.0.0/implemented/resource-access-control.md)
-- [one-app-fork-convergence.md](../v6.6.0/) (Studio whole-draft Save; `managed_by` complements the fork path)
+- [fork-convergence.md](../v6.6.0/) (Studio whole-draft Save; `managed_by` complements the fork path)
 
 ---
 

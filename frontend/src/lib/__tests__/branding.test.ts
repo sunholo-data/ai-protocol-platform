@@ -75,7 +75,7 @@ describe("BRANDING — env-var driven per-deployment branding", () => {
     vi.stubEnv("NEXT_PUBLIC_BRAND_FAVICON", "/images/logo/acmeenergy-logo.jpg");
     vi.stubEnv("NEXT_PUBLIC_BRAND_LOGO_HERO", "/images/logo/acmeenergy-logo.jpg");
     vi.stubEnv("NEXT_PUBLIC_BRAND_LOGO_AVATAR", "/images/logo/acmeenergy-logo.jpg");
-    vi.stubEnv("NEXT_PUBLIC_BRAND_EMAIL", "hello@acme-energy.example");
+    vi.stubEnv("NEXT_PUBLIC_BRAND_EMAIL", "hello@acmeenergy.com");
     vi.stubEnv("NEXT_PUBLIC_BRAND_GITHUB", "");
 
     const BRANDING = await freshBranding();
@@ -87,7 +87,7 @@ describe("BRANDING — env-var driven per-deployment branding", () => {
     expect(BRANDING.logo.favicon).toBe("/images/logo/acmeenergy-logo.jpg");
     expect(BRANDING.logo.heroAnimated).toBe("/images/logo/acmeenergy-logo.jpg");
     expect(BRANDING.logo.chatAvatar).toBe("/images/logo/acmeenergy-logo.jpg");
-    expect(BRANDING.contact.email).toBe("hello@acme-energy.example");
+    expect(BRANDING.contact.email).toBe("hello@acmeenergy.com");
     // Empty string falls back to upstream — forks that don't have a public
     // repo can leave NEXT_PUBLIC_BRAND_GITHUB unset.
     expect(BRANDING.contact.githubRepo).toBe(

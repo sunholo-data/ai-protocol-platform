@@ -9,9 +9,16 @@ from observability.llm_metrics import estimate_cost, record_llm_cost
 
 class TestEstimateCost:
     def test_gemini_flash(self):
-        # 1000 input, 500 output at gemini-2.5-flash rates (0.15/1M, 0.60/1M)
+        # 1000 input, 500 output at gemini-2.5-flash rates (0.30/1M, 2.50/1M)
         cost = estimate_cost("gemini-2.5-flash", 1000, 500)
-        expected = (1000 * 0.15 + 500 * 0.60) / 1_000_000
+        expected = (1000 * 0.30 + 500 * 2.50) / 1_000_000
+        assert abs(cost - expected) < 1e-10
+
+    def test_gemini_flash_lite_not_priced_as_flash(self):
+        # "gemini-2.5-flash" is a literal substring of "gemini-2.5-flash-lite" —
+        # the lite entry must be checked first or this prices at the non-lite rate.
+        cost = estimate_cost("gemini-2.5-flash-lite", 1000, 500)
+        expected = (1000 * 0.10 + 500 * 0.40) / 1_000_000
         assert abs(cost - expected) < 1e-10
 
     def test_gemini_pro(self):
@@ -20,18 +27,18 @@ class TestEstimateCost:
         assert abs(cost - expected) < 1e-10
 
     def test_claude_sonnet(self):
-        cost = estimate_cost("claude-sonnet", 2000, 1000)
+        cost = estimate_cost("anthropic/claude-sonnet-5", 2000, 1000)
         expected = (2000 * 3.00 + 1000 * 15.00) / 1_000_000
         assert abs(cost - expected) < 1e-10
 
     def test_claude_haiku(self):
-        cost = estimate_cost("claude-haiku", 5000, 2000)
-        expected = (5000 * 0.25 + 2000 * 1.25) / 1_000_000
+        cost = estimate_cost("anthropic/claude-haiku-4-5", 5000, 2000)
+        expected = (5000 * 1.00 + 2000 * 5.00) / 1_000_000
         assert abs(cost - expected) < 1e-10
 
-    def test_gpt4o(self):
-        cost = estimate_cost("gpt-4o", 3000, 1000)
-        expected = (3000 * 2.50 + 1000 * 10.00) / 1_000_000
+    def test_gpt_5_6_sol(self):
+        cost = estimate_cost("openai/gpt-5.6-sol", 3000, 1000)
+        expected = (3000 * 5.00 + 1000 * 30.00) / 1_000_000
         assert abs(cost - expected) < 1e-10
 
     def test_unknown_model_returns_zero(self):

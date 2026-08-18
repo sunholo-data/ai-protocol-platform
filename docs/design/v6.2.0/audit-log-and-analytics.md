@@ -1,6 +1,6 @@
 # Audit Log + Analytics View
 
-**Status**: Planned — surfaced by [Shepherd / an internal-tools fork](../forks/internal-tools-fork/v0.1.0/scope.md)
+**Status**: Planned — surfaced by an internal-tools fork
 **Priority**: P1 — both forks-in-flight will want this; generic enough that every future fork needs it too
 **Scope**: Firestore schema + ADK callback + admin React route
 **Dependencies**: [agent-factory](../v6.0.0/implemented/agent-factory.md), [auth-and-permissions](../v6.0.0/implemented/auth-and-permissions.md)
@@ -10,7 +10,7 @@
 
 Every fork wants to answer "who used the bot today, what skill ran, what tools did it call, how much did it cost." Today this requires reading Cloud Trace + Cloud Logging + Vertex AI billing exports — three places, no joining key, no per-skill view. The template ships OTEL → Cloud Trace by default, which is excellent for engineering debugging but useless for "show me last week's Sheep usage."
 
-Both forks (Shepherd's explicit analytics route, a tutoring fork's teacher dashboard) need an admin-facing audit log with a standard schema. Reinventing it per fork is wasteful and produces inconsistent reports.
+Both forks (the internal-tools fork's explicit analytics route, a tutoring fork's teacher dashboard) need an admin-facing audit log with a standard schema. Reinventing it per fork is wasteful and produces inconsistent reports.
 
 ## Goals
 
@@ -83,7 +83,7 @@ Optional Pub/Sub-backed export pipe:
 2. BigQuery subscription on the topic → `audit_log.events` table (auto-schema)
 3. Long-term retention + ad-hoc SQL + Looker connectivity for forks that want it
 
-Off by default; one Terraform variable to enable. Shepherd's stretch "deep analytics" path uses this.
+Off by default; one Terraform variable to enable. the internal-tools fork's stretch "deep analytics" path uses this.
 
 ### React admin route
 
@@ -164,5 +164,5 @@ Auto-populated on first sign-in for Firebase users. Anonymous sessions show `ses
 - [Agent factory](../v6.0.0/implemented/agent-factory.md) — callback hooks used to write events
 - [Event-driven skills](event-driven-skills.md) — trigger source for `channel="scheduled"` / `"pubsub"`
 - [Auth and permissions](../v6.0.0/implemented/auth-and-permissions.md) — admin role check
-- [an internal-tools fork scope](../forks/internal-tools-fork/v0.1.0/scope.md) — first consumer
-- [a tutoring fork scope](../forks/tutoring-fork/v0.1.0/scope.md) — uses for teacher dashboard
+- an internal-tools fork scope (that fork's own repo) — first consumer
+- a tutoring fork scope (that fork's own repo) — uses for teacher dashboard

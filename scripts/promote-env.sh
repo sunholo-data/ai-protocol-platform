@@ -37,10 +37,12 @@
 #
 # Dry run is the DEFAULT. Nothing mutates without --yes.
 
+
+source "$(dirname "${BASH_SOURCE[0]}")/_deploy_env.sh"
 set -euo pipefail
 
 REGION="${PROMOTE_REGION:-europe-west1}"
-SERVICE_NAME="${PROMOTE_SERVICE_NAME:-platform-frontend}"
+SERVICE_NAME="${PROMOTE_SERVICE_NAME:-${DEPLOY_SERVICE_NAME}}"
 
 # The project that HOSTS THE TRIGGERS, which is NOT the target environment's
 # project. All Aitana Cloud Build triggers live in one shared deploy project and
@@ -48,15 +50,15 @@ SERVICE_NAME="${PROMOTE_SERVICE_NAME:-platform-frontend}"
 # `triggers run` fail with a confusing "trigger not found" against a project
 # that looks right — caught by a dry run before the first real promotion.
 # (A fork whose triggers live in each env project sets this to the env project.)
-TRIGGER_PROJECT="${PROMOTE_TRIGGER_PROJECT:-your-deploy-project-id}"
+TRIGGER_PROJECT="${PROMOTE_TRIGGER_PROJECT:-${DEPLOY_BUILD_PROJECT}}"
 
 # Environment -> GCP project. Mirrors cli/aiplatform/config.yaml's
 # logging.projects block; keep the two in step.
 project_for_env() {
   case "$1" in
-    dev)  echo "your-project-id" ;;
-    test) echo "your-project-id-test" ;;
-    prod) echo "your-project-id-prod" ;;
+    dev)  echo "${DEPLOY_PROJECT_DEV}" ;;
+    test) echo "${DEPLOY_PROJECT_TEST}" ;;
+    prod) echo "${DEPLOY_PROJECT_PROD}" ;;
     *)    return 1 ;;
   esac
 }

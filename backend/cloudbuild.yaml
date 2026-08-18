@@ -42,7 +42,22 @@ substitutions:
   # needs an explicit per-env value.
   _COMPACTION_SECOND_PASS: ""
   _COMPACTION_TASKS_TARGET_URL: ""
+  # TEMPLATE-INVERT M4b left this neutral but WITHOUT the guard the root
+  # pipeline got — and the very next deploy proved why that guard exists: it
+  # stood up a brand-new `platform-backend` service beside the live
+  # `aitana-v6-backend`, which then failed because a fresh service gets the
+  # default compute SA and cannot read the secrets. Exactly the silent
+  # split-brain the guard was written for; it was simply not applied to the
+  # SECOND pipeline. (Same shape as downstream #12: a rule enforced on some
+  # files and not all of them.)
   _SERVICE_NAME: platform-backend
+  # Prefix for Terraform-created per-deploy resources. Mirrors the root
+  # pipeline; must match this environment's real resource names.
+  _RESOURCE_PREFIX: platform
+  # BigQuery project holding the ENTSO-E ingestion the day-ahead-prices
+  # tool reads. Deployment identity; empty means the tool is not
+  # configured for this env and says so.
+  _ENTSOE_PROJECT: ''
   _REGION: terraform_managed
   _ARTIFACT_REGISTRY_REPO_URL_CLIENT: terraform_managed
   _PROJECT_ID: terraform_managed
@@ -133,6 +148,17 @@ steps:
       - '-c'
       - |
         set -euo pipefail
+        # Refuse to deploy under the template placeholder. Without this a
+        # missing _SERVICE_NAME substitution stands up a DUPLICATE service
+        # beside the live one instead of updating it — which is precisely what
+        # happened on 2026-08-17 (a stray `platform-backend` with no ready
+        # revision, because a fresh service gets the default compute SA and
+        # cannot read the secrets). Same guard as the root pipeline.
+        if [ "${_SERVICE_NAME}" = "platform-backend" ]; then
+          echo "ERROR: _SERVICE_NAME is still the template placeholder."
+          echo "Set it in this environment's Cloud Build trigger substitutions."
+          exit 1
+        fi
         IMAGE=$$(cat /workspace/image_backend)
         echo "Deploying backend=$${IMAGE}"
         exec gcloud "$$@" --image="$${IMAGE}"
@@ -177,11 +203,12 @@ steps:
       - '--set-env-vars=GOOGLE_GENAI_USE_VERTEXAI=True'
       - '--set-env-vars=MODEL_RESIDENCY_POLICY=${_MODEL_RESIDENCY_POLICY}'
       - '--set-env-vars=COMPACTION_SECOND_PASS_ENABLED=${_COMPACTION_SECOND_PASS}'
-      - '--set-env-vars=COMPACTION_TASKS_QUEUE=projects/${_PROJECT_ID}/locations/${_REGION}/queues/platform-compaction'
-      - '--set-env-vars=COMPACTION_TASKS_OIDC_SA=platform-tasks@${_PROJECT_ID}.iam.gserviceaccount.com'
+      - '--set-env-vars=COMPACTION_TASKS_QUEUE=projects/${_PROJECT_ID}/locations/${_REGION}/queues/${_RESOURCE_PREFIX}-compaction'
+      - '--set-env-vars=COMPACTION_TASKS_OIDC_SA=${_RESOURCE_PREFIX}-tasks@${_PROJECT_ID}.iam.gserviceaccount.com'
       - '--set-env-vars=COMPACTION_TASKS_TARGET_URL=${_COMPACTION_TASKS_TARGET_URL}'
       - '--set-env-vars=ADK_ARTIFACT_BUCKET=${_PROJECT_ID}-artifacts'
-      - '--set-env-vars=LOGS_BUCKET_NAME=${_PROJECT_ID}-platform-logs'
+      - '--set-env-vars=LOGS_BUCKET_NAME=${_PROJECT_ID}-${_RESOURCE_PREFIX}-logs'
+      - '--set-env-vars=ENTSOE_PROJECT=${_ENTSOE_PROJECT}'
       # Vertex AI Search — platform-default `ai_search` datastore (aitana3) +
       # the search-infra project/location used to expand bare datastore ids.
       # Lives in the dedicated aitana-ai-search project, NOT the compute project;

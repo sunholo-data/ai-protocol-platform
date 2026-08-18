@@ -11,12 +11,13 @@
 # a pass — it answered). The HARD assertion is: a tool-using turn NEVER dies on
 # `tool_call_id` / a cross-provider RUN_ERROR. When a MODEL_FALLBACK to a
 # different provider IS observed, that's the real cross-provider path proven.
+
+source "$(dirname "${BASH_SOURCE[0]}")/_deploy_env.sh"
 set -uo pipefail
 
 ENV="${1:-dev}"
 case "$ENV" in
-  dev)  PROJECT="your-project-id";  HOST="https://your-service-url.example" ;;
-  test) PROJECT="your-project-id-test"; HOST="https://your-service-url.example" ;;
+  dev|test|prod) PROJECT="$(project_for_env "$ENV")"; HOST="$(host_for_env "$ENV")" ;;
   *) echo "usage: $0 [dev|test]" >&2; exit 2 ;;
 esac
 

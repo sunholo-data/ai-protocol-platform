@@ -84,7 +84,7 @@ specialists on demand, with a runtime AI judgement over three confirmation level
 **Tasks:**
 - [ ] `confirm_delegation` handling in `surface-action-run`: read collected values, re-issue turn on target skill via `create_agent_with_thinking`, same `thread_id`, seed values; keep the per-request `LatencyTracker` bind; `AGENT_DELEGATION` on switch (~130)
 - [ ] Frontend: retire passive "Suggested X" chip; confirm card via existing chat-form path; **fix silent import-by-reference** (`ChatShell.tsx:1145-1148`) (~50)
-- [ ] Tenant cutover: `aiplatform client set` / REST PATCH `clients/acme-energy.example` → `default_skill=one-assistant` + `enabled_skills` (**local fixture AND deployed dev**, decided)
+- [ ] Tenant cutover: `aiplatform client set` / REST PATCH `clients/acmeenergy.com` → `default_skill=one-assistant` + `enabled_skills` (**local fixture AND deployed dev**, decided)
 - [ ] Tests: re-issue on target/same-thread/seeded values; never-silent paths (~90)
 
 **Files:** `backend/protocols/a2ui_surface_action_run_routes.py` (mod), `frontend/src/components/chat/DelegationMarker.tsx` (mod/retire suggest), `frontend/src/components/chat/ChatShell.tsx` (mod), `frontend/src/hooks/useSkillAgent.ts` (mod), deployed Firestore (PATCH)

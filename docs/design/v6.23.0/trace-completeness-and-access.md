@@ -178,7 +178,7 @@ that cannot be right, which is exactly "not populating correctly".
 ### Phase 1 FINDINGS — TEST, 100 most recent sessions (2026-08-10)
 
 Run after `v6.23.2` put the endpoint on test. This is the env that matters:
-26 of the 100 belong to **acme-energy.example**.
+26 of the 100 belong to **acmeenergy.com**.
 
 | Finding | All (100) | ONE only (26) |
 |---|---|---|
@@ -253,7 +253,7 @@ Driven by Phase 1's findings. Whatever the cause, two invariants hold:
 
 Grant Dana (and ONE's designated super-users) access to traces **for their own
 tenant's sessions only**. Group-tag scoping already exists — `derived_group_tags`
-maps `acme-energy.example` → `["ONE"]` — so this is a policy application, not new
+maps `acmeenergy.com` → `["ONE"]` — so this is a policy application, not new
 machinery. The list endpoint filters by the caller's group tags; the detail
 endpoint re-checks on read. No cross-tenant visibility, ever.
 
@@ -351,6 +351,6 @@ session load.
 
 ## Related Documents
 
-- [UAT source record](../../feedback/platform-uat-2026-08-06.md)
+- UAT source record (internal notes)
 - [`.claude/skills/aitana-adk-testing/SKILL.md`](../../../.claude/skills/aitana-adk-testing/SKILL.md) — ADK canonical store vs Firestore mirror
 - [conversation-context-fidelity.md](conversation-context-fidelity.md) — its compaction event lands in this trace view

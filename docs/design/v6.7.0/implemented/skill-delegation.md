@@ -4,7 +4,7 @@
 **Priority**: P1 (Medium)
 **Estimated**: 4–5 days
 **Scope**: Fullstack
-**Dependencies**: `agent-factory` (v6.0.0, implemented), `resource-access-control` (v6.0.0, implemented), `one-app-fork-convergence` model tiers (v6.6.0, implemented)
+**Dependencies**: `agent-factory` (v6.0.0, implemented), `resource-access-control` (v6.0.0, implemented), `fork-convergence` model tiers (v6.6.0, implemented)
 **Created**: 2026-07-08
 **Last Updated**: 2026-07-09
 
@@ -405,7 +405,7 @@ Extend the existing `aiplatform` CLI (per [local-dev-cli.md](../../../docs/desig
 
 - [agent-factory.md](../v6.0.0/implemented/agent-factory.md) — `_HeuristicRouter`, `sub_agents`, `resolve_model`
 - [resource-access-control.md](../v6.0.0/implemented/resource-access-control.md) — the 5-type `AccessContext` evaluator reused here
-- [one-app-fork-convergence.md](../v6.6.0/one-app-fork-convergence.md) — model tiers (`lite`/`smart`) that delegation routes between
+- [fork-convergence.md](../../v6.6.0/fork-convergence.md) — model tiers (`lite`/`smart`) that delegation routes between
 - [local-dev-cli.md](../v6.1.0/local-dev-cli.md) — `aiplatform` CLI surface
 - [CLAUDE.md](../../../CLAUDE.md) — privacy boundary / US-egress rule for `smart`-tier delegation
 

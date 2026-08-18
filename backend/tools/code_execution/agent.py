@@ -14,7 +14,9 @@ from google.adk.code_executors import BuiltInCodeExecutor
 
 # A registry id/tier (not a raw api name) so resolve_model_chain can attach the
 # fallback chain and pass the eu-strict residency check (v6.14.0 reliability sweep).
-_CODE_AGENT_MODEL = os.environ.get("CODE_AGENT_MODEL", "gemini-2-5-flash")
+# `lite` tracks the registry automatically — 2026-08-13: was a hardcoded
+# gemini-2-5-flash, which EOLs 2026-10-16.
+_CODE_AGENT_MODEL = os.environ.get("CODE_AGENT_MODEL", "lite")
 
 
 def create_code_agent() -> LlmAgent:

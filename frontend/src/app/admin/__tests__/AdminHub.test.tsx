@@ -69,9 +69,9 @@ describe("AdminHub IA", () => {
   });
 
   it("tells a tenant admin their view is scoped, so a short list isn't confusing", () => {
-    asTenant("acme-energy.example");
+    asTenant("acmeenergy.com");
     render(<AdminHub />);
-    expect(screen.getByText(/scoped to acme-energy\.example/i)).toBeTruthy();
+    expect(screen.getByText(/scoped to acmeenergy\.com/i)).toBeTruthy();
   });
 
   it("keeps every existing admin route reachable", () => {

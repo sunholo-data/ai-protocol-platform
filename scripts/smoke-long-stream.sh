@@ -15,6 +15,8 @@
 #   eval "$(.claude/skills/aiplatform-cli/scripts/mint-token.sh)"
 # ). Trap catalogue: .claude/skills/platform-deploy/resources/traps.md #20.
 
+
+source "$(dirname "${BASH_SOURCE[0]}")/_deploy_env.sh"
 set -euo pipefail
 
 ENV="${1:-dev}"
@@ -23,9 +25,7 @@ GAP="${3:-60}"
 REGION="europe-west1"
 
 case "$ENV" in
-  dev)   PROJECT="your-project-id" ;;
-  test)  PROJECT="your-project-id-test" ;;
-  prod)  PROJECT="your-project-id-prod" ;;
+  dev|test|prod) PROJECT="$(project_for_env "$ENV")" ;;
   local) PROJECT="" ;;
   *) echo "Unknown env: $ENV (use dev|test|prod|local)"; exit 2 ;;
 esac

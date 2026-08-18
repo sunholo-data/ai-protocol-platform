@@ -19,10 +19,10 @@ class TestPlatformAdmin:
 
 class TestTenantAdmin:
     def test_tenant_admin_of_own_domain(self):
-        assert admin_roles.is_tenant_admin(["tenant-admin:acme-energy.example"], "acme-energy.example") is True
+        assert admin_roles.is_tenant_admin(["tenant-admin:acmeenergy.com"], "acmeenergy.com") is True
 
     def test_not_tenant_admin_of_other_domain(self):
-        assert admin_roles.is_tenant_admin(["tenant-admin:acme-energy.example"], "rockwool.com") is False
+        assert admin_roles.is_tenant_admin(["tenant-admin:acmeenergy.com"], "rockwool.com") is False
 
     def test_platform_admin_administers_every_domain(self):
         assert admin_roles.is_tenant_admin(["aitana-admin"], "anything.com") is True

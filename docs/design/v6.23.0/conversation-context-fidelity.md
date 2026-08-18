@@ -476,7 +476,7 @@ short-to-medium sessions should get *faster*.
 
 ## Related Documents
 
-- [UAT source record](../../feedback/platform-uat-2026-08-06.md) — the meeting this came from
+- UAT source record (internal notes) — the meeting this came from
 - [`backend/adk/session.py`](../../../backend/adk/session.py) — where compaction is configured
 - [`backend/CLAUDE.md`](../../../backend/CLAUDE.md) — model-reliability and verification-bar rules
 - [local-dev-cli.md](../v6.1.0/local-dev-cli.md) — CLI surface this extends

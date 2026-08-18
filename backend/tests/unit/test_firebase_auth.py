@@ -191,14 +191,14 @@ def test_group_tags_is_frozen() -> None:
 
 
 async def test_derived_group_tags_unioned_with_jwt_claim() -> None:
-    """acme-energy.example user with no JWT groupTags gets ONE via clients/{domain}."""
+    """acmeenergy.com user with no JWT groupTags gets ONE via clients/{domain}."""
     with (
         patch("auth.firebase_auth.fb_auth.verify_id_token") as mock_verify,
         patch("db.clients.resolve_derived_group_tags", return_value=frozenset({"ONE"})),
     ):
-        mock_verify.return_value = _decoded(email="alice@acme-energy.example")
+        mock_verify.return_value = _decoded(email="alice@acmeenergy.com")
         user = await get_current_user(_make_request({"Authorization": "Bearer good.jwt"}))
-    assert user.domain == "acme-energy.example"
+    assert user.domain == "acmeenergy.com"
     assert user.group_tags == frozenset({"ONE"})
 
 
@@ -208,7 +208,7 @@ async def test_derived_tags_unioned_with_existing_jwt_tags() -> None:
         patch("auth.firebase_auth.fb_auth.verify_id_token") as mock_verify,
         patch("db.clients.resolve_derived_group_tags", return_value=frozenset({"ONE"})),
     ):
-        mock_verify.return_value = _decoded(email="alice@acme-energy.example", groupTags=["aitana-admin"])
+        mock_verify.return_value = _decoded(email="alice@acmeenergy.com", groupTags=["aitana-admin"])
         user = await get_current_user(_make_request({"Authorization": "Bearer good.jwt"}))
     assert user.group_tags == frozenset({"ONE", "aitana-admin"})
 
@@ -230,6 +230,6 @@ async def test_derived_tags_lookup_failure_does_not_block_auth() -> None:
         patch("auth.firebase_auth.fb_auth.verify_id_token") as mock_verify,
         patch("db.clients.resolve_derived_group_tags", side_effect=RuntimeError("firestore down")),
     ):
-        mock_verify.return_value = _decoded(email="alice@acme-energy.example", groupTags=["x"])
+        mock_verify.return_value = _decoded(email="alice@acmeenergy.com", groupTags=["x"])
         user = await get_current_user(_make_request({"Authorization": "Bearer good.jwt"}))
     assert user.group_tags == frozenset({"x"})

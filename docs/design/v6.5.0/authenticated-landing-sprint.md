@@ -59,7 +59,7 @@ M2 depends on M1's endpoints. M3 is the rollout + verification gate (touches the
 
 ### M3 — CLI + ONE config rollout + live verify (~0.5d)
 - `aiplatform client set --default-skill <slug>` (Click option + httpx PUT + unit test).
-- Apply ONE config: `aiplatform client set acme-energy.example --enabled-skills one-ppa-expert,one-doc-compare,web-researcher --default-skill one-ppa-expert`.
+- Apply ONE config: `aiplatform client set acmeenergy.com --enabled-skills one-ppa-expert,one-doc-compare,web-researcher --default-skill one-ppa-expert`.
 - Deploy dev (push triggers frontend+backend); chrome-devtools live verify.
 
 **Acceptance**

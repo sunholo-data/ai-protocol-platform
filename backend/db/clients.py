@@ -81,7 +81,7 @@ class ClientConfig(BaseModel):
     enabled_skills: list[str] | None = None
     # Domain-derived group tags unioned into the JWT's `groupTags` claim at
     # request time. Lets a deployment grant the `ONE` tag to every
-    # acme-energy.example user without an admin running `set_custom_user_claims`
+    # acmeenergy.com user without an admin running `set_custom_user_claims`
     # per signup. Tagged-access skills (type=tagged) become reachable to the
     # whole domain. None/empty = no derived tags.
     derived_group_tags: list[str] | None = None

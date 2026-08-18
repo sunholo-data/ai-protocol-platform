@@ -14,13 +14,13 @@
 # the parsed_documents skillId+status+createdAt index; get_document_content
 # offloads to an artifact that retrieve_artifact must find — the save_artifact
 # await regression). Confirm-card / form UX still gets the real-browser pass.
+
+source "$(dirname "${BASH_SOURCE[0]}")/_deploy_env.sh"
 set -euo pipefail
 
 ENV="${1:-dev}"
 case "$ENV" in
-  dev)  PROJECT="your-project-id";  HOST="https://your-service-url.example" ;;
-  test) PROJECT="your-project-id-test"; HOST="https://your-service-url.example" ;;
-  prod) PROJECT="your-project-id-prod"; HOST="https://your-service-url.example" ;;
+  dev|test|prod) PROJECT="$(project_for_env "$ENV")"; HOST="$(host_for_env "$ENV")" ;;
   *) echo "usage: $0 [dev|test|prod]" >&2; exit 2 ;;
 esac
 

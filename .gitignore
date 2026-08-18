@@ -85,3 +85,15 @@ infrastructure/mcp-sandbox/artefacts/*/v1/assets/.ailang-version
 
 # MCP Toolbox binary for local dev (make toolbox-install) — never commit the 150MB binary
 .bin/
+
+# TEMPLATE-INVERT M3: real-valued config generated from tracked .example files
+# by scripts/materialize-config.sh. Tracking these would put generic content
+# upstream and real content downstream at the SAME path — the permanent
+# merge-conflict case the upstream/downstream split exists to remove.
+infrastructure/mcp-toolbox/tools.yaml
+docs/ops/deployed-urls.md
+deploy.env
+cli/aiplatform/config.yaml
+# --force backups of the above
+infrastructure/mcp-toolbox/tools.yaml.bak
+docs/ops/deployed-urls.md.bak

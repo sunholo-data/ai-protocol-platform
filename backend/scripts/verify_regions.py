@@ -35,9 +35,17 @@ def main() -> int:
     for entry in cfg.models:
         if entry.provider != "google":
             continue
-        # Global-residency models serve ONLY at location="global" (runtime
+        # An entry with its own pinned `location` (the `-eu` entries added
+        # 2026-08-13 for Gemini 3.x models whose only EU option is the "eu"
+        # jurisdictional multi-region endpoint) is probed there. Otherwise
+        # global-residency models serve ONLY at location="global" (runtime
         # routes them there via RegionalGemini — see adk.agent.resolve_model).
-        primary_loc = "global" if entry.residency == "global" else DEFAULT_REGION
+        if entry.location:
+            primary_loc = entry.location
+        elif entry.residency == "global":
+            primary_loc = "global"
+        else:
+            primary_loc = DEFAULT_REGION
         if entry.fallbacks:
             pairs[(entry.api_name, primary_loc)] = f"{entry.id} (primary)"
         for link in entry.fallbacks:

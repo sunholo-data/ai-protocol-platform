@@ -290,7 +290,7 @@ the allow entry alone would still have resolved to nothing for a ONE user —
 which is exactly why direct invocation worked while delegation did not.
 
 **Prod is protected by the second gate, not by tags.** `enabled_skills` on
-`clients/acme-energy.example` is per-env runtime data that does not ride a deploy.
+`clients/acmeenergy.com` is per-env runtime data that does not ride a deploy.
 `maps-assistant` is on that allowlist for dev and test only; prod's list is
 non-null and omits it, so the skill is invisible to ONE there whatever the tags
 say. That split is the point — a skill's ACCESS ships with the code while its

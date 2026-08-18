@@ -49,7 +49,7 @@ export const TRANSPORT_FIELD = `__${process.env.NEXT_PUBLIC_APP_SLUG || "platfor
  * catch (only null/undefined). `||` treats "" the same as unset, falling
  * back to Sunholo defaults. (Same pattern as TRANSPORT_FIELD above.)
  *
- * See docs/design/v6.4.0/multi-tenant-demo-readiness.md.
+ * See docs/design/v6.6.0/fork-convergence.md.
  */
 export const BRANDING = {
   /** Short product name used in page <title>, banners, marketing hero. */

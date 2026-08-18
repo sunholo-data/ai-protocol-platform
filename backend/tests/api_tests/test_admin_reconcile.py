@@ -48,7 +48,7 @@ def _mirror(**kw):
     base = {
         "session_id": "s1",
         "owner_uid": "u1",
-        "owner_domain": "acme-energy.example",
+        "owner_domain": "acmeenergy.com",
         "skill_id": "one-assistant",
         "turn_count": 2,
         "provisional": False,
@@ -209,8 +209,8 @@ def test_provisional_row_with_turns_is_flagged() -> None:
 def test_sweep_tallies_codes_across_sessions() -> None:
     """The sweep's tally IS the Phase 1 deliverable — one session proves nothing."""
     docs = [
-        {"__id": "s1", "ownerDomain": "acme-energy.example", "lastMessageAt": "2026-08-01"},
-        {"__id": "s2", "ownerDomain": "acme-energy.example", "lastMessageAt": "2026-08-02"},
+        {"__id": "s1", "ownerDomain": "acmeenergy.com", "lastMessageAt": "2026-08-01"},
+        {"__id": "s2", "ownerDomain": "acmeenergy.com", "lastMessageAt": "2026-08-02"},
     ]
     broken = [
         _event(parts=[_part(call=("t", "c1"))]),
@@ -241,7 +241,7 @@ def test_reconcile_requires_admin(path: str) -> None:
 
     app = FastAPI()
     app.include_router(router)
-    plain = User(uid="u", email="alex@acme-energy.example", domain="acme-energy.example", group_tags=frozenset())
+    plain = User(uid="u", email="alex@acmeenergy.com", domain="acmeenergy.com", group_tags=frozenset())
     app.dependency_overrides[get_current_user] = lambda: plain
     res = TestClient(app, raise_server_exceptions=False).get(path)
     assert res.status_code == 403
@@ -269,7 +269,7 @@ def _mark(docs, mirror, events, *, dry_run=True, already=False):
     return res.json(), writes
 
 
-_DOCS = [{"__id": "s1", "ownerDomain": "acme-energy.example", "lastMessageAt": "2026-07-27"}]
+_DOCS = [{"__id": "s1", "ownerDomain": "acmeenergy.com", "lastMessageAt": "2026-07-27"}]
 
 
 def test_mark_lost_flags_a_session_with_turns_and_no_transcript() -> None:
@@ -311,7 +311,7 @@ def test_mark_lost_requires_admin() -> None:
 
     app = FastAPI()
     app.include_router(router)
-    plain = User(uid="u", email="l@acme-energy.example", domain="acme-energy.example", group_tags=frozenset())
+    plain = User(uid="u", email="l@acmeenergy.com", domain="acmeenergy.com", group_tags=frozenset())
     app.dependency_overrides[get_current_user] = lambda: plain
     res = TestClient(app, raise_server_exceptions=False).post("/api/admin/analytics/sessions-mark-transcript-lost")
     assert res.status_code == 403

@@ -79,6 +79,15 @@ steps:
       - '-c'
       - |
         set -euo pipefail
+        # Same split-brain guard as the other deploying pipelines. A promotion
+        # under the placeholder name would copy images into, and deploy to, a
+        # service that is not the live one. Caught by
+        # test_cloudbuild_image_identity.py before it ever ran.
+        if [ "${_SERVICE_NAME}" = "platform-frontend" ]; then
+          echo "ERROR: _SERVICE_NAME is still the template placeholder."
+          echo "Set it in this environment's Cloud Build trigger substitutions."
+          exit 1
+        fi
         if [ -z "${_VERSION}" ]; then
           echo "FATAL: _VERSION is required — a promote without a frozen tag is a rebuild" >&2
           exit 1

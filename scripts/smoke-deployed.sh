@@ -19,6 +19,8 @@
 # for the `backend` check. `auth` additionally needs Firebase admin on the
 # target project (ADC via `gcloud auth application-default login`).
 
+
+source "$(dirname "${BASH_SOURCE[0]}")/_deploy_env.sh"
 set -euo pipefail
 
 ENV="${1:-dev}"
@@ -28,16 +30,14 @@ REGION="europe-west1"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 case "$ENV" in
-  dev)  PROJECT="your-project-id" ;;
-  test) PROJECT="your-project-id-test" ;;
-  prod) PROJECT="your-project-id-prod" ;;
+  dev|test|prod) PROJECT="$(project_for_env "$ENV")" ;;
   *) echo "Unknown env: $ENV (use dev|test|prod)"; exit 2 ;;
 esac
 
 echo "== Env: $ENV  Project: $PROJECT  Region: $REGION =="
 
 smoke_frontend() {
-  local svc="platform-frontend"
+  local svc="${DEPLOY_SERVICE_NAME}"
   echo ""
   echo "-- $svc (public, multi-container) --"
   local url
@@ -91,7 +91,7 @@ smoke_frontend() {
 }
 
 smoke_backend() {
-  local svc="platform-backend"
+  local svc="${DEPLOY_SERVICE_NAME%-frontend}-backend"
   echo ""
   echo "-- $svc (IAM-protected, standalone) --"
   local url
@@ -306,7 +306,7 @@ smoke_channels() {
   # which is exactly what proves the framework + adapter are wired).
   echo ""
   echo "-- channel webhook reachability --"
-  local svc="platform-backend"
+  local svc="${DEPLOY_SERVICE_NAME%-frontend}-backend"
   local url
   url=$(gcloud run services describe "$svc" \
     --project="$PROJECT" --region="$REGION" \

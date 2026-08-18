@@ -5,15 +5,15 @@
 **Scope**: Backend channel adapter (`backend/channels/discord.py` 656 LOC) + chunk helper (56 LOC) + 4 test files (39 tests) + Cloud Run Terraform module (222 LOC across main.tf/variables.tf/outputs.tf)
 **Dependencies**: [channels framework](channels.md) (shipped M1, commit 65aa951); [auth-and-permissions](../v6.0.0/implemented/auth-and-permissions.md)
 **Created**: 2026-05-16
-**Last Updated**: 2026-05-16 — sprint complete. 39 new tests pass (test_discord 19 + test_discord_streaming 7 + test_discord_registration 5 + test_chunk 8). `terraform validate` clean on `infrastructure/modules/cloud-run-channel/`. Registered in fast_api_app.py gated on `DISCORD_PUBLIC_KEY` so LOCAL_MODE boots cleanly. Sprint evaluator round 1: PASS 92/100. Deviations from this design: `/scope` command (the internal-tools fork-fork-specific) deferred — generic command set `/ask /skill /skills /help` covers the template. Gateway-message handler now uses `BaseChannel._dispatch_inbound` (extracted from the framework in commit 6c55b43 after the M2/M3 round-1 evaluations flagged duplication).
+**Last Updated**: 2026-05-16 — sprint complete. 39 new tests pass (test_discord 19 + test_discord_streaming 7 + test_discord_registration 5 + test_chunk 8). `terraform validate` clean on `deploy/terraform/cloud-run-channel/`. Registered in fast_api_app.py gated on `DISCORD_PUBLIC_KEY` so LOCAL_MODE boots cleanly. Sprint evaluator round 1: PASS 92/100. Deviations from this design: `/scope` command (fork-specific) deferred — generic command set `/ask /skill /skills /help` covers the template. Gateway-message handler now uses `BaseChannel._dispatch_inbound` (extracted from the framework in commit 6c55b43 after the M2/M3 round-1 evaluations flagged duplication).
 
 ## Problem Statement
 
-The [an internal-tools fork](../forks/internal-tools-fork/v0.1.0/scope.md) needs Discord as its primary user channel — that's where developer/team communication actually lives for internal-team forks. The bot mechanics already exist as working code at `<local-path>` (472 lines, Flask-era).
+The an internal-tools fork needs Discord as its primary user channel — that's where developer/team communication actually lives for internal-team forks. The bot mechanics already exist as working code at `<local-path>` (472 lines, Flask-era).
 
 **This document covers only the Discord-specific adapter.** The shared plumbing (identity resolution, command parsing, attachment handling, webhook verification scaffolding, registry mounting) lives in the [channels framework](channels.md) and is consumed by all channel adapters uniformly. Discord = `BaseChannel` subclass + 3 abstract methods + ~80-120 LOC of discord.py specifics.
 
-Pure-webhook helpers exist in [`sunholo-py/src/sunholo/bots/discord.py`](<local-path>) (`generate_discord_output`, `discord_webhook`) but those are one-way output formatters, not an interactive bot. The bulk of the work is the gateway-based interactive bot, which is what edmonbrain implements.
+Pure-webhook helpers exist in `sunholo-py/src/sunholo/bots/discord.py` (a local path) (`generate_discord_output`, `discord_webhook`) but those are one-way output formatters, not an interactive bot. The bulk of the work is the gateway-based interactive bot, which is what edmonbrain implements.
 
 ## Goals
 
@@ -162,7 +162,7 @@ The agent factory checks `channel.supports_streaming` and routes to `send_stream
 - Alternative: deploy as a Cloud Run service with a `KEEPALIVE` cron pinging the bot's health endpoint every 4 min, but min-instances is the cleaner answer
 - Document the cost trade-off in the template README
 
-Add to `infrastructure/modules/cloud-run-channel/` Terraform module with `min_instances` variable defaulting to 0 (override for Discord).
+Add to `deploy/terraform/cloud-run-channel/` Terraform module with `min_instances` variable defaulting to 0 (override for Discord).
 
 ### Slash commands
 
@@ -193,7 +193,7 @@ Every message → audit log entry via the shared callback ([audit-log-and-analyt
 | Source citation rendering as Discord embeds + auto-thread UX | 0.5h | Lift from edmonbrain |
 
 Plus (template-level, counted once in framework):
-- Terraform module `infrastructure/modules/cloud-run-channel/` with `min_instances` variable (Discord requires 1)
+- Terraform module `deploy/terraform/cloud-run-channel/` with `min_instances` variable (Discord requires 1)
 - Firestore `channel_routes/discord/{guild_id}` schema for per-guild skill defaults
 - Smoke test: bot joins a guild, responds to `/ask`, streams reply, logs to audit
 
@@ -234,8 +234,8 @@ Plus (template-level, counted once in framework):
 ## Related Documents
 
 - **[Channels framework](channels.md)** — Parent design; `BaseChannel` ABC + registry + shared plumbing. **Must land first (Phase 0).**
-- [an internal-tools fork scope](../forks/internal-tools-fork/v0.1.0/scope.md) — first consumer
+- an internal-tools fork scope (that fork's own repo) — first consumer
 - [Audit log + analytics](../v6.2.0/audit-log-and-analytics.md) — captures Discord events via the framework's standard channel metadata
 - [Event-driven skills](../v6.2.0/event-driven-skills.md) — uses `ChannelRegistry.get("discord").send()` for trigger output routing
-- Source scaffold: [<local-path>](<local-path>)
-- Helper (webhook output formatter, not bot): [<local-path>](<local-path>)
+- Source scaffold: <local-path> (a local path)
+- Helper (webhook output formatter, not bot): <local-path> (a local path)

@@ -15,7 +15,6 @@ import os
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TITLE_MODEL = "gemini-2.5-flash-lite"
 _PROMPT = (
     "Based on the conversation excerpt below, generate a short title "
     "(maximum 6 words, no quotes, no punctuation at the end).\n\n"
@@ -32,14 +31,27 @@ def generate_title_fast(events: list) -> str | None:
     if not excerpt:
         return None
 
-    model_name = os.environ.get("CHAT_TITLE_MODEL", _DEFAULT_TITLE_MODEL)
+    model_ref = os.environ.get("CHAT_TITLE_MODEL", "lite")
     try:
         from google import genai
         from google.genai import types as genai_types
 
+        from config.models import api_name_for, entry_for
         from config.thinking import ThinkDepth, thinking_config_for
 
-        client = genai.Client()
+        # This bare client (allowlisted exemption from the resilient layer —
+        # cosmetic, fails soft, off the critical path) has no fallback chain to
+        # pin a location for it, so it must do so itself: an entry's own
+        # `location` (2026-08-13: the "eu" multi-region Gemini 3.x need) wins,
+        # else `residency: global` pins "global", else the env default region.
+        # CHAT_TITLE_MODEL may still be set to a raw literal not in the
+        # registry — entry is None, location stays unset, same as before.
+        model_name = api_name_for(model_ref)
+        entry = entry_for(model_ref)
+        location = entry.location if entry else None
+        if location is None and entry is not None and entry.residency == "global":
+            location = "global"
+        client = genai.Client(vertexai=True, location=location) if location else genai.Client()
         response = client.models.generate_content(
             model=model_name,
             contents=_PROMPT.format(excerpt=excerpt[:1000]),

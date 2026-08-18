@@ -29,7 +29,7 @@ from scripts.seed_tool_permissions import (  # noqa: E402
 # Every skill a ONE-tagged user can REACH — the surface the explicit prod
 # allowlist (`--one --explicit`) must cover. Derivation (do NOT trim without
 # re-checking the delegation graph — a dropped skill = a silent 403 on prod):
-#   - clients/acme-energy.example.enabled_skills (the dropdown ONE lands on):
+#   - clients/acmeenergy.com.enabled_skills (the dropdown ONE lands on):
 #       one-assistant, one-ppa-expert, one-doc-compare, web-researcher
 #   - one-assistant delegates (delegation.allow): + claude-assistant, gpt-assistant
 #   - discoverJobs + one-ppa-expert.delegation.allow: + one-obligation-analysis

@@ -32,10 +32,10 @@ class TestResolution:
         assert scope.domains is None
 
     def test_single_tenant_admin(self):
-        scope = resolve_admin_scope(_user("tenant-admin:acme-energy.example"))
+        scope = resolve_admin_scope(_user("tenant-admin:acmeenergy.com"))
         assert scope is not None
         assert not scope.is_platform
-        assert scope.domains == frozenset({"acme-energy.example"})
+        assert scope.domains == frozenset({"acmeenergy.com"})
 
     def test_multi_tenant_admin(self):
         scope = resolve_admin_scope(_user("tenant-admin:a.com", "tenant-admin:b.com"))

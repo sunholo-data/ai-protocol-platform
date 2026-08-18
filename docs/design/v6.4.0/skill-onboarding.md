@@ -416,7 +416,7 @@ Skill emits A2UI Card with action button
 - [ ] Click an example → tab opens in Document; chat composer "Will process: <filename>" badge fires
 - [ ] Expand Contracts library → folder tree shows; pick a doc → tab opens
 - [ ] open `one-doc-compare`, pick 2 PPAs (one from examples, one from ONE library), wait for diff → click "Compare clauses" on a material diff → agent responds in chat
-- [ ] `aiplatform demo verify --tenant acme-energy.example` returns green for the new onboarding assertions
+- [ ] `aiplatform demo verify --tenant acmeenergy.com` returns green for the new onboarding assertions
 
 ## Security Considerations
 
@@ -460,7 +460,7 @@ Skill emits A2UI Card with action button
 
 - [docs/design/v6.4.0/internal-app-shell-port.md](internal-app-shell-port.md) — 4.3 sister sprint; ships the SidebarSection + WorkbenchPane primitives this doc hangs onto
 - [docs/design/v6.4.0/skill-driven-shell-modes.md](skill-driven-shell-modes.md) — 4.4 sibling; `SkillConfig.shell` and `SkillConfig.welcome` are sibling extensions that compose orthogonally
-- [docs/design/v6.4.0/multi-tenant-demo-readiness.md](multi-tenant-demo-readiness.md) — 4.2; defined the `acmeenergy-docs` bucket binding this doc reuses for `welcome.bucket_browser`
+- the deployment's demo-readiness doc (deployment-private) — 4.2; defined the `acmeenergy-docs` bucket binding this doc reuses for `welcome.bucket_browser`
 - [docs/design/v6.3.0/implemented/rag-document-corpus.md](../v6.3.0/implemented/rag-document-corpus.md) — bucket-import path the picker reuses
 - [docs/design/v6.3.0/implemented/client-tenant-management.md](../v6.3.0/implemented/client-tenant-management.md) — tenant bucket binding model
 - [docs/design/v6.1.0/implemented/local-dev-cli.md](../v6.1.0/implemented/local-dev-cli.md) — CLI parent doc

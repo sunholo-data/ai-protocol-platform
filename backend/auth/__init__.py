@@ -94,24 +94,38 @@ def _require_known_domain() -> bool:
     """Whether authentication is restricted to an email-domain allowlist (v6.18.0).
 
     Off by default (backward-compatible — every existing env keeps working). Set
-    ``AUTH_REQUIRE_KNOWN_DOMAIN=1`` per-env to lock a deployment (e.g. the ONE
-    deployment) to its customer + operator domains.
+    ``AUTH_REQUIRE_KNOWN_DOMAIN=1`` per-env to lock a deployment to its customer
+    + operator domains.
+
+    Turning it on requires ``AUTH_OPERATOR_DOMAINS`` to be set as well — that
+    default is empty on purpose (see below), so the gate without it admits only
+    mapped tenants.
     """
     return os.environ.get("AUTH_REQUIRE_KNOWN_DOMAIN", "").strip().lower() in _ALLOWLIST_TRUTHY
 
 
 def _operator_domains() -> frozenset[str]:
     """Operator email domains that are always permitted, independent of a tenant
-    mapping. Config via ``AUTH_OPERATOR_DOMAINS`` (csv); defaults to this
-    deployment's own operator + smoke domains so deployed whoami/handoff smoke
-    tests keep passing.
+    mapping. Config via ``AUTH_OPERATOR_DOMAINS`` (csv).
 
-    Phrased without naming the deployment on purpose: the template sanitizer
-    rewrites the default VALUE below (v6.19.0, AIPLA #42 — a fork that enabled
-    the domain gate would otherwise admit our domain as its operators), and
-    prose that names a specific brand goes stale the moment the value changes.
+    **Empty by default, deliberately.** An operator domain is deployment
+    identity: there is no value that is correct for an unknown deployment, so
+    the only safe default is none, and every deployment declares its own.
+
+    This used to default to this deployment's own domains, with the template
+    sanitizer rewriting the literal on the way out (v6.19.0, AIPLA #42 — a fork
+    that switched on the domain gate would otherwise trust *our* staff domain).
+    TEMPLATE-INVERT M3 removed that: publish-time rewriting cannot survive the
+    upstream/downstream inversion, because the same tracked path would hold
+    different bytes on each side — a permanent merge conflict on every sync.
+
+    The real values now live in deploy config (``cloudbuild.yaml`` passes
+    ``AUTH_OPERATOR_DOMAINS`` explicitly). Removing the default without that
+    half would 403 every operator on dev/test, which both set
+    ``AUTH_REQUIRE_KNOWN_DOMAIN=1`` — asserted by
+    ``tests/unit/test_fork_safe_defaults.py``.
     """
-    raw = os.environ.get("AUTH_OPERATOR_DOMAINS", "yourcompany.com,yourcompany.test")
+    raw = os.environ.get("AUTH_OPERATOR_DOMAINS", "")
     return frozenset(d.strip().lower() for d in raw.split(",") if d.strip())
 
 
@@ -143,6 +157,21 @@ def _enforce_domain_allowlist(user: User) -> None:
         return
     if _domain_allowed(user):
         return
+    if not _operator_domains():
+        # NEVER SILENT (CLAUDE.md #8). The gate is on but no operator domain is
+        # configured, so every operator is about to be denied — and the symptom
+        # (a 403 for staff who have always worked) reads as an auth bug rather
+        # than a missing env var. TEMPLATE-INVERT M3 removed the code default
+        # that used to mask this, so the deploy must supply
+        # AUTH_OPERATOR_DOMAINS. See traps.md #23: that is TWO trigger
+        # substitutions, not one.
+        logger.error(
+            "AUTH_OPERATOR_DOMAINS_MISSING: AUTH_REQUIRE_KNOWN_DOMAIN is on but "
+            "AUTH_OPERATOR_DOMAINS is empty — only mapped tenants can authenticate. "
+            "Set it in this env's trigger substitutions (uid=%s domain=%s)",
+            user.uid,
+            user.domain or "(none)",
+        )
     logger.info("auth: rejected domain uid=%s domain=%s", user.uid, user.domain or "(none)")
     raise HTTPException(
         status_code=403,

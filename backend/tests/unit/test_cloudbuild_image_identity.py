@@ -31,6 +31,24 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 ROOT_CLOUDBUILD = REPO_ROOT / "cloudbuild.yaml"
 BACKEND_CLOUDBUILD = REPO_ROOT / "backend" / "cloudbuild.yaml"
 
+
+def all_pipelines() -> list[Path]:
+    """EVERY cloudbuild pipeline, found by glob rather than named by hand.
+
+    Downstream feedback #12: v6.20.0 migrated two of four pipelines to
+    SHORT_SHA + digest pinning and this guard, which encodes the rule, asserted
+    against those same two BY NAME. The other two kept deploying an unguarded
+    `:${BRANCH_NAME}` — empty on a tag build, so they could not be built at a
+    tag at all — and the guard could not see them. Globbing would have caught it
+    in the same sprint that introduced it.
+    """
+    found = sorted(
+        p for p in REPO_ROOT.rglob("cloudbuild*.yaml") if ".venv" not in p.parts and "node_modules" not in p.parts
+    )
+    assert found, "no cloudbuild pipelines found — did the glob break?"
+    return found
+
+
 # The immutable tag every build must carry. SHORT_SHA is populated on BOTH
 # branch- and tag-triggered builds, which is why it — and not TAG_NAME — is the
 # one that must always be present. See test_tag_name_is_guarded.
@@ -203,3 +221,86 @@ def test_build_steps_tag_only_with_the_always_present_substitution(named_pipelin
                 "A build step cannot guard an empty substitution — tag with SHORT_SHA "
                 "here and apply mutable names in the push step."
             )
+
+
+class TestEveryPipelineIsTagSafe:
+    """The rule applies to ALL pipelines, not the two that were named here."""
+
+    def test_no_pipeline_deploys_an_unguarded_branch_name(self):
+        """`:${BRANCH_NAME}` is legal ONLY inside an `if [ -n "${BRANCH_NAME}" ]`.
+
+        The mutable tag is still pushed on branch builds — things read it — so
+        the rule is not "never mention it" but "never use it unguarded". The
+        first version of this check flagged the correctly-guarded pushes in the
+        root and backend pipelines, and its own explanatory comment.
+        """
+        offenders = []
+        for path in all_pipelines():
+            depth = None
+            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                if 'if [ -n "${BRANCH_NAME}" ]' in stripped:
+                    depth = line.index("if")
+                    continue
+                # The guard block ends at the matching `fi` (same indent).
+                if depth is not None and stripped == "fi" and line.index("fi") == depth:
+                    depth = None
+                    continue
+                if ":${BRANCH_NAME}" in stripped and depth is None:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}")
+        assert offenders == [], (
+            "pipelines deploy an unguarded :${BRANCH_NAME}, which is EMPTY on a "
+            f"tag build and cannot be promoted: {offenders}"
+        )
+
+    def test_every_pipeline_carries_the_immutable_tag(self):
+        missing = [
+            str(p.relative_to(REPO_ROOT))
+            for p in all_pipelines()
+            if IMMUTABLE_TAG not in p.read_text(encoding="utf-8")
+            # promote copies by digest and builds nothing, so it needs no tag.
+            and "promote" not in p.name
+        ]
+        assert missing == [], f"pipelines with no {IMMUTABLE_TAG} image tag: {missing}"
+
+
+class TestEveryDeployingPipelineGuardsItsServiceName:
+    """A placeholder service name must fail the build, in EVERY pipeline.
+
+    Deploying under the wrong service name does not error — Cloud Run happily
+    creates a NEW service beside the live one and the old one keeps serving.
+    That is a silent split-brain, and on 2026-08-17 it happened for real: the
+    root pipeline had the guard, `backend/cloudbuild.yaml` did not, and the
+    first deploy after the identity scrub stood up a stray `platform-backend`.
+
+    Same shape as downstream feedback #12 — a rule enforced on some files and
+    not all of them — so it is asserted across the glob rather than per file.
+    """
+
+    PLACEHOLDER_PREFIX = "platform-"
+
+    def _deploying_pipelines(self) -> list[Path]:
+        out = []
+        for path in all_pipelines():
+            text = path.read_text(encoding="utf-8")
+            # Only pipelines that actually run `gcloud run deploy` need it;
+            # promote copies by digest and builds nothing.
+            if "run deploy" in text or "'deploy'" in text:
+                out.append(path)
+        return out
+
+    def test_placeholder_service_name_is_guarded(self):
+        offenders = []
+        for path in self._deploying_pipelines():
+            text = path.read_text(encoding="utf-8")
+            declared = re.search(r"^\s+_SERVICE_NAME:\s*(\S+)", text, re.M)
+            if not declared or not declared.group(1).startswith(self.PLACEHOLDER_PREFIX):
+                continue  # no placeholder default to guard against
+            if f'= "{declared.group(1)}"' not in text:
+                offenders.append(f"{path.relative_to(REPO_ROOT)} (_SERVICE_NAME={declared.group(1)})")
+        assert offenders == [], (
+            "pipelines default _SERVICE_NAME to a placeholder with no guard — a "
+            f"missing substitution would create a duplicate service: {offenders}"
+        )

@@ -46,7 +46,7 @@ Customer feedback (2026-06-19): the product surfaces too many skills and makes s
 **Success Metrics:**
 - Signed-in visit to `/` → 0 clicks to a usable chat (redirect to last session, or a fresh primary-skill chat).
 - Logged-out visit to `/` → the landing/marketing page (unchanged).
-- In-app skill set for `@acme-energy.example` users is exactly `[one-ppa-expert, one-doc-compare, web-researcher]`.
+- In-app skill set for `@acmeenergy.com` users is exactly `[one-ppa-expert, one-doc-compare, web-researcher]`.
 
 **Non-Goals:**
 - Filtering the **logged-out** marketplace to a client's skills — logged-out users can't invoke skills anyway; the homepage is marketing. (Tracked as a possible follow-up; the hero already rebrands per deployment.)
@@ -105,7 +105,7 @@ Three pieces: (1) a backend "most-recent session for this user" resolver; (2) an
 
 Per design-doc-creator rule 5b-bis:
 - Extend `aiplatform client set` with `--default-skill <slug>` (~0.1d) alongside the existing `--enabled-skills`. Backlink: [local-dev-cli.md](../v6.1.0/local-dev-cli.md).
-- The ONE narrowing is applied with: `aiplatform client set acme-energy.example --enabled-skills one-ppa-expert,one-doc-compare,web-researcher --default-skill one-ppa-expert`.
+- The ONE narrowing is applied with: `aiplatform client set acmeenergy.com --enabled-skills one-ppa-expert,one-doc-compare,web-researcher --default-skill one-ppa-expert`.
 
 ### API Changes
 
@@ -180,7 +180,7 @@ GET /  (HomeGate, client)
 ## Success Criteria
 
 - [ ] Signed-in `/` → last chat (or fresh primary) with zero clicks; logged-out `/` → landing
-- [ ] `@acme-energy.example` in-app skills = exactly the 3 configured
+- [ ] `@acmeenergy.com` in-app skills = exactly the 3 configured
 - [ ] `aiplatform client set --default-skill` works end-to-end
 - [ ] Backend + frontend tests, lint, typecheck, build all green
 - [ ] Live-verified on dev via chrome-devtools
@@ -194,5 +194,5 @@ GET /  (HomeGate, client)
 ## Related Documents
 
 - [skill-driven-shell-modes.md](skill-driven-shell-modes.md) — the chat shells users land in (shipped).
-- [multi-tenant-demo-readiness.md](../v6.4.0/multi-tenant-demo-readiness.md) — `enabled_skills` per-user filter + per-deployment branding.
+- the deployment's demo-readiness doc (deployment-private) — `enabled_skills` per-user filter + per-deployment branding.
 - [local-dev-cli.md](../v6.1.0/local-dev-cli.md) — `aiplatform client set`.

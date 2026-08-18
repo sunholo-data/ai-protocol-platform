@@ -1,7 +1,7 @@
 # Channels
 
 **Status**: ✅ Implemented 2026-05-16 — all 5 milestones shipped (M1 framework + M2 Discord + M3 Email + M4 Telegram+WhatsApp + M5 smoke+howto+CLI demo)
-**Priority**: P1 (Medium) — Shepherd / an internal-tools fork no longer blocked
+**Priority**: P1 (Medium) — an internal-tools fork no longer blocked
 **Estimated**: 3.5 days
 **Actual**: 1 calendar day via parallel Task sub-agents (M2+M3, then M4+M5)
 **Scope**: Backend channel framework + 4 production adapters + 1 demo adapter + Cloud Run TF module + adapter howto
@@ -11,7 +11,7 @@
 
 ## Problem Statement
 
-v5 supports three messaging channels (Telegram, Email, WhatsApp) that each independently route through `process_assistant_request()`. The v5 implementations are working code but they're **three loosely-coupled modules with copy-paste boilerplate** — identity resolution, command parsing, attachment handling, message splitting are all repeated per channel. Adding a fourth channel (Discord, demanded by the [an internal-tools fork](../forks/internal-tools-fork/v0.1.0/scope.md)) under that pattern means copying 80% again.
+v5 supports three messaging channels (Telegram, Email, WhatsApp) that each independently route through `process_assistant_request()`. The v5 implementations are working code but they're **three loosely-coupled modules with copy-paste boilerplate** — identity resolution, command parsing, attachment handling, message splitting are all repeated per channel. Adding a fourth channel (Discord, demanded by an internal-tools fork) under that pattern means copying 80% again.
 
 v6 has the chance to fix this once. The right shape is a `BaseChannel` framework plus thin per-channel adapters, where adding a new channel is "subclass + 3 methods + ~80 LOC."
 
@@ -30,9 +30,9 @@ Key questions:
 
 **Impact:**
 - Required for v5 feature parity (Telegram + email + WhatsApp)
-- Required for [an internal-tools fork](../forks/internal-tools-fork/v0.1.0/scope.md) (Discord)
+- Required for an internal-tools fork (Discord)
 - Required for [event-driven skills](../v6.2.0/event-driven-skills.md) — trigger output routing depends on `Channel.send()` being uniform
-- Discord is now first-batch priority over Telegram (Shepherd ships before any v6 Telegram user)
+- Discord is now first-batch priority over Telegram (the internal-tools fork ships before any v6 Telegram user)
 
 ## Goals
 
@@ -492,7 +492,7 @@ This means:
 - [ ] Cloud Run `min-instances=1` Terraform module for Discord (gateway-keepalive requirement)
 - [ ] `channel_routes/discord/{guild_id}` Firestore schema for per-guild skill defaults
 - [ ] Integration tests: real Discord guild + Mailgun test webhook
-- [ ] [an internal-tools fork](../forks/internal-tools-fork/v0.1.0/scope.md) is the first downstream consumer of both
+- [ ] an internal-tools fork is the first downstream consumer of both
 
 **Phase 1 gate:** Discord bot in a test guild responds to `/ask` and a mention; email round-trip with `[Skill] body` subject parsing works.
 
@@ -509,7 +509,7 @@ This means:
 ### Migration order rationale
 
 Original v6.1.0 plan was Telegram first (active v5 users). New plan is Discord first because:
-- [Shepherd / an internal-tools fork](../forks/internal-tools-fork/v0.1.0/scope.md) is the only real consumer in the v6 window — no v6 Telegram users exist yet
+- an internal-tools fork is the only real consumer in the v6 window — no v6 Telegram users exist yet
 - Discord forces the framework to handle a non-pure-webhook transport (gateway), exposing more abstraction edges than Telegram would
 - Email comes alongside Discord because it has the most-divergent skill-selection pattern (subject prefix) and exercises the override paths in the framework
 - Telegram and WhatsApp port cleanly from v5 once the framework is proven — they don't add design surface, only deployment
@@ -580,6 +580,6 @@ Original v6.1.0 plan was Telegram first (active v5 users). New plan is Discord f
 - [Discord channel adapter](discord-channel.md) — Phase 1 detailed design
 - [Event-driven skills](../v6.2.0/event-driven-skills.md) — trigger system depends on `ChannelRegistry.get(name).send()` being uniform
 - [Audit log + analytics](../v6.2.0/audit-log-and-analytics.md) — uses `channel` event metadata written by `BaseChannel.handle_webhook`
-- [Shepherd / an internal-tools fork](../forks/internal-tools-fork/v0.1.0/scope.md) — first downstream consumer
+- an internal-tools fork — first downstream consumer
 - v5 source: `<your-v5-source>/backend/email_integration.py`, `telegram_service.py`, `whatsapp_service.py`
 - Discord scaffold: `<local-path>`

@@ -239,7 +239,7 @@ export default function ToolPermissionsPage() {
         <div className="grid gap-2">
           <input
             className="rounded-md border px-3 py-2 text-sm font-mono"
-            placeholder="id — email, domain (e.g. acme-energy.example), or * for wildcard"
+            placeholder="id — email, domain (e.g. acmeenergy.com), or * for wildcard"
             value={docId}
             onChange={(e) => {
               setDocId(e.target.value);

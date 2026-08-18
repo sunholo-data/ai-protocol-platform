@@ -4,6 +4,8 @@ Google [MCP Toolbox for Databases](https://mcp-toolbox.dev/) v1.7.0, running as
 a **third container in the `platform-frontend` Cloud Run service**, serving
 hand-authored BigQuery queries to skills as MCP tools.
 
+Design: [`docs/design/v6.14.0/mcp-toolbox-database-gateway.md`](../../docs/design/v6.14.0/mcp-toolbox-database-gateway.md)
+
 ## Why a sidecar and not its own service
 
 Loopback (`127.0.0.1:5000`) means **no auth to get wrong**: no Cloud Run IAM
@@ -14,7 +16,7 @@ with no auth block, so **this needs zero backend code**.
 The trade: a Cloud Run service account is **per service, not per container**, so
 Toolbox shares `sa-platform` and cannot be scoped narrower than the frontend.
 That is acceptable because the tenant boundary is the **GCP project** (each
-data-client gets its own fork/project), and `sa-platform` already reads the client's
+data-client gets its own fork/project), and the runtime SA already reads the client's
 data today via `backend/tools/entsoe_query.py` — so there is no new exposure.
 
 **The rule this imposes:** never grant a second client's project to a shared
@@ -27,7 +29,7 @@ split Toolbox out to a per-client service with its own scoped SA and add an
 | File | Ships in the public template? |
 |---|---|
 | `Dockerfile` | ✅ pins the upstream image, `COPY tools.yaml` |
-| `tools.yaml` | ❌ **excluded** — ONE's MarketData queries (licensed data + the customer's pricing IP) |
+| `tools.yaml` | ❌ **excluded** — your real per-client queries (ship your own; often licensed / confidential) |
 | `tools.example.yaml` | ✅ renamed over `tools.yaml` by the sanitize pipeline so the template still builds |
 
 `scripts/sanitize-for-template.sh` enforces both halves and hard-fails if
@@ -49,7 +51,7 @@ So, never put caller input in an identifier position:
 
 - **C2 — choosing a column?** `CASE @param WHEN 'literal' THEN \`Real Column\` END`.
 - **C2b — choosing a table?** `UNION ALL` the branches with a **literal** label
-  column, filter on a **bound** param. (Used here: MarketData puts the market in the
+  column, filter on a **bound** param. (e.g. a vendor that puts the market in the
   *table name*, e.g. `PPA_sweden_4`.)
 - **C3 — never ship a generic `*-execute-sql` tool.** Google marks them "not for
   production agents".

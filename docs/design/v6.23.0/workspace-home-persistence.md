@@ -284,6 +284,6 @@ user's escape hatch.
 
 ## Related Documents
 
-- [UAT source record](../../feedback/platform-uat-2026-08-06.md)
+- UAT source record (internal notes)
 - [workbench-artifacts-model.md](../v6.7.0/implemented/workbench-artifacts-model.md) — the 7.5 tab model this extends
 - [`frontend/src/components/protocols/CLAUDE.md`](../../../frontend/src/components/protocols/CLAUDE.md) — A2UI render path

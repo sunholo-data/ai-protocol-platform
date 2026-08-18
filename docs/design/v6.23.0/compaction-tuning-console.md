@@ -244,4 +244,4 @@ regardless of configuration.
 
 - [compaction-wiring-and-observability](compaction-wiring-and-observability.md) — the prerequisite; M4's marker is the feedback signal
 - [conversation-context-fidelity](conversation-context-fidelity.md) — the tuning table these levers override
-- [UAT source record](../../feedback/platform-uat-2026-08-06.md)
+- UAT source record (internal notes)

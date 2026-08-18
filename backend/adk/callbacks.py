@@ -57,7 +57,7 @@ _RAG_DOCUMENTS_ENABLED = os.environ.get("RAG_DOCUMENTS_ENABLED", "").lower() in 
 # `user:` is shared across one user's sessions, and no prefix is session-only.
 # These four were all `app:`, which was wrong in three different ways (proven on
 # test: a turn counter climbed 125→131 across sessions belonging to BOTH
-# yourcompany.com and acme-energy.example).
+# yourcompany.com and acmeenergy.com).
 #   - docs_files / rag_corpus_name / doc_load_error describe ONE USER's private
 #     RAG corpus → `user:`. As `app:` they were a cross-user leak: a user who had
 #     uploaded nothing inherited another user's corpus name, and `search_documents`

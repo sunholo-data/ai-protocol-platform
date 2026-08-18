@@ -8,7 +8,7 @@
 - [local-dev-cli.md](local-dev-cli.md) — `aiplatform` CLI must exist before any of these options are useful
 - [mcp-app-integrations.md](mcp-app-integrations.md) — pattern for integrating external tooling that this doc inherits
 - [auth-and-permissions.md](auth-and-permissions.md) — auth context propagation
-- AILANG Cloud reference: [`<local-path>`](file://<local-path>)
+- AILANG Cloud reference: `<local-path>` (a local path)
 **Created**: 2026-04-11
 **Last Updated**: 2026-04-11
 
@@ -72,7 +72,7 @@ Score each axiom per [Product Axioms](../../product-axioms.md). Net score must b
 
 **Conflict Justifications:** None.
 
-**Standards compliance check:** No new protocols. The decision is between existing runtimes. The selected option (see §Recommendation) reuses AILANG Cloud's existing REST + Pub/Sub message protocol, which is already documented in [`<local-path>`](file://<local-path>).
+**Standards compliance check:** No new protocols. The decision is between existing runtimes. The selected option (see §Recommendation) reuses AILANG Cloud's existing REST + Pub/Sub message protocol, which is already documented in `<local-path>` (a local path).
 
 ## Design
 
@@ -452,8 +452,8 @@ This doc deliberately **does not** ship implementation. The plan is staged:
 - [agent-factory.md](agent-factory.md) — the v6 ADK agent factory (relevant if the future user-facing path picks Option A)
 - [docs/talks/ai-ui-protocol-stack.md](../../talks/ai-ui-protocol-stack.md) — the workshop narrative; "Aitana operates Aitana via Aitana" is a credible Phase 3 demo if a use case materializes
 - **External (AILANG Cloud — sibling system, Sunholo-operated):**
-  - [`<local-path>`](file://<local-path>)
-  - [`<local-path>`](file://<local-path>)
+  - `<local-path>` (a local path)
+  - `<local-path>` (a local path)
   - `github.com/sunholo-data/ailang` (coordinator + executor source)
   - `github.com/sunholo-data/ailang_bootstrap` (skill plugin)
   - `github.com/sunholo-data/ailang-multivac` (Terraform + Cloud Build)

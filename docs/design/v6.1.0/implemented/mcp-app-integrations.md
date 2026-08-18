@@ -8,7 +8,7 @@
 - v6.0.0 backend + frontend running (✅)
 - [streaming-and-protocols.md](streaming-and-protocols.md) — AG-UI tool-call event flow (the existing `TOOL_CALL_RESULT.content` channel is the carrier; no new event type)
 - [tools-porting-guide.md](tools-porting-guide.md) — `McpToolset` registration pattern proven via 1A.3
-- [platform-deploy skill](../../../.claude/skills/platform-deploy/SKILL.md) — three-repo deploy flow for the sidecar
+- platform-deploy skill (the deploy skill) — three-repo deploy flow for the sidecar
 **Created**: 2026-04-11
 **Last Updated**: 2026-04-30
 
@@ -411,7 +411,7 @@ After M1 captured fixtures showed real MCP servers ship UI by REFERENCE (tool de
 
 ### Phase 4 (revised 2026-04-30): Sidecar Cloud Run deployment — three-repo touch (~1.25 day)
 
-**This phase touches three repos per the [platform-deploy skill](../../../.claude/skills/platform-deploy/SKILL.md). Read that skill BEFORE starting Phase 4 — the IAM cascade and per-env directory structure have specific gotchas (per `gotcha_two_deploy_projects` and `reference_promotion_pattern` memory).** Dev-only first; promote to test/prod after dev demo lands.
+**This phase touches three repos per the platform-deploy skill (the deploy skill). Read that skill BEFORE starting Phase 4 — the IAM cascade and per-env directory structure have specific gotchas (per `gotcha_two_deploy_projects` and `reference_promotion_pattern` memory).** Dev-only first; promote to test/prod after dev demo lands.
 
 **Repo 1 — `sunholo-data/ai-protocol-platform` (this repo):**
 - [ ] Add `infrastructure/mcp-ext-apps-map/Dockerfile` that pins a specific `modelcontextprotocol/ext-apps` commit, builds `examples/map-server`, runs on `$PORT` with `streamable_http` transport. Multi-stage build to keep the image small (~0.15d)

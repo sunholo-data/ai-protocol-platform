@@ -13,14 +13,14 @@ from db.clients import ClientConfig, resolve_default_skill
 
 
 def _make_user() -> User:
-    return User(uid="caller-uid", email="user@acme-energy.example", domain="acme-energy.example")
+    return User(uid="caller-uid", email="user@acmeenergy.com", domain="acmeenergy.com")
 
 
 # --- ClientConfig.default_skill model ---
 
 
 def test_client_config_default_skill_round_trips():
-    cfg = ClientConfig(domain="acme-energy.example", default_skill="one-ppa-expert")
+    cfg = ClientConfig(domain="acmeenergy.com", default_skill="one-ppa-expert")
     assert cfg.default_skill == "one-ppa-expert"
     restored = ClientConfig.model_validate(cfg.model_dump())
     assert restored.default_skill == "one-ppa-expert"
@@ -34,13 +34,13 @@ def test_client_config_default_skill_defaults_none():
 
 
 def test_resolve_default_skill_prefers_explicit():
-    cfg = ClientConfig(domain="acme-energy.example", default_skill="one-ppa-expert", enabled_skills=["other", "x"])
+    cfg = ClientConfig(domain="acmeenergy.com", default_skill="one-ppa-expert", enabled_skills=["other", "x"])
     with mock.patch("db.clients.get_client_sync", return_value=cfg):
         assert resolve_default_skill(_make_user()) == "one-ppa-expert"
 
 
 def test_resolve_default_skill_falls_back_to_first_enabled():
-    cfg = ClientConfig(domain="acme-energy.example", enabled_skills=["one-ppa-expert", "web-researcher"])
+    cfg = ClientConfig(domain="acmeenergy.com", enabled_skills=["one-ppa-expert", "web-researcher"])
     with mock.patch("db.clients.get_client_sync", return_value=cfg):
         assert resolve_default_skill(_make_user()) == "one-ppa-expert"
 
@@ -74,7 +74,7 @@ def client(app):
 
 def test_clients_me_returns_resolved_config(client):
     cfg = ClientConfig(
-        domain="acme-energy.example",
+        domain="acmeenergy.com",
         display_name="Acme Energy",
         enabled_skills=["one-ppa-expert", "one-doc-compare", "web-researcher"],
         default_skill="one-ppa-expert",
@@ -84,7 +84,7 @@ def test_clients_me_returns_resolved_config(client):
         resp = client.get("/api/clients/me")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["domain"] == "acme-energy.example"
+    assert body["domain"] == "acmeenergy.com"
     assert body["default_skill"] == "one-ppa-expert"
     assert body["enabled_skills"] == ["one-ppa-expert", "one-doc-compare", "web-researcher"]
     # documents_bucket must NOT leak via this non-admin endpoint.

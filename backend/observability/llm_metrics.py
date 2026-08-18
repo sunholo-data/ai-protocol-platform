@@ -3,7 +3,15 @@
 Records estimated cost per model call as an OTEL counter.
 Called from ADK after_agent callbacks or middleware.
 
-Cost estimates are approximate — based on published pricing as of 2026-04.
+Cost estimates are approximate — based on published pricing verified 2026-08-13
+(ai.google.dev/gemini-api/docs/pricing, ai.google.dev/gemini-api/docs/latest-model,
+the claude-api skill's cached model table, and OpenAI pricing aggregators for the
+GPT-5.6 family). Model keys must match `str(llm_request.model)` — the ADK model
+object's api_name (dotted for Gemini: "gemini-3.7-flash"; provider-prefixed for
+Claude/OpenAI via LiteLlm: "anthropic/claude-opus-4-8", "openai/gpt-5.6-sol" —
+substring matching below doesn't need the prefix). Not every registry model has
+confirmed pricing; an unmatched model returns 0.0 by design (see estimate_cost)
+rather than a guess — extend this table instead of estimating.
 """
 
 from __future__ import annotations
@@ -24,20 +32,34 @@ token_counter = _meter.create_counter(
     unit="tokens",
 )
 
-# Approximate cost per 1M tokens (input, output) — USD
-# Source: published pricing pages as of 2026-04
+# Approximate cost per 1M tokens (input, output) — USD. Verified 2026-08-13.
+# ORDER MATTERS: matching is substring containment (`known in key`), first hit
+# wins — a "-lite" variant MUST precede its non-lite prefix (e.g.
+# "gemini-2.5-flash" is a literal substring of "gemini-2.5-flash-lite") or the
+# lite call prices at the non-lite rate. Every key below is currently
+# collision-free by full-model-id specificity; keep it that way when adding
+# entries — no generic short buckets ("claude-sonnet", "gpt-4o-mini"-style).
 _COST_PER_1M: dict[str, tuple[float, float]] = {
-    # Gemini
-    "gemini-2.5-flash": (0.15, 0.60),
-    "gemini-2.5-pro": (1.25, 10.00),
-    "gemini-2.0-flash": (0.10, 0.40),
-    # Claude (via Vertex AI)
-    "claude-sonnet": (3.00, 15.00),
-    "claude-haiku": (0.25, 1.25),
-    "claude-opus": (15.00, 75.00),
+    # Gemini — lite variants first (substring-of-non-lite hazard, see above)
+    "gemini-3.5-flash-lite": (0.30, 2.50),
+    "gemini-2.5-flash-lite": (0.10, 0.40),
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.5-pro": (1.25, 10.00),  # prompts <= 200K; 200K+ is (2.50, 15.00), not modeled
+    "gemini-3.6-flash": (1.50, 7.50),
+    "gemini-3.7-flash": (0.75, 3.75),  # introductory through 2026-12-31; then (1.50, 7.50)
+    # Claude (direct Anthropic API — see backend/CLAUDE.md privacy boundary)
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-5": (3.00, 15.00),  # (2.00, 10.00) introductory through 2026-08-31, not modeled
+    "claude-opus-4-7": (5.00, 25.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-fable-5": (10.00, 50.00),
     # OpenAI (via LiteLlm)
-    "gpt-4o": (2.50, 10.00),
-    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-5.6-luna": (0.20, 1.20),
+    "gpt-5.6-terra": (2.00, 12.00),
+    "gpt-5.6-sol": (5.00, 30.00),
+    "gpt-5.4": (2.50, 15.00),
+    "gpt-5.1-chat-latest": (1.25, 10.00),
 }
 
 

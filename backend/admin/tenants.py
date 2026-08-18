@@ -390,7 +390,7 @@ def onboard_tenant(
     write; a bucket/group-tag warning is surfaced but does not block."""
     domain = (body.domain or "").strip().lower()
     if not domain or "." not in domain:
-        raise HTTPException(status_code=422, detail="A valid email domain is required (e.g. acme-energy.example).")
+        raise HTTPException(status_code=422, detail="A valid email domain is required (e.g. acmeenergy.com).")
 
     _require_tenant_admin(user, domain)
 

@@ -443,7 +443,7 @@ None — no backend changes.
 ## Related Documents
 
 - [docs/design/v6.4.0/fork-visual-demo-pullback.md](fork-visual-demo-pullback.md) — sister sprint; covers landing + audit-pane components. This doc deliberately reuses 4.1's audit-pane slot if/when it lands.
-- [docs/design/v6.4.0/multi-tenant-demo-readiness.md](multi-tenant-demo-readiness.md) — ONE-content sprint that instantiates the workbench artefacts this shell hosts.
+- the deployment's demo-readiness doc (deployment-private) — ONE-content sprint that instantiates the workbench artefacts this shell hosts.
 - [docs/design/v6.2.0/implemented/multi-surface-rendering.md](../v6.2.0/implemented/multi-surface-rendering.md) — surface mount foundation
 - [docs/design/v6.2.0/implemented/a2ui-surface-context.md](../v6.2.0/implemented/a2ui-surface-context.md) — workspace ↔ agent state loop
 - [docs/design/v6.2.0/implemented/artefact-render-hook.md](../v6.2.0/implemented/artefact-render-hook.md) — defence-in-depth for MCP App iframes

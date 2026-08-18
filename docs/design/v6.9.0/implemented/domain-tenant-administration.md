@@ -4,7 +4,7 @@
 **Priority**: P1
 **Estimated**: 4 days
 **Scope**: Fullstack
-**Dependencies**: 6.3.0 client-tenant-management ✅, 6.4.0 one-app-fork-convergence ✅, 6.5.0 auth-landing ✅, [administration-overview.md](administration-overview.md) (9.1 shared admin identity + audit foundation)
+**Dependencies**: 6.3.0 client-tenant-management ✅, 6.4.0 fork-convergence ✅, 6.5.0 auth-landing ✅, [administration-overview.md](administration-overview.md) (9.1 shared admin identity + audit foundation)
 **Created**: 2026-07-14
 **Last Updated**: 2026-07-16
 
@@ -288,7 +288,7 @@ audit record and that a real domain user lands on `default_skill` and sees only
 
 - [administration-overview.md](administration-overview.md) (9.1 — shared admin identity + audit)
 - [skill-administration.md](skill-administration.md) (9.2), [user-group-administration.md](user-group-administration.md) (9.3)
-- [client-tenant-management.md](../v6.3.0/implemented/client-tenant-management.md), [multi-tenant-demo-readiness.md](../v6.4.0/multi-tenant-demo-readiness.md)
+- [client-tenant-management.md](../v6.3.0/implemented/client-tenant-management.md), the deployment's demo-readiness doc (deployment-private)
 - [resource-access-control.md](../v6.0.0/implemented/resource-access-control.md)
 
 ---

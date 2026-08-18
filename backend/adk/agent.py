@@ -157,13 +157,19 @@ def resolve_model(model_id: str) -> Gemini | LiteLlm:
     """
     resolved = api_name_for(model_id)
     if resolved.startswith("gemini-"):
-        # Global-endpoint-only models (registry residency: global — e.g. the
-        # gemini-3.x previews, verified 2026-07-10) 404 on the default
-        # region-pinned client (GOOGLE_CLOUD_LOCATION=europe-west1). Route
-        # them through an explicit location="global" client. Note: global
-        # endpoint = NOT EU-resident; eu-strict deployments reject these at
+        # Vertex region/endpoint availability is NOT uniform across Gemini
+        # generations (verified per-model via live probes — see
+        # config/models.yaml comments). An entry with an explicit `location`
+        # (e.g. a Gemini 3.x model whose only EU option is the jurisdictional
+        # multi-region endpoint, location="eu", not a europe-west* region)
+        # is pinned there. Failing that, `residency: global` entries (404 on
+        # the default region-pinned client, GOOGLE_CLOUD_LOCATION=europe-west1)
+        # route through location="global". Note: global endpoint = NOT
+        # EU-resident; eu-strict deployments reject these at
         # resolve_model_chain before this branch matters.
         entry = entry_for(model_id)
+        if entry is not None and entry.location:
+            return RegionalGemini(model=resolved, location=entry.location)
         if entry is not None and entry.residency == "global":
             return RegionalGemini(model=resolved, location="global")
         return Gemini(model=resolved)

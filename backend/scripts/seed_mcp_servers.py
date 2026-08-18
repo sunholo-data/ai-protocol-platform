@@ -62,6 +62,7 @@ EXT_APPS_MAP_CONFIG = {
     "tags": ["geo", "visualization", "mcp-app"],
 }
 
+
 # MCP Toolbox (v6.14.0) — Google's database gateway, run as a SIDECAR container
 # inside platform-frontend rather than as its own Cloud Run service.
 #
@@ -78,7 +79,37 @@ EXT_APPS_MAP_CONFIG = {
 # Toolbox's default port is 5000. The path is TOOLSET-SCOPED — /mcp/<toolset>
 # serves only that toolset's tools, which is how a fork exposes a different
 # per-client toolset without touching the registry.
-TOOLBOX_URL = "http://127.0.0.1:5000/mcp/example"
+# TOOLSET NAMES COME FROM THE SHIPPED CONFIG, not a constant here.
+#
+# TEMPLATE-INVERT M4 scrubbed the customer's toolset name to the generic
+# `example` in this file, while the deployed sidecar kept serving the real
+# toolset — so the registry pointed at a path Toolbox does not serve and the
+# skills silently resolved to no tools. Third instance of the same class as
+# ENTSOE_PROJECT and tools.yaml: a scrubbed value that was load-bearing.
+#
+# Reading the config makes the registry agree with the sidecar by construction,
+# in this deployment AND in a fork, which is the same fix bq.py took.
+def _toolsets() -> list[str]:
+    """Toolset names declared by whichever tools.yaml this checkout has."""
+    import yaml as _yaml
+
+    for name in ("tools.yaml", "tools.example.yaml"):
+        path = Path(__file__).resolve().parents[2] / "infrastructure" / "mcp-toolbox" / name
+        if not path.exists():
+            continue
+        return [
+            str(d["name"])
+            for d in _yaml.safe_load_all(path.read_text())
+            if isinstance(d, dict) and d.get("kind") == "toolset" and d.get("name")
+        ]
+    return []
+
+
+_TOOLSETS = _toolsets()
+_PRIMARY_TOOLSET = _TOOLSETS[0] if _TOOLSETS else "example"
+_BQ_TOOLSET = next((n for n in _TOOLSETS if "bigquery" in n or n.endswith("-bq")), _PRIMARY_TOOLSET)
+
+TOOLBOX_URL = f"http://127.0.0.1:5000/mcp/{_PRIMARY_TOOLSET}"
 TOOLBOX_CONFIG = {
     "name": "Toolbox — ONE MarketData PPA prices",
     "transport": "http",
@@ -100,7 +131,7 @@ TOOLBOX_CONFIG = {
 # so two documents let one-ppa-expert keep exactly its two curated MarketData tools
 # while one-bigquery gets the generic executors, with no overlap. Merging them
 # would hand every MarketData consumer arbitrary SQL by accident.
-TOOLBOX_BQ_URL = "http://127.0.0.1:5000/mcp/one-bigquery"
+TOOLBOX_BQ_URL = f"http://127.0.0.1:5000/mcp/{_BQ_TOOLSET}"
 TOOLBOX_ONE_BQ_CONFIG = {
     "name": "Toolbox — ONE BigQuery (scoped ad-hoc query)",
     "transport": "http",

@@ -37,13 +37,18 @@ from __future__ import annotations
 import argparse
 import ast
 import logging
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger("migrate_v5_channel_mappings")
 
-DEFAULT_SOURCE = Path("<your-v5-source>/backend/channel_mappings.py")
+# The v5 checkout lives wherever the operator cloned it, so there is no default
+# that is right for anyone but its author. Set V5_SOURCE_ROOT (or pass --source)
+# to point at the v5 backend; a one-off migration script does not get to hardcode
+# one machine's filesystem layout.
+DEFAULT_SOURCE = Path(os.environ.get("V5_SOURCE_ROOT", "../v5-source/backend")) / "channel_mappings.py"
 # v6's identity resolver derives the firebase_uid from `channel-{channel}_{user_id}`.
 # Mirror that here so the v5 import lands at the same UID an auto-create would have.
 _DERIVED_UID_PREFIX = "channel-"

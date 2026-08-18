@@ -35,6 +35,46 @@ def _make_bq_row(year: int, month: int, day: int, hour: int, price: float | None
     return row
 
 
+@pytest.fixture(autouse=True)
+def _configured_entsoe_project(monkeypatch: pytest.MonkeyPatch):
+    """Give the tool a data project, the way a deployed env does.
+
+    `_ENTSOE_PROJECT` is read at IMPORT time, so setting the env var here would
+    be too late — patch the module attribute. Deliberately a fake project: the
+    real one is deployment config and naming it here would put it back into a
+    shipped file (TEMPLATE-INVERT).
+
+    The unconfigured path has its own test below.
+    """
+    from tools import entsoe_query
+
+    monkeypatch.setattr(entsoe_query, "_ENTSOE_PROJECT", "test-entsoe-project")
+
+
+def test_unconfigured_project_says_so_instead_of_querying(monkeypatch: pytest.MonkeyPatch):
+    """No ENTSOE_PROJECT must name the missing knob, not emit `bq://.entsoe.…`.
+
+    Regression guard for TEMPLATE-INVERT M4, where the identity scrub replaced
+    the hardcoded project with a placeholder that no pipeline supplied. The
+    symptom was a malformed BigQuery reference — or an empty result the agent
+    would relay as "no prices found", which is worse.
+    """
+    import asyncio
+
+    from tools import entsoe_query
+
+    monkeypatch.setattr(entsoe_query, "_ENTSOE_PROJECT", "")
+
+    with patch("google.cloud.bigquery.Client") as client:
+        result = asyncio.run(
+            entsoe_query.entsoe_day_ahead_prices(bidding_zone="DK1", start_date="2026-06-01", end_date="2026-06-02")
+        )
+
+    assert result.get("configured") is False
+    assert "ENTSOE_PROJECT" in result["error"]
+    client.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Zone resolution (pure)
 # ---------------------------------------------------------------------------
@@ -90,7 +130,9 @@ async def test_returns_rows_with_source_uri_citation():
     assert result["rows"][1]["ts"] == "2026-06-01T01:00:00+00:00"
     # Source URI is the citation chip target — must reference the RESOLVED zone
     # table (DK1 → the Denmark zone table) and the query parameters.
-    assert "bq://your-entsoe-project.entsoe.data_zones_denmark_hourly" in result["source_uri"]
+    from tools import entsoe_query
+
+    assert f"bq://{entsoe_query._ENTSOE_PROJECT}.entsoe.data_zones_denmark_hourly" in result["source_uri"]
     assert "bidding_zone=DK1" in result["source_uri"]
     # The query must read the per-zone column, not a bare price column.
     called_query = fake_client.query.call_args[0][0]

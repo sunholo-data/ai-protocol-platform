@@ -253,7 +253,7 @@ LOCAL_MODE=1 path:
 - **Checkpoint:** Two attendees on the shared tier cannot read each other's chat sessions. Commit `feat(LOCAL_MODE M4): shared workshop Firestore tier + tightened rules`.
 
 ### M5 — Repo scrub for public-fork prep (~1 day)
-- [ ] Remove `internal preview bundle/` (NDA — covered by [internal feedback notes.md](../../feedback/internal feedback notes.md), but the wheel + skill bundle stay private)
+- [ ] Remove `internal preview bundle/` (NDA — covered by internal feedback notes.md (internal notes), but the wheel + skill bundle stay private)
 - [ ] Remove NDA PDFs: `docs/External Preview Guide_ Agents CLI (1).pdf`, `docs/vendor/Preview Guide_ Python ADK MCP.pdf`
 - [ ] Remove `docs/feedback/` (or relocate to a private repo)
 - [ ] Remove `.claude/state/sprints/`, `.claude/hooks/lint_on_edit.sh`'s hardcoded `<local-path>` (templated via env)

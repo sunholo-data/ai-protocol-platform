@@ -1,6 +1,6 @@
 # Google Workspace MCP Integration Guide
 
-**Status**: Planned — surfaced by [Shepherd / an internal-tools fork](../forks/internal-tools-fork/v0.1.0/scope.md)
+**Status**: Planned — surfaced by an internal-tools fork
 **Priority**: P2 — documentation + reference config, not a feature build
 **Scope**: Template documentation + one reference skill + auth pattern decisions
 **Dependencies**: [MCP strategy](../v6.0.0/implemented/agent-factory.md) (template already supports `McpToolset`)
@@ -60,7 +60,7 @@ Q1: Is the skill user-facing (a Sheep asks it a question)?
 Q2: Is the skill scheduled or event-triggered?
     YES → Service account with domain-wide delegation.
             fork admin grants DWD via Google Workspace admin console.
-            SA acts as a designated bot identity ("shepherd-bot@the internal-tools fork.org").
+            SA acts as a designated bot identity ("the internal-tools fork-bot@the internal-tools fork.org").
             Pro: works without a user online.
             Con: requires admin setup; bot identity sees what bot identity is given.
     NO → impossible — skills are either user-driven or trigger-driven.
@@ -71,9 +71,9 @@ Q3: Does the skill take a write action (send email, create event, modify sheet)?
             Reason: defense in depth + auditability.
 ```
 
-**Shepherd-specific:**
+**the internal-tools fork-specific:**
 - `contract-qa` (user-facing) → OAuth-per-Sheep on first use, scope = `drive.readonly`, folder filter = configured contract folders
-- `contract-watch` (scheduled) → SA+DWD as `shepherd-bot@the internal-tools fork.org`, scope = same folder set, read-only
+- `contract-watch` (scheduled) → SA+DWD as `the internal-tools fork-bot@the internal-tools fork.org`, scope = same folder set, read-only
 
 ### Folder/scope enforcement
 
@@ -128,11 +128,11 @@ The reference skill includes a 5-minute result cache pattern.
 
 | Step | Est | Notes |
 |------|-----|-------|
-| Survey current Google MCP server catalogue (day-1 task before Shepherd Chunk 2) | 1h | Verify URLs, auth options, scope params |
+| Survey current Google MCP server catalogue (day-1 task before the internal-tools fork Chunk 2) | 1h | Verify URLs, auth options, scope params |
 | Write `docs/integrations/google-workspace.md` with auth decision tree + quota table | 0.5h | Lift from this doc |
 | Reference skill `drive-search.yaml` + agent factory wiring example | 0.5h | Template ships this |
 
-Plus follow-up if Shepherd's Chunk 2 hits limits:
+Plus follow-up if the internal-tools fork's Chunk 2 hits limits:
 - 4h fallback: bespoke `drive-contracts` MCP server build, becomes the alt-pattern documented for forks that need it
 
 ## Risk Register
@@ -140,7 +140,7 @@ Plus follow-up if Shepherd's Chunk 2 hits limits:
 | Risk | Likelihood | Mitigation |
 |------|-----------|------------|
 | Google catalogue changes server names/URLs | High | Config-driven (env + Firestore); doc explicitly says "verify catalogue on day 1 of any fork" |
-| OAuth-per-user adds onboarding friction Sheep don't tolerate | Medium | For Shepherd, fall back to SA+DWD for all read skills; OAuth only for write actions |
+| OAuth-per-user adds onboarding friction Sheep don't tolerate | Medium | For the internal-tools fork, fall back to SA+DWD for all read skills; OAuth only for write actions |
 | Server lacks folder-scoping in API | Medium | Skill-side filter is the belt-and-braces enforcement; works regardless |
 | Rate limits surface only at scale | Medium | Documented quotas + caching pattern in reference skill; alert on `429` rate in audit log |
 | Tokens stored in Firestore become a target | Medium | Cloud KMS encryption + access via SA only + 90-day rotation |
@@ -164,13 +164,13 @@ Plus follow-up if Shepherd's Chunk 2 hits limits:
 
 1. **Token storage location.** Firestore + KMS, or Secret Manager? Firestore is per-user friendly; Secret Manager is more standard for service-level secrets. Recommendation: Firestore for user OAuth, Secret Manager for SA credentials.
 2. **Multi-Workspace forks.** A fork serving multiple Workspaces (rare but possible) needs per-tenant SA configuration. Defer until a use case appears.
-3. **Drive comments, sharing changes — eventarc?** Google offers Workspace Events API; could feed events into [event-driven-skills](event-driven-skills.md). Defer to v0.2.0 unless Shepherd's contract-watch needs change-feed instead of polling.
+3. **Drive comments, sharing changes — eventarc?** Google offers Workspace Events API; could feed events into [event-driven-skills](event-driven-skills.md). Defer to v0.2.0 unless the internal-tools fork's contract-watch needs change-feed instead of polling.
 4. **Caching layer location.** Per-skill cache in Firestore, or shared cache in Cloud Memorystore? Firestore is simpler; revisit if cache pressure becomes real.
 
 ## Related Documents
 
 - [Event-driven skills](event-driven-skills.md) — pairs with this for scheduled Drive scans
 - [Audit log + analytics](audit-log-and-analytics.md) — captures Google MCP tool calls
-- [an internal-tools fork scope](../forks/internal-tools-fork/v0.1.0/scope.md) — first consumer (contract-qa + contract-watch)
+- an internal-tools fork scope (that fork's own repo) — first consumer (contract-qa + contract-watch)
 - [Agent factory](../v6.0.0/implemented/agent-factory.md) — `McpToolset` wiring point
 - [MCP strategy](../../../.claude/projects/-Users-mark-dev-aitana-labs-platform/memory/project_mcp_strategy.md) — template MCP approach: FunctionTool for core, McpToolset for remote

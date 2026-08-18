@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import sys
+import os
 from pathlib import Path
 
 import click
@@ -43,11 +44,34 @@ _TOOLBOX_DIR = _REPO_ROOT / "infrastructure" / "mcp-toolbox"
 DEFAULT_URL = "http://127.0.0.1:5000/mcp/one-bigquery"
 
 # The DATA project (not the billing project the source runs jobs in).
-_DATA_PROJECT = "your-entsoe-project"
+#
+# TEMPLATE-INVERT M3: deployment identity, so no hardcoded default — a fork
+# inheriting ours would aim every query at a BigQuery project it cannot read
+# and get a confusing permission error rather than a clear "not configured".
+# Set AIPLATFORM_BQ_DATA_PROJECT for this deployment.
+_DATA_PROJECT_ENV = "AIPLATFORM_BQ_DATA_PROJECT"
 
-# source name -> tool-family prefix. The two families exist because a Toolbox
-# source declares ONE BigQuery location and ONE's datasets span two.
-_FAMILY_BY_SOURCE = {"one-curated-ew4": "bq_market", "one-curated-ew1": "bq_analysis"}
+
+def _data_project() -> str:
+    """The BigQuery data project, from the environment.
+
+    Returns a recognisable placeholder rather than raising, so `--help` and
+    dataset listing still work on a fresh checkout; the query itself then fails
+    with a project name that names its own problem.
+    """
+    return os.environ.get(_DATA_PROJECT_ENV, "") or "SET-AIPLATFORM_BQ_DATA_PROJECT"
+
+# A "family" is a group of executor tools bound to one Toolbox source. Several
+# exist because a Toolbox source declares a SINGLE BigQuery location, and a
+# deployment's datasets may span more than one region.
+#
+# TEMPLATE-INVERT M4: this used to be a hardcoded {source-name: family} dict
+# naming this deployment's private BigQuery sources. Those names shipped to the
+# public template and NEITHER the scrub table nor the customer-identifier gate
+# could see them — they carry no customer spelling, so there was nothing to
+# match on. Deriving the map from the config removes the leak by construction
+# AND makes the CLI work against any deployment's toolset rather than ours.
+_QUERY_TOOL_SUFFIX = "_query"
 
 
 def _config_path() -> Path | None:
@@ -68,11 +92,23 @@ def _dataset_routing() -> dict[str, str]:
     path = _config_path()
     if path is None:
         return {}
+    docs = [d for d in yaml.safe_load_all(path.read_text()) if isinstance(d, dict)]
+
+    # {source name: family prefix}, derived from the config's own executor tools:
+    # a tool named "<family>_query" declares the source it runs against.
+    family_by_source = {
+        str(d["source"]): str(d["name"])[: -len(_QUERY_TOOL_SUFFIX)]
+        for d in docs
+        if d.get("kind") == "tool"
+        and str(d.get("name", "")).endswith(_QUERY_TOOL_SUFFIX)
+        and d.get("source")
+    }
+
     routing: dict[str, str] = {}
-    for doc in yaml.safe_load_all(path.read_text()):
-        if not isinstance(doc, dict) or doc.get("kind") != "source":
+    for doc in docs:
+        if doc.get("kind") != "source":
             continue
-        family = _FAMILY_BY_SOURCE.get(doc.get("name", ""))
+        family = family_by_source.get(str(doc.get("name", "")))
         if not family:
             continue
         for qualified in doc.get("allowedDatasets") or []:
@@ -170,7 +206,7 @@ def tables(dataset: str, url: str, as_json: bool) -> None:
     """
     family = _family_for(dataset)
     sql_text = (
-        f"SELECT table_name FROM `{_DATA_PROJECT}.{dataset}.INFORMATION_SCHEMA.TABLES` ORDER BY table_name"
+        f"SELECT table_name FROM `{_data_project()}.{dataset}.INFORMATION_SCHEMA.TABLES` ORDER BY table_name"
     )
     content, is_error = _call(url, f"{family}_query", {"sql": sql_text})
     _emit(content, is_error, as_json=as_json)
@@ -191,7 +227,7 @@ def schema(table: str, url: str, as_json: bool) -> None:
     # quote-stripped first — the C2 rule applies to hand-written SQL too.
     safe = table_name.replace("\\", "").replace("'", "").replace('"', "")
     sql_text = (
-        f"SELECT column_name, data_type FROM `{_DATA_PROJECT}.{dataset}.INFORMATION_SCHEMA.COLUMNS` "
+        f"SELECT column_name, data_type FROM `{_data_project()}.{dataset}.INFORMATION_SCHEMA.COLUMNS` "
         f"WHERE table_name = '{safe}' ORDER BY ordinal_position"
     )
     content, is_error = _call(url, f"{family}_query", {"sql": sql_text})

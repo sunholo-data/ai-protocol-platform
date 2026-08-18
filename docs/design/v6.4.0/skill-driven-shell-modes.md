@@ -418,7 +418,7 @@ Mon 2026-06-15 → Thu 2026-06-18. Single dev. Each milestone independently reve
 ## Related Documents
 
 - [docs/design/v6.4.0/internal-app-shell-port.md](internal-app-shell-port.md) — 4.3 ships the chat-shell primitives this doc reuses across shells. Must land first.
-- [docs/design/v6.4.0/multi-tenant-demo-readiness.md](multi-tenant-demo-readiness.md) — 4.2 shipped one-doc-compare skill + SideBySideDocViewer that this doc promotes to a primary surface.
+- the deployment's demo-readiness doc (deployment-private) — 4.2 shipped one-doc-compare skill + SideBySideDocViewer that this doc promotes to a primary surface.
 - [docs/design/v6.2.0/implemented/multi-surface-rendering.md](../v6.2.0/implemented/multi-surface-rendering.md) — surface ID foundation (workspace/sidebar/modal).
 - [docs/design/v6.2.0/implemented/a2ui-surface-context.md](../v6.2.0/implemented/a2ui-surface-context.md) — surface state ↔ agent loop.
 - [docs/design/v6.0.0/implemented/skills-data-model.md](../v6.0.0/implemented/skills-data-model.md) — SkillConfig schema being extended.

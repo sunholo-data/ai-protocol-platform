@@ -219,7 +219,7 @@ ONE_LLMOPS_BUCKET = "your-project-id-dev-llmops-bucket"
 
 
 def _one_user() -> User:
-    return _make_user(uid="one-uid", email="analyst@acme-energy.example", domain="acme-energy.example")
+    return _make_user(uid="one-uid", email="analyst@acmeenergy.com", domain="acmeenergy.com")
 
 
 @pytest.mark.parametrize(
@@ -627,7 +627,7 @@ def test_self_registered_config_does_not_open_the_gate(app: FastAPI, client: Tes
         ownerId="stranger",  # <- owner-wins would return True
         ownerEmail="x@evil.com",
         accessControl={"type": "private"},
-        allowedDomains=["acme-energy.example"],
+        allowedDomains=["acmeenergy.com"],
     )
     factory, _ = _mock_gcs_blob(b"%PDF-1.7 secret", "application/pdf")
     try:
@@ -649,7 +649,7 @@ def test_config_without_allowed_domains_fails_closed(app: FastAPI, client: TestC
     cleanup = _install_user(app, _one_user())
     legacy = _make_bucket(
         gcsBucket=ONE_LLMOPS_BUCKET,
-        accessControl={"type": "domain", "domain": "acme-energy.example"},
+        accessControl={"type": "domain", "domain": "acmeenergy.com"},
         allowedDomains=[],  # predates the field / written straight to Firestore
     )
     factory, _ = _mock_gcs_blob(b"%PDF-1.7 secret", "application/pdf")
@@ -678,10 +678,10 @@ def test_blessed_bucket_readable_by_its_domain(app: FastAPI, client: TestClient)
         ownerId="admin-uid",
         ownerEmail="admin@yourcompany.com",
         accessControl={"type": "tagged", "tags": ["ONE"]},
-        allowedDomains=["acme-energy.example"],
+        allowedDomains=["acmeenergy.com"],
     )
     one_user_with_tag = _make_user(
-        uid="one-uid", email="analyst@acme-energy.example", domain="acme-energy.example", group_tags=frozenset({"ONE"})
+        uid="one-uid", email="analyst@acmeenergy.com", domain="acmeenergy.com", group_tags=frozenset({"ONE"})
     )
     cleanup()
     cleanup = _install_user(app, one_user_with_tag)

@@ -140,7 +140,7 @@ def _fill_welcome_buckets(resp: SkillResponse, user: User) -> SkillResponse:
     A shared SKILL.md leaves ``example_documents`` / ``bucket_browser`` ``bucket``
     EMPTY so each env resolves it per-env (no hardcoded bucket, no customer
     project). Resolution order:
-      1. ``welcome.documentsTenant`` set (e.g. ONE's ``acme-energy.example``) →
+      1. ``welcome.documentsTenant`` set (e.g. ONE's ``acmeenergy.com``) →
          that TENANT's per-env `documents_bucket` (the env llmops bucket aitana3
          indexes). This is the correct source for a shared library: it does NOT
          depend on who is viewing, so a platform admin sees ONE's PPAs just like a

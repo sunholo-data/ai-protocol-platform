@@ -118,7 +118,7 @@ class TestResolveDerivedGroupTags:
         mock_client.derived_group_tags = ["ONE", "beta"]
 
         with patch("db.clients.get_client_sync", return_value=mock_client):
-            tags = resolve_derived_group_tags("acme-energy.example")
+            tags = resolve_derived_group_tags("acmeenergy.com")
 
         assert tags == frozenset({"ONE", "beta"})
 

@@ -224,6 +224,6 @@ that speed advantage is the reason we are steering ONE to `.docx` at all.
 
 ## Related Documents
 
-- [UAT source record](../../feedback/platform-uat-2026-08-06.md)
+- UAT source record (internal notes)
 - [`backend/adk/CLAUDE.md`](../../../backend/adk/CLAUDE.md) — why data-shape fixes need a paired instruction
 - [conversation-context-fidelity.md](conversation-context-fidelity.md) — sibling P0 from the same session

@@ -85,7 +85,7 @@ def get_client(ctx: click.Context, domain: str) -> None:
     help=(
         "Comma-separated group tags auto-granted to every user from this domain "
         "(unioned with the JWT groupTags claim). Use to grant tagged-skill access "
-        "to a customer's whole domain (e.g. 'ONE' for acme-energy.example). "
+        "to a customer's whole domain (e.g. 'ONE' for acmeenergy.com). "
         "Omit to leave unchanged. Pass empty string to clear."
     ),
 )

@@ -43,15 +43,17 @@ class TestTierDefaults:
 class TestResolveTier:
     def test_lite_resolves_to_eu_resident_under_eu_strict(self, monkeypatch):
         # THE invariant: an eu-strict deployment (prod) must get an EU-resident
-        # `lite`, whatever the unrestricted variant is set to. The floating
-        # gemini-flash-lite-latest alias is global-only and 404s in
-        # europe-west1, so this is pinned to the concrete gemini-2.5-flash-lite
-        # (fastest EU-resident model measured). See models.yaml note.
+        # `lite`, whatever the unrestricted variant is set to. 2026-08-13: now
+        # gemini-3.5-flash-lite pinned to the "eu" jurisdictional multi-region
+        # endpoint (gemini-2.5-flash-lite has no single/multi-region EU option
+        # of its own generation still alive much longer — 2.5 family EOLs
+        # 2026-10-16). See models.yaml gemini-3-5-flash-lite-eu note.
         monkeypatch.setenv("MODEL_RESIDENCY_POLICY", "eu-strict")
         entry = resolve_tier("lite")
         assert entry.provider == "google"
         assert entry.residency == "eu"
-        assert entry.api_name == "gemini-2.5-flash-lite"
+        assert entry.api_name == "gemini-3.5-flash-lite"
+        assert entry.location == "eu"
 
     def test_lite_resolves_to_faster_3x_under_unrestricted(self, monkeypatch):
         # dev + test run MODEL_RESIDENCY_POLICY=unrestricted and take the

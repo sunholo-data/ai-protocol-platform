@@ -11,7 +11,7 @@
 
 The platform resolves each user's GCS document bucket from Firestore at `clients/{email_domain}`.
 The `db/clients.py` module reads this collection on every upload, but **nothing writes it** — no
-API, no CLI, no seed. Onboarding a client (e.g. Acme Energy at `acme-energy.example`) currently
+API, no CLI, no seed. Onboarding a client (e.g. Acme Energy at `acmeenergy.com`) currently
 requires opening the Firestore console and hand-writing a document. This violates two hard axioms:
 
 - **API FIRST**: platform state must only be modified through the versioned API, not via console.
@@ -34,11 +34,11 @@ There is no way to do this from the terminal, verify it, or hand it to a non-GCP
 commands with no Firestore console access.
 
 **Success metrics:**
-- `aiplatform client set acme-energy.example --documents-bucket acmeenergy-docs` creates or updates
+- `aiplatform client set acmeenergy.com --documents-bucket acmeenergy-docs` creates or updates
   the Firestore record and prints the new config in <2s
 - `aiplatform client list` shows all registered domains in a table
-- `aiplatform client get acme-energy.example` returns current config as JSON
-- `aiplatform client delete acme-energy.example` removes the record with a confirmation prompt
+- `aiplatform client get acmeenergy.com` returns current config as JSON
+- `aiplatform client delete acmeenergy.com` removes the record with a confirmation prompt
 - Backend unit tests cover the CRUD routes; CLI tests cover the four commands
 
 ---
@@ -84,7 +84,7 @@ management. The CLI follows the existing Click subcommand pattern used throughou
 
 ### Data Model
 
-`clients/{domain}` in Firestore — document ID is the email domain (e.g. `acme-energy.example`).
+`clients/{domain}` in Firestore — document ID is the email domain (e.g. `acmeenergy.com`).
 
 Existing `ClientConfig` in [backend/db/clients.py](../../../backend/db/clients.py) — **no schema
 changes needed**:
@@ -188,12 +188,12 @@ for env in dev test production; do
 done
 
 # 3. Register the client config — replaces Firestore console
-aiplatform --env dev client set acme-energy.example \
+aiplatform --env dev client set acmeenergy.com \
   --documents-bucket acmeenergy-docs \
   --display-name "Acme Energy"
 
 # 4. Verify
-aiplatform --env dev client get acme-energy.example
+aiplatform --env dev client get acmeenergy.com
 ```
 
 Steps 1–2 remain gcloud (IAM is infrastructure, not application state). Step 3 was previously
@@ -260,10 +260,10 @@ schema changes to revert.
 
 ## Success Criteria
 
-- [ ] `aiplatform --env dev client set acme-energy.example --documents-bucket acmeenergy-docs --display-name "Acme Energy"` succeeds and prints the config
+- [ ] `aiplatform --env dev client set acmeenergy.com --documents-bucket acmeenergy-docs --display-name "Acme Energy"` succeeds and prints the config
 - [ ] `aiplatform --env dev client list` shows the new entry in a table
-- [ ] `aiplatform --env dev client get acme-energy.example` returns full config as JSON
-- [ ] `aiplatform --env dev client delete acme-energy.example` removes it (with confirmation)
+- [ ] `aiplatform --env dev client get acmeenergy.com` returns full config as JSON
+- [ ] `aiplatform --env dev client delete acmeenergy.com` removes it (with confirmation)
 - [ ] Non-admin Firebase user gets 403 on all four backend routes
 - [ ] `pytest tests/api_tests/test_admin_clients.py` — all 8 tests pass
 - [ ] `pytest cli/tests/test_cli_client.py` — all 5 tests pass

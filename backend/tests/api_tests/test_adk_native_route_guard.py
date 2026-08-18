@@ -43,8 +43,8 @@ _ADMIN = User(
 )
 _PLAIN_USER = User(
     uid="user-uid",
-    email="alex@acme-energy.example",
-    domain="acme-energy.example",
+    email="alex@acmeenergy.com",
+    domain="acmeenergy.com",
     group_tags=frozenset({"ONE"}),
 )
 

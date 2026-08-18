@@ -12,9 +12,20 @@
 # ── Why this script exists at all ────────────────────────────────────────────
 # Three categories of work, and only the middle one is ours:
 #
-#   1. Terraform owns    — APIs, SA + IAM, Firestore, buckets, Artifact
+#   1. YOUR IaC owns     — APIs, SA + IAM, Firestore, buckets, Artifact
 #                          Registry, secret SHELLS, Pub/Sub, Cloud Run.
-#   2. THIS SCRIPT owns  — things with no Terraform resource. The load-bearing
+#
+#                          The template does NOT ship Terraform (decision
+#                          2026-08-17: the public tier is the gcloud path;
+#                          Terraform is the private deploy tier). This is not an
+#                          omission you should go looking for a root module to
+#                          fill — downstream feedback #17 was exactly that
+#                          search, and the misdirection cost real time.
+#
+#                          The gcloud path here is COMPLETE: bootstrap-gcp-project.sh
+#                          then this script gets you a deployed service. Adopt
+#                          IaC when you outgrow it, on your own terms.
+#   2. THIS SCRIPT owns  — things no IaC provider covers. The load-bearing
 #                          one is the Vertex Agent Engine: verified absent from
 #                          provider google v6.50.0 (1226 resources, zero
 #                          matching `reasoning`/`agent_engine`). Without it,

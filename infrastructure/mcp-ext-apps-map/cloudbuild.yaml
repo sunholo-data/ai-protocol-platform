@@ -7,6 +7,14 @@
 # Branch-based deployment: dev -> your-project-id (only env this sprint;
 # test/prod follow the same shape when they're cut). Substitutions
 # managed by Terraform — see multivac-aitana infrastructure repo.
+# TEMPLATE-INVERT M5 / downstream feedback #12: this pipeline used to build,
+# push AND deploy `:${BRANCH_NAME}`. BRANCH_NAME is EMPTY on a tag build, so the
+# reference rendered as `image:` and the step died with "invalid reference
+# format" — meaning this service could not be built at a tag at all, and any
+# environment running it could not be promoted as a unit.
+#
+# SHORT_SHA is populated on BOTH branch and tag builds, which is why it is the
+# immutable tag the other pipelines already use.
 
 substitutions:
   _SERVICE_NAME: mcp-ext-apps-map
@@ -31,7 +39,7 @@ steps:
     args:
       - 'build'
       - '-t'
-      - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/server:${BRANCH_NAME}'
+      - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/server:${SHORT_SHA}'
       - '.'
     timeout: 600s
 
@@ -41,7 +49,7 @@ steps:
     waitFor: ['build-mcp-ext-apps-map']
     args:
       - 'push'
-      - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/server:${BRANCH_NAME}'
+      - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/server:${SHORT_SHA}'
 
   # --- Deploy to Cloud Run (single container, public — used by both
   #     the agent's McpToolset on the backend AND the iframe in the browser
@@ -59,7 +67,7 @@ steps:
       - '--platform=managed'
       - '--allow-unauthenticated'
       - '--max-instances=3'
-      - '--image=${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/server:${BRANCH_NAME}'
+      - '--image=${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/server:${SHORT_SHA}'
       - '--port=8080'
       - '--memory=1Gi'
       - '--cpu=1'

@@ -94,7 +94,7 @@ After all of that, we ship a parsed document that renders but loses table layout
 
 ### What the ailang-parse workbench actually does
 
-[`docs/js/wasm-demo.js:1773`](file://<local-path>) (`buildA2UIDemo`) walks the adjacency-list nodes directly with explicit cases:
+`docs/js/wasm-demo.js:1773` (a local path) (`buildA2UIDemo`) walks the adjacency-list nodes directly with explicit cases:
 
 ```js
 case 'heading': // -> <h1>..<h6>

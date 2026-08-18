@@ -19,12 +19,13 @@
 # Scope: asserts the AI authors + the form EMITS on the wire (placement:"chat").
 # The submit -> surface read-back -> continue loop is the real-browser pass
 # (same split as handoff-e2e's confirm-card UX).
+
+source "$(dirname "${BASH_SOURCE[0]}")/_deploy_env.sh"
 set -euo pipefail
 
 ENV="${1:-dev}"
 case "$ENV" in
-  dev)  PROJECT="your-project-id";  HOST="https://your-service-url.example" ;;
-  test) PROJECT="your-project-id-test"; HOST="https://your-service-url.example" ;;
+  dev|test|prod) PROJECT="$(project_for_env "$ENV")"; HOST="$(host_for_env "$ENV")" ;;
   *) echo "usage: $0 [dev|test]" >&2; exit 2 ;;
 esac
 

@@ -1,7 +1,7 @@
 # v6.23.0 — Build Sequence
 
 **Cutover hardening.** Opened 2026-08-06, straight out of the ONE user-acceptance
-session ([source record](../../feedback/platform-uat-2026-08-06.md)). Unlike
+session (source record (internal notes)). Unlike
 v6.22.0, which came from a Google product announcement, every doc in this version
 traces to a named person describing a specific failure or need on a specific date.
 
@@ -142,6 +142,6 @@ Tomas for the context-fidelity journey he originally reported).
 
 ## Related
 
-- [UAT source record](../../feedback/platform-uat-2026-08-06.md) — parsed transcript + notes
+- UAT source record (internal notes) — parsed transcript + notes
 - [uat-triage-2026-08-06](uat-triage-2026-08-06.md) — every point raised, and where it went
 - [v6.22.0 SEQUENCE](../v6.22.0/SEQUENCE.md) — the platform-services version this runs alongside

@@ -102,7 +102,7 @@ class TestAuthoringTemplateAccess:
 
     def test_one_team_can_reach_it(self):
         assert "ONE" in self._tags(), (
-            "the ONE team's derived group tag is 'ONE' (clients/acme-energy.example"
+            "the ONE team's derived group tag is 'ONE' (clients/acmeenergy.com"
             ".derived_group_tags) — without it the tag gate rejects the team"
         )
 

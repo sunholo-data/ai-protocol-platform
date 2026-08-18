@@ -7,9 +7,11 @@
 # Frontend: http://localhost:3456  (Next.js, hot-reload)
 #
 # Both processes share this terminal — Ctrl-C kills both.
-# Firestore + Vertex AI hit the real your-project-id project via ADC.
+# Firestore + Vertex AI hit the real DEV_GCP_PROJECT (deploy.env) via ADC.
 # Run `gcloud auth application-default login` once if credentials are stale.
 
+
+source "$(dirname "${BASH_SOURCE[0]}")/_deploy_env.sh"
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,8 +19,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Force-set both vars — GCP_PROJECT shadows GOOGLE_CLOUD_PROJECT in
 # db/firestore.py, and the shell may already have GCP_PROJECT pointing at
 # a different project (e.g. multivac-internal-dev). Always use dev here.
-export GCP_PROJECT=your-project-id
-export GOOGLE_CLOUD_PROJECT=your-project-id
+export GCP_PROJECT="${DEV_GCP_PROJECT}"
+export GOOGLE_CLOUD_PROJECT="${DEV_GCP_PROJECT}"
 export GOOGLE_CLOUD_LOCATION="${GOOGLE_CLOUD_LOCATION:-europe-west1}"
 export GOOGLE_GENAI_USE_VERTEXAI="True"
 # MODEL-RELIABILITY M3: local dev mirrors the deployed dev policy (the
@@ -59,8 +61,8 @@ if [ -f "$ENV_FILE" ]; then
     # Re-pin the GCP project triple so .env can never silently downgrade
     # the local dev project (e.g. an old `GCP_PROJECT=multivac-internal-dev`
     # left in someone's .env after porting v5 tooling).
-    export GCP_PROJECT=your-project-id
-    export GOOGLE_CLOUD_PROJECT=your-project-id
+    export GCP_PROJECT="${DEV_GCP_PROJECT}"
+    export GOOGLE_CLOUD_PROJECT="${DEV_GCP_PROJECT}"
 fi
 
 # Pin frontend to 3456 — 3000 is often occupied by other local servers.
@@ -148,7 +150,7 @@ if [ -d "$SANDBOX_DIR/node_modules" ]; then
 fi
 
 # MCP Toolbox (database gateway). Deployed it is a SIDECAR container inside
-# platform-frontend; locally it is this raw binary. Either way the backend
+# the deployed Cloud Run service; locally it is this raw binary. Either way the backend
 # reaches it on the SAME loopback URL (127.0.0.1:5000), which is why the
 # mcp_servers registry entry needs no per-env variant.
 #

@@ -16,7 +16,7 @@
 
 ## Problem Statement
 
-Five downstream forks have stress-tested the platform over the last quarter — **CPH AIPLA** (Copenhagen University physics tutor), **a tutoring fork** (Danish schools), **Shepherd / internal-tools Tools** (collective ops), **gde-ap-agent** (Sunholo's Gemini Enterprise demo), and the early **Aitana** product surfaces. Each pushed protocol fixes upstream (the AIPLA template-extensions in v6.2.0 2.11–2.14; the gde-ap-agent G37–G46 hardening; the ACTION-TRIGGER write-and-run sprint). Those flowed back cleanly.
+Five downstream forks have stress-tested the platform over the last quarter — **CPH AIPLA** (Copenhagen University physics tutor), **a tutoring fork** (Danish schools), **the internal-tools fork / internal-tools Tools** (collective ops), **gde-ap-agent** (Sunholo's Gemini Enterprise demo), and the early **Aitana** product surfaces. Each pushed protocol fixes upstream (the AIPLA template-extensions in v6.2.0 2.11–2.14; the gde-ap-agent G37–G46 hardening; the ACTION-TRIGGER write-and-run sprint). Those flowed back cleanly.
 
 What didn't flow back: the **visible polish** that makes those forks compelling on stage. The audit pane (gde-ap-agent), the editorial landing + tech narrative (gde-ap-agent), the workspace artefact pattern (CPH AIPLA's KineBot / LedPlanck / Boldkast), and the workspace primitives (ProgressChecklist, ProblemStatementCard, WorkspaceShell, ChatRevealTab) all live downstream-only. Aitana itself currently boots into a chat surface with no narrative on top, no audit-style protocol visibility, and no rich workbench artefacts. The protocol stack is there; nothing in the demo shows it off.
 
@@ -323,7 +323,7 @@ Light. Three new demo skills as SKILL.md files; one optional `audit_specialist` 
 - [docs/design/v6.2.0/implemented/a2ui-surface-context.md](../v6.2.0/implemented/a2ui-surface-context.md) — workspace → agent state loop
 - [docs/design/v6.2.0/implemented/artefact-render-hook.md](../v6.2.0/implemented/artefact-render-hook.md) — defence-in-depth for workbench artefacts
 - [docs/design/template/](../template/) — upstream-feedback tracker (this doc is the next iteration after G37–G46)
-- [docs/design/forks/tutoring-fork/v0.1.0/scope.md](../forks/tutoring-fork/v0.1.0/scope.md) — sister fork with similar workspace needs
+- docs/design/forks/tutoring-fork/v0.1.0/scope.md (that fork's own repo) — sister fork with similar workspace needs
 - [docs/design/v6.1.0/local-dev-cli.md](../v6.1.0/implemented/local-dev-cli.md) — `aiplatform` CLI parent doc for `aiplatform demo`
 - [docs/talks/ai-ui-protocol-stack.md](../../talks/ai-ui-protocol-stack.md) — Croatia July 2026 narrative tracker
 - gde-ap-agent source: `<local-path>`

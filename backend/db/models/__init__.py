@@ -143,7 +143,14 @@ class SkillMetadata(BaseModel):
 
     author: str = "aitana"
     version: str = "1.0"
-    model: str = "gemini-2.5-flash"
+    # `pro` tier (not a pinned id) so an un-configured skill tracks the
+    # registry automatically and stays residency-safe — 2026-08-13: was a
+    # hardcoded gemini-2.5-flash, which EOLs 2026-10-16. See models.yaml
+    # platform_default comment: a raw global-endpoint id here would raise
+    # ResidencyViolationError under eu-strict; tiers resolve to EU variants
+    # automatically. `pro` (not `lite`) to preserve this fallback's prior
+    # capability class — gemini-2.5-flash was non-lite.
+    model: str = "pro"
     thinking_model: str | None = Field(default=None, alias="thinkingModel")
     # How hard this skill's PRIMARY agent should think (config/thinking.py).
     # A front door and a chaining specialist want opposite answers: measured

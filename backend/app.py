@@ -47,7 +47,9 @@ root_agent = Agent(
     # (retry + Gemini region fallback via ResilientLlm) — NOT a bare Gemini with
     # SDK-level retry_options, which multiplies attempts against the resilient
     # layer's budget (see adk/resilient_llm.py). v6.14.0 reliability sweep.
-    model=resolve_model_chain("gemini-2-5-flash"),
+    # `lite` (not a pinned id) so this tracks the registry automatically —
+    # 2026-08-13: was a hardcoded gemini-2-5-flash, which EOLs 2026-10-16.
+    model=resolve_model_chain("lite"),
     instruction=(
         "You are Aitana, a helpful AI assistant. "
         "You can help with document analysis, search, data extraction, and more. "

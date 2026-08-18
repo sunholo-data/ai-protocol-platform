@@ -1,4 +1,9 @@
-# CLI default backend URLs per environment.
+# CLI default backend URLs per environment. THIS IS THE EXAMPLE.
+#
+# `make materialize-config` copies it to config.yaml (gitignored), which the
+# CLI prefers when present. Real service URLs are deployment identity: a
+# tracked file holding ours here and placeholders upstream would be the same
+# path with different bytes on each side — a conflict on every sync.
 # Forks: update these values after deploying your own Cloud Run services.
 # Override at runtime with env vars: AIPLATFORM_API_URL (global) or
 # AIPLATFORM_API_URL_{ENV} (per-env, e.g. AIPLATFORM_API_URL_DEV).
@@ -21,9 +26,9 @@ logging:
     backend: sidecar   # FastAPI + ADK
     ui: main           # Next.js
   projects:
-    dev: your-project-id
+    dev: your-project-id-dev
     test: your-project-id-test
-    prod: your-project-id-prod
+    prod: your-project-id-production
 
 # Deployment / promotion targets for `aiplatform deploy` (v6.20.0, AIPLA #47).
 # `deploy status` reads these to report the live revision + image digests per
@@ -33,6 +38,6 @@ deploy:
   service: platform-frontend
   region: europe-west1
   projects:
-    dev: your-project-id
+    dev: your-project-id-dev
     test: your-project-id-test
-    prod: your-project-id-prod
+    prod: your-project-id-production

@@ -187,11 +187,13 @@ def create_web_search_agent() -> LlmAgent:
     # lazily). resolve_model_chain gives this sub-agent's Gemini turn the same
     # retry + region-fallback as the main agent (v6.14.0 reliability sweep). The
     # chain stays Gemini-only, so google_search/url_context grounding survives.
+    # `lite` tier (not a pinned id) so this tracks the registry automatically —
+    # 2026-08-13: was a hardcoded gemini-2-5-flash, which EOLs 2026-10-16.
     from adk.agent import resolve_model_chain
 
     return LlmAgent(
         name="web_search_agent",
-        model=resolve_model_chain("gemini-2-5-flash"),
+        model=resolve_model_chain("lite"),
         description="Searches the web and fetches URL content. Use for web search and URL lookup.",
         instruction=_WEB_INSTRUCTION,
         tools=[google_search, url_context],
@@ -206,12 +208,13 @@ def create_enterprise_search_agent(datastore_id: str) -> LlmAgent:
         datastore_id: Full Vertex AI Search resource ID:
             projects/{project}/locations/{location}/collections/{collection}/dataStores/{id}
     """
-    # See create_web_search_agent — resilient chain, Gemini-only for VertexAiSearch.
+    # See create_web_search_agent — resilient chain, Gemini-only for VertexAiSearch,
+    # `lite` tier tracks the registry automatically (2026-08-13).
     from adk.agent import resolve_model_chain
 
     return LlmAgent(
         name="enterprise_search_agent",
-        model=resolve_model_chain("gemini-2-5-flash"),
+        model=resolve_model_chain("lite"),
         description="Searches the enterprise knowledge base. Use for document and corpus search.",
         instruction=_ENTERPRISE_INSTRUCTION,
         tools=[VertexAiSearchTool(data_store_id=datastore_id)],

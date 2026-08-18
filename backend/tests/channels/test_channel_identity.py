@@ -129,7 +129,7 @@ class TestAuthoritativeResolution:
         with (
             patch(
                 "firebase_admin.auth.get_user",
-                return_value=_record(email="u@acme-energy.example", claims={"groupTags": ["BASE"]}),
+                return_value=_record(email="u@acmeenergy.com", claims={"groupTags": ["BASE"]}),
             ),
             patch("db.clients.resolve_derived_group_tags", return_value=frozenset({"ONE"})),
         ):

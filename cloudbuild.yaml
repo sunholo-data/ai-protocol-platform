@@ -5,7 +5,21 @@
 # Substitutions are managed by Terraform (see infrastructure repo)
 
 substitutions:
+  # TEMPLATE-INVERT M4b: neutral default + a hard guard below. Deploying with
+  # the wrong service name does not error — it creates a SECOND Cloud Run
+  # service while the real one keeps serving, which is a silent split-brain.
+  # The guard turns that into a failed build (CLAUDE.md #8: never silent).
   _SERVICE_NAME: platform-frontend
+  # Prefix for Terraform-created per-deploy resources: the logs bucket, the
+  # compaction queue and the tasks SA all share it. One substitution rather
+  # than three literals, so a fork renames its resources in one place.
+  # Unlike _SERVICE_NAME a wrong value here fails at RUNTIME (a missing bucket
+  # or queue), not at deploy — so it is not guarded, just centralised.
+  _RESOURCE_PREFIX: platform
+  # BigQuery project holding the ENTSO-E ingestion the day-ahead-prices
+  # tool reads. Deployment identity; empty means the tool is not
+  # configured for this env and says so.
+  _ENTSOE_PROJECT: ''
   _REGION: terraform_managed
   _BUILD_FOLDER: .
   _ARTIFACT_REGISTRY_REPO_URL_CLIENT: terraform_managed
@@ -17,6 +31,19 @@ substitutions:
   # Admin seed allowlist — SA emails permitted to call
   # /api/admin/seed-platform-skills. Terraform-managed per env.
   _ADMIN_SEED_ALLOWED_SAS: terraform_managed
+  # TEMPLATE-INVERT M3: operator email domains (csv) for the v6.18.0 Gap-B
+  # domain gate. DEPLOYMENT IDENTITY — backend/auth/__init__.py no longer
+  # defaults to ours, so this is the only supplier.
+  #
+  # !! Empty here on purpose (a fork must not inherit our domains), which means
+  # every env running AUTH_REQUIRE_KNOWN_DOMAIN=1 MUST override it in its
+  # trigger substitutions. Per traps.md #23 that is TWO places: run_client.tfvars
+  # feeds the BRANCH trigger only, and the hand-maintained tag-release trigger
+  # that deploys test has to be updated separately.
+  #
+  # If it is missed, the backend logs a loud AUTH_OPERATOR_DOMAINS_MISSING error
+  # at startup rather than silently denying every operator.
+  _AUTH_OPERATOR_DOMAINS: ""
   # MODEL-RELIABILITY M3: deployment residency gate (eu-strict|unrestricted),
   # enforced by construction in resolve_model_chain. dev = unrestricted (the
   # accepted dev/demo US-egress exception); set "eu-strict" per-trigger when
@@ -68,6 +95,11 @@ substitutions:
   # their own. Leaving it '' disabled MCP Apps on deployed dev — the blank
   # obligation-analysis Workspace, 2026-07-12.
   _MCP_SANDBOX_URL: ''
+  # TEMPLATE-INVERT M4b: the deployed A2A agent card's `url`. A live Cloud
+  # Run URL, so it cannot be derived from _PROJECT_ID. Empty here; each env
+  # supplies its own in trigger substitutions. Left empty, the card falls
+  # back to localhost and the frontend proxy rewrites it (G43 part 2).
+  _PUBLIC_BASE_URL: ''
   # Feature flag: expose the Skill Studio authoring UI (/skills/studio). "true"
   # bakes NEXT_PUBLIC_ENABLE_SKILL_STUDIO into the frontend build. Behind Firebase
   # auth; has known gaps (see docs/design/v6.9.0/skill-administration.md).
@@ -222,9 +254,31 @@ steps:
   # Wraps Google's pinned upstream image (FROM …/toolbox:1.7.0) and bakes in our
   # curated tools.yaml. Runs as a THIRD container in this service, loopback-only.
   # Design: docs/design/v6.14.0/mcp-toolbox-database-gateway.md
+  # TEMPLATE-INVERT M3: tools.yaml is GENERATED from the tracked
+  # tools.example.yaml and gitignored, so Cloud Build's clone does NOT contain
+  # it and `COPY tools.yaml` would fail. Materialize it first.
+  #
+  # Deployment-specific tool definitions belong in this env's own source, not in
+  # a file tracked identically upstream and downstream — that was the
+  # permanent-conflict case. Until this env supplies its own, the example
+  # toolset is what deploys.
+  - name: 'gcr.io/cloud-builders/git'
+    id: materialize-toolbox-config
+    # Waits on both CI gates like every other step (v6.19.0 / AIPLA #36): a
+    # commit with red CI must not reach any build stage. Caught by
+    # test_cloudbuild_ci_gate.py when this first shipped with waitFor: ['-'].
+    waitFor: ['ci-gate-backend', 'ci-gate-frontend']
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        bash scripts/materialize-config.sh
+        test -f infrastructure/mcp-toolbox/tools.yaml
+
   - name: 'gcr.io/cloud-builders/docker'
     id: build-toolbox
-    waitFor: ['ci-gate-backend', 'ci-gate-frontend']
+    waitFor: ['ci-gate-backend', 'ci-gate-frontend', 'materialize-toolbox-config']
     args:
       - 'build'
       - '-t'
@@ -346,7 +400,7 @@ steps:
   #   * tcpSocket startup probe — Toolbox has NO /healthz (upstream #2644)
   #     and the image is distroless (no shell for an exec probe). Same form
   #     the backend sidecar uses on :1956.
-  #   * No secrets, no auth: it runs as this service's SA (sa-platform),
+  #   * No secrets, no auth: it runs as this service's runtime SA,
   #     which already holds bigquery.dataViewer on ONE's project. tools.yaml
   #     is baked into the image (git-tracked, PR-reviewed) — no mount.
   #   * TOOLBOX_BQ_PROJECT — BigQuery BILLING/job project, per env.
@@ -355,14 +409,14 @@ steps:
   #     service Ready:False. Health-gating bounds it — a non-Ready revision
   #     gets no traffic, the old revision keeps serving (verified: the
   #     127.0.0.1 misconfig failed safely with zero downtime). Recovery in
-  #     the platform-deploy skill (gotcha_run_multiple_sidecar_ignore.md).
+  #     the deploy skill's trap catalogue.
   #
   # MODEL-RELIABILITY M1: --timeout=3600 (Cloud Run max) — without it
   # the default request timeout kills long SSE streams (the v5 long-stream
   # incident: a healthy 5-minute Anthropic response died mid-stream).
   # Pairs with the node:http proxy path in the frontend and the AG-UI
   # heartbeats in the backend. Carry this flag when cutting test/prod
-  # envs — see the platform-deploy skill trap catalogue.
+  # envs — see the deploy skill's trap catalogue.
   #
   # G18 (template-fork-ergonomics.md): `^|^` delimiter override on
   # ADMIN_SEED_ALLOWED_SAS above — its value is a comma-separated list
@@ -388,7 +442,7 @@ steps:
   # toolbox sidecar. Set here rather than baked into tools.yaml because that file
   # lives INSIDE the image and v6.20.0 promotion COPIES the image to test/prod by
   # digest, so a build-time value cannot differ per env: before this, every env
-  # billed BigQuery jobs to (and consumed the query quota of) your-project-id.
+  # billed BigQuery jobs to (and consumed the query quota of) the dev project.
   # Runtime env is the only mechanism that survives promotion.
   #
   # tools.yaml carries a colon-DEFAULT, so an env that never receives this var
@@ -433,7 +487,7 @@ steps:
         # This mount is on the SIDECAR, and that is the whole point. The
         # maps-assistant skill 500'd on dev (2026-08-12) with the secret mounted
         # only in backend/cloudbuild.yaml — that file deploys the STANDALONE
-        # IAM-protected platform-backend, but chat is served by this
+        # IAM-protected standalone backend, but chat is served by this
         # multi-container frontend's backend sidecar. Both need it; a secret
         # added to one is not added to the other.
         SECRETS="AGENT_ENGINE_ID=AGENT_ENGINE_ID:latest,DOCPARSE_API_KEY=DOCPARSE_API_KEY:latest,MAPS_GROUNDING_API_KEY=MAPS_GROUNDING_API_KEY:latest"
@@ -467,29 +521,64 @@ steps:
         # silently deployed an env with the wrong settings. _PROJECT_ID is
         # terraform-managed per trigger and correct for branch, tag and manual
         # runs alike. (v6.20.0 — caught when the first tag build ran.)
+        # TEMPLATE-INVERT M4b: the env tier is derived from the project id's
+        # SUFFIX, not from a list of project names. Same behaviour, but the
+        # pipeline no longer contains this deployment's identity — a fork's
+        # `<anything>-dev` resolves exactly the same way ours does, with no new
+        # trigger substitution to wire in two places (traps.md #23).
+        #
+        # The codebase already derives env this way (`_env_from_project`), so
+        # this makes the pipeline agree with the app instead of restating it.
         case "${_PROJECT_ID}" in
-          your-project-id)  AI_SEARCH_SRC_BUCKET=your-project-id-dev-llmops-bucket ;;
-          your-project-id-test) AI_SEARCH_SRC_BUCKET=your-project-id-test-test-llmops-bucket ;;
-          *)                    AI_SEARCH_SRC_BUCKET="" ;;
+          *-dev)        ENV_TIER=dev ;;
+          *-test)       ENV_TIER=test ;;
+          *-production) ENV_TIER=prod ;;
+          *)            ENV_TIER=unknown ;;
+        esac
+        # Refuse to deploy under the template's placeholder name. Without this
+        # a missing _SERVICE_NAME substitution silently stands up a duplicate
+        # service beside the live one instead of updating it.
+        if [ "${_SERVICE_NAME}" = "platform-frontend" ]; then
+          echo "ERROR: _SERVICE_NAME is still the template placeholder."
+          echo "Set it in this environment's Cloud Build trigger substitutions."
+          echo "See traps.md #23 — that is TWO triggers, branch and tag-release."
+          exit 1
+        fi
+        # Only pass PUBLIC_BASE_URL when this env supplies one — an empty
+        # --set-env-vars=PUBLIC_BASE_URL= would blank it rather than omit it.
+        if [ -n "${_PUBLIC_BASE_URL}" ]; then
+          PUBLIC_BASE_URL_FLAG="--set-env-vars=PUBLIC_BASE_URL=${_PUBLIC_BASE_URL}"
+        else
+          PUBLIC_BASE_URL_FLAG=""
+        fi
+        case "$${ENV_TIER}" in
+          dev|test) AI_SEARCH_SRC_BUCKET=${_PROJECT_ID}-$${ENV_TIER}-llmops-bucket ;;
+          *)        AI_SEARCH_SRC_BUCKET="" ;;
         esac
         # v6.18.0 Gap B: restrict authentication to the deployment's operator +
         # mapped-tenant domains. Enabled on dev/test; prod DEFERRED until the
-        # #31-coordinated TENANT_FALLBACK_FAIL_CLOSED flip (needs yourcompany.com's
-        # own upload bucket first). Operator domains come from the code default
-        # (yourcompany.com,yourcompany.test) — override via AUTH_OPERATOR_DOMAINS if
-        # ever needed. Gap A (bucket authz) is on-by-default and needs no flag.
-        case "${_PROJECT_ID}" in
-          your-project-id|your-project-id-test) AUTH_REQUIRE_KNOWN_DOMAIN=1 ;;
-          *)                                        AUTH_REQUIRE_KNOWN_DOMAIN=0 ;;
+        # #31-coordinated TENANT_FALLBACK_FAIL_CLOSED flip (needs this
+        # deployment's own upload bucket first). Gap A (bucket authz) is
+        # on-by-default and needs no flag.
+        #
+        # TEMPLATE-INVERT M3: operator domains are DEPLOYMENT IDENTITY and no
+        # longer have a code default — backend/auth/__init__.py defaults to
+        # empty so a fork cannot inherit ours (AIPLA #42). This pipeline is
+        # therefore the sole supplier: without the _AUTH_OPERATOR_DOMAINS
+        # substitution below, dev/test would 403 every operator, because both
+        # set AUTH_REQUIRE_KNOWN_DOMAIN=1.
+        case "$${ENV_TIER}" in
+          dev|test) AUTH_REQUIRE_KNOWN_DOMAIN=1 ;;
+          *)        AUTH_REQUIRE_KNOWN_DOMAIN=0 ;;
         esac
         # v6.18.0: deny an unmapped tenant the shared fallback bucket (read AND
         # write) — closes the shared-bucket exposure alongside Gap-A/B. dev/test
         # on; prod DEFERRED (frozen). Precondition-free: operators are admins
         # (read via Gap-A bypass) and don't upload, so their upload-403 is
         # intended. Coordinated with #31 (write-side UX already shipped).
-        case "${_PROJECT_ID}" in
-          your-project-id|your-project-id-test) TENANT_FALLBACK_FAIL_CLOSED=1 ;;
-          *)                                        TENANT_FALLBACK_FAIL_CLOSED=0 ;;
+        case "$${ENV_TIER}" in
+          dev|test) TENANT_FALLBACK_FAIL_CLOSED=1 ;;
+          *)        TENANT_FALLBACK_FAIL_CLOSED=0 ;;
         esac
         gcloud run deploy ${_SERVICE_NAME} \
           --region=${_REGION} \
@@ -516,7 +605,7 @@ steps:
           --set-env-vars=GOOGLE_CLOUD_LOCATION=${_REGION} \
           --set-env-vars=GOOGLE_GENAI_USE_VERTEXAI=True \
           --set-env-vars=ADK_ARTIFACT_BUCKET=${_PROJECT_ID}-artifacts \
-          --set-env-vars=LOGS_BUCKET_NAME=${_PROJECT_ID}-platform-logs \
+          --set-env-vars=LOGS_BUCKET_NAME=${_PROJECT_ID}-${_RESOURCE_PREFIX}-logs \
           --set-env-vars=GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true \
           --set-env-vars=OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true \
           --set-env-vars=OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental \
@@ -529,16 +618,18 @@ steps:
           --set-env-vars=VERTEX_AI_SEARCH_LOCATION=eu \
           --set-env-vars=AI_SEARCH_SOURCE_BUCKET_OVERRIDE=$${AI_SEARCH_SRC_BUCKET} \
           --set-env-vars=AUTH_REQUIRE_KNOWN_DOMAIN=$${AUTH_REQUIRE_KNOWN_DOMAIN} \
+          --set-env-vars='^|^AUTH_OPERATOR_DOMAINS=${_AUTH_OPERATOR_DOMAINS}' \
+          --set-env-vars=ENTSOE_PROJECT=${_ENTSOE_PROJECT} \
           --set-env-vars=TENANT_FALLBACK_FAIL_CLOSED=$${TENANT_FALLBACK_FAIL_CLOSED} \
           --set-env-vars=SLOW_STREAM_PROBE_ENABLED=${_SLOW_STREAM_PROBE_ENABLED} \
           --set-env-vars=MODEL_RESIDENCY_POLICY=${_MODEL_RESIDENCY_POLICY} \
           --set-env-vars=COMPACTION_SECOND_PASS_ENABLED=${_COMPACTION_SECOND_PASS} \
-          --set-env-vars=COMPACTION_TASKS_QUEUE=projects/${_PROJECT_ID}/locations/${_REGION}/queues/platform-compaction \
-          --set-env-vars=COMPACTION_TASKS_OIDC_SA=platform-tasks@${_PROJECT_ID}.iam.gserviceaccount.com \
+          --set-env-vars=COMPACTION_TASKS_QUEUE=projects/${_PROJECT_ID}/locations/${_REGION}/queues/${_RESOURCE_PREFIX}-compaction \
+          --set-env-vars=COMPACTION_TASKS_OIDC_SA=${_RESOURCE_PREFIX}-tasks@${_PROJECT_ID}.iam.gserviceaccount.com \
           --set-env-vars=COMPACTION_TASKS_TARGET_URL=${_COMPACTION_TASKS_TARGET_URL} \
           --set-env-vars=ENABLE_A2A_INVOCATION=true \
           --set-env-vars=A2A_INVOCATION_REQUIRE_AUTH=false \
-          --set-env-vars=PUBLIC_BASE_URL=https://your-service-url.example \
+          $${PUBLIC_BASE_URL_FLAG} \
           --set-env-vars=ENABLE_A2A_FILE_INPUT=true \
           --set-env-vars=A2A_AGENT_DOCUMENTS_BUCKET=gs://aitana-public-bucket/demo/ \
           --container=toolbox \

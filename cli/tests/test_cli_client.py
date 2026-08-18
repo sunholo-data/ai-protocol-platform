@@ -16,38 +16,38 @@ BASE = "http://localhost:1956"
 @respx.mock
 def test_client_list_renders_table() -> None:
     payload = [
-        {"domain": "acme-energy.example", "display_name": "Acme Energy", "documents_bucket": "one-docs"},
+        {"domain": "acmeenergy.com", "display_name": "Acme Energy", "documents_bucket": "one-docs"},
         {"domain": "acme.com", "display_name": "", "documents_bucket": None},
     ]
     respx.get(f"{BASE}/api/admin/clients").mock(return_value=httpx.Response(200, json=payload))
     runner = CliRunner()
     result = runner.invoke(main, ["--env", "local", "client", "list"])
     assert result.exit_code == 0, result.output
-    assert "acme-energy.example" in result.output
+    assert "acmeenergy.com" in result.output
     assert "one-docs" in result.output
     assert "acme.com" in result.output
 
 
 @respx.mock
 def test_client_get_prints_json() -> None:
-    payload = {"domain": "acme-energy.example", "display_name": "Acme Energy", "documents_bucket": "one-docs"}
-    respx.get(f"{BASE}/api/admin/clients/acme-energy.example").mock(return_value=httpx.Response(200, json=payload))
+    payload = {"domain": "acmeenergy.com", "display_name": "Acme Energy", "documents_bucket": "one-docs"}
+    respx.get(f"{BASE}/api/admin/clients/acmeenergy.com").mock(return_value=httpx.Response(200, json=payload))
     runner = CliRunner()
-    result = runner.invoke(main, ["--env", "local", "client", "get", "acme-energy.example"])
+    result = runner.invoke(main, ["--env", "local", "client", "get", "acmeenergy.com"])
     assert result.exit_code == 0, result.output
     body = json.loads(result.output)
-    assert body["domain"] == "acme-energy.example"
+    assert body["domain"] == "acmeenergy.com"
     assert body["documents_bucket"] == "one-docs"
 
 
 @respx.mock
 def test_client_set_calls_put_with_correct_payload() -> None:
     response_payload = {
-        "domain": "acme-energy.example",
+        "domain": "acmeenergy.com",
         "display_name": "Acme Energy",
         "documents_bucket": "one-docs",
     }
-    route = respx.put(f"{BASE}/api/admin/clients/acme-energy.example").mock(
+    route = respx.put(f"{BASE}/api/admin/clients/acmeenergy.com").mock(
         return_value=httpx.Response(200, json=response_payload)
     )
     runner = CliRunner()
@@ -58,7 +58,7 @@ def test_client_set_calls_put_with_correct_payload() -> None:
             "local",
             "client",
             "set",
-            "acme-energy.example",
+            "acmeenergy.com",
             "--documents-bucket",
             "one-docs",
             "--display-name",
@@ -79,12 +79,12 @@ def test_client_set_with_enabled_skills_sends_list() -> None:
     Covers the v6.4.0 ONE-DEMO M1 tenant skill filter wiring.
     """
     response_payload = {
-        "domain": "acme-energy.example",
+        "domain": "acmeenergy.com",
         "display_name": "Acme Energy",
         "documents_bucket": "multivac-acme-energy-bucket",
         "enabled_skills": ["one-ppa-expert", "one-doc-compare", "general-assistant"],
     }
-    route = respx.put(f"{BASE}/api/admin/clients/acme-energy.example").mock(
+    route = respx.put(f"{BASE}/api/admin/clients/acmeenergy.com").mock(
         return_value=httpx.Response(200, json=response_payload)
     )
     runner = CliRunner()
@@ -95,7 +95,7 @@ def test_client_set_with_enabled_skills_sends_list() -> None:
             "local",
             "client",
             "set",
-            "acme-energy.example",
+            "acmeenergy.com",
             "--documents-bucket",
             "multivac-acme-energy-bucket",
             "--display-name",
@@ -119,11 +119,11 @@ def test_client_set_with_enabled_skills_sends_list() -> None:
 def test_client_set_with_empty_enabled_skills_clears_filter() -> None:
     """`--enabled-skills ""` sends enabled_skills=null → "all skills visible"."""
     response_payload = {
-        "domain": "acme-energy.example",
+        "domain": "acmeenergy.com",
         "display_name": "Acme Energy",
         "enabled_skills": None,
     }
-    route = respx.put(f"{BASE}/api/admin/clients/acme-energy.example").mock(
+    route = respx.put(f"{BASE}/api/admin/clients/acmeenergy.com").mock(
         return_value=httpx.Response(200, json=response_payload)
     )
     runner = CliRunner()
@@ -134,7 +134,7 @@ def test_client_set_with_empty_enabled_skills_clears_filter() -> None:
             "local",
             "client",
             "set",
-            "acme-energy.example",
+            "acmeenergy.com",
             "--enabled-skills",
             "",
         ],
@@ -149,11 +149,11 @@ def test_client_set_with_empty_enabled_skills_clears_filter() -> None:
 def test_client_set_with_derived_group_tags_sends_list() -> None:
     """`--derived-group-tags ONE,beta` → PUT body has derived_group_tags as a 2-tag list."""
     response_payload = {
-        "domain": "acme-energy.example",
+        "domain": "acmeenergy.com",
         "display_name": "",
         "derived_group_tags": ["ONE", "beta"],
     }
-    route = respx.put(f"{BASE}/api/admin/clients/acme-energy.example").mock(
+    route = respx.put(f"{BASE}/api/admin/clients/acmeenergy.com").mock(
         return_value=httpx.Response(200, json=response_payload)
     )
     runner = CliRunner()
@@ -164,7 +164,7 @@ def test_client_set_with_derived_group_tags_sends_list() -> None:
             "local",
             "client",
             "set",
-            "acme-energy.example",
+            "acmeenergy.com",
             "--derived-group-tags",
             "ONE,beta",
         ],
@@ -178,14 +178,14 @@ def test_client_set_with_derived_group_tags_sends_list() -> None:
 @respx.mock
 def test_client_set_with_empty_derived_group_tags_clears() -> None:
     """`--derived-group-tags ""` sends derived_group_tags=null."""
-    response_payload = {"domain": "acme-energy.example", "display_name": "", "derived_group_tags": None}
-    route = respx.put(f"{BASE}/api/admin/clients/acme-energy.example").mock(
+    response_payload = {"domain": "acmeenergy.com", "display_name": "", "derived_group_tags": None}
+    route = respx.put(f"{BASE}/api/admin/clients/acmeenergy.com").mock(
         return_value=httpx.Response(200, json=response_payload)
     )
     runner = CliRunner()
     result = runner.invoke(
         main,
-        ["--env", "local", "client", "set", "acme-energy.example", "--derived-group-tags", ""],
+        ["--env", "local", "client", "set", "acmeenergy.com", "--derived-group-tags", ""],
     )
     assert result.exit_code == 0, result.output
     body = json.loads(route.calls.last.request.content)
@@ -194,21 +194,21 @@ def test_client_set_with_empty_derived_group_tags_clears() -> None:
 
 @respx.mock
 def test_client_delete_with_yes_skips_prompt() -> None:
-    payload = {"domain": "acme-energy.example", "display_name": "Acme Energy", "documents_bucket": "one-docs"}
-    route = respx.delete(f"{BASE}/api/admin/clients/acme-energy.example").mock(
+    payload = {"domain": "acmeenergy.com", "display_name": "Acme Energy", "documents_bucket": "one-docs"}
+    route = respx.delete(f"{BASE}/api/admin/clients/acmeenergy.com").mock(
         return_value=httpx.Response(200, json=payload)
     )
     runner = CliRunner()
-    result = runner.invoke(main, ["--env", "local", "client", "delete", "acme-energy.example", "--yes"])
+    result = runner.invoke(main, ["--env", "local", "client", "delete", "acmeenergy.com", "--yes"])
     assert result.exit_code == 0, result.output
     assert route.called
 
 
 @respx.mock
 def test_client_delete_prompts_and_aborts_on_n() -> None:
-    route = respx.delete(f"{BASE}/api/admin/clients/acme-energy.example").mock(return_value=httpx.Response(200, json={}))
+    route = respx.delete(f"{BASE}/api/admin/clients/acmeenergy.com").mock(return_value=httpx.Response(200, json={}))
     runner = CliRunner()
-    result = runner.invoke(main, ["--env", "local", "client", "delete", "acme-energy.example"], input="n\n")
+    result = runner.invoke(main, ["--env", "local", "client", "delete", "acmeenergy.com"], input="n\n")
     assert result.exit_code == 1  # click.confirm(abort=True) raises Abort → exit 1
     assert not route.called
     assert "Aborted" in result.output or "abort" in result.output.lower()
@@ -219,13 +219,13 @@ def test_client_set_with_default_skill_sends_it_and_omits_unset_fields() -> None
     """`--default-skill X` (v6.5.0 AUTH-LANDING) sends default_skill and, with no
     other flags, sends ONLY that — a partial upsert that won't null sibling
     fields like enabled_skills / derived_group_tags server-side."""
-    route = respx.put(f"{BASE}/api/admin/clients/acme-energy.example").mock(
-        return_value=httpx.Response(200, json={"domain": "acme-energy.example", "default_skill": "one-ppa-expert"})
+    route = respx.put(f"{BASE}/api/admin/clients/acmeenergy.com").mock(
+        return_value=httpx.Response(200, json={"domain": "acmeenergy.com", "default_skill": "one-ppa-expert"})
     )
     runner = CliRunner()
     result = runner.invoke(
         main,
-        ["--env", "local", "client", "set", "acme-energy.example", "--default-skill", "one-ppa-expert"],
+        ["--env", "local", "client", "set", "acmeenergy.com", "--default-skill", "one-ppa-expert"],
     )
     assert result.exit_code == 0, result.output
     assert route.called

@@ -4,7 +4,7 @@
 **Priority**: P1
 **Estimated**: Umbrella (sets the shared model for 9.2/9.3/9.4)
 **Scope**: Fullstack
-**Dependencies**: 6.0.0 auth-and-permissions ✅, 6.0.0 resource-access-control ✅, 6.3.0 client-tenant-management ✅, 6.6.0 one-app-fork-convergence ✅
+**Dependencies**: 6.0.0 auth-and-permissions ✅, 6.0.0 resource-access-control ✅, 6.3.0 client-tenant-management ✅, 6.6.0 fork-convergence ✅
 **Created**: 2026-07-14
 **Last Updated**: 2026-07-16
 

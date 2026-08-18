@@ -7,7 +7,7 @@ endpoints authorize on "authenticated + the SA can read the bucket", so any
 authenticated user can name the ONE llmops bucket and list/preview confidential
 PPAs. Enforce authorization at the app layer (Axiom #9 SECURE BY CONSTRUCTION),
 and add an opt-in email-domain allowlist so the ONE deployment admits only
-`acme-energy.example` + operators.
+`acmeenergy.com` + operators.
 
 ## Ordering
 

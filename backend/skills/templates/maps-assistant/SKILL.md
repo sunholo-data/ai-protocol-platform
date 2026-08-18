@@ -10,7 +10,7 @@ avatar: /images/avatars/skill-web-researcher.svg
 # MAPS_GROUNDING_API_KEY is still the "dummy_value" placeholder (staged
 # rollout — terraform applied on dev/test only), so a Maps call there would
 # 401. What keeps ONE off that path is the SECOND gate: `enabled_skills` on
-# clients/acme-energy.example, which is per-env runtime data that does NOT ride a
+# clients/acmeenergy.com, which is per-env runtime data that does NOT ride a
 # deploy. `maps-assistant` was added to that allowlist on dev and test only;
 # prod's list is non-null and omits it, so the skill is invisible there
 # regardless of tags.

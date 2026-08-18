@@ -104,27 +104,32 @@ async def test_fatal_error_raises_without_fallback():
     assert calls["n"] == 1  # no retry, no fallback on a fatal (non-fallbackable) error
 
 
-def test_chain_for_pro_has_region_and_model_fallback(monkeypatch):
-    # eu-strict (prod): pro is the EU-resident 2.5-pro, which supports a
-    # same-model cross-region rung as well as a sibling model fallback.
+def test_chain_for_pro_has_eu_pin_and_legacy_model_fallback(monkeypatch):
+    # eu-strict (prod): pro is gemini-3.7-flash pinned to the "eu" jurisdictional
+    # multi-region endpoint (2026-08-13 — was 2.5-pro, which EOLs 2026-10-16). No
+    # same-model cross-region rung is possible (no second EU location for this
+    # endpoint type — see the gemini-3-7-flash-eu registry entry), so the chain
+    # leans on the legacy gemini-2-5-pro sibling until it retires.
     monkeypatch.setenv("MODEL_RESIDENCY_POLICY", "eu-strict")
-    labels = [r.label for r in rg.gemini_chain_for("pro")]
-    assert labels[0].startswith("gemini-2.5-pro")
-    assert any("@europe-west4" in label for label in labels)  # cross-region rung
-    assert any("flash" in label for label in labels)  # model fallback rung
+    chain = rg.gemini_chain_for("pro")
+    labels = [r.label for r in chain]
+    assert chain[0].api_name == "gemini-3.7-flash"
+    assert chain[0].location == "eu"
+    assert any("gemini-2.5-pro" in label for label in labels[1:])  # legacy model fallback rung
 
 
 def test_chain_for_pro_under_unrestricted_pins_global_and_has_model_fallback(monkeypatch):
-    # unrestricted (dev/test): pro is the faster global-endpoint 3.6-flash.
-    # Rung 0 MUST pin location="global" — the global endpoint is where these
-    # models serve; the default region-pinned client (europe-west1) 404s them
-    # (the live PPA-pipeline failure this fix addresses). A cross-*region* rung
-    # is still impossible (global serves nowhere else), so the chain is SHORTER
-    # (2 rungs) and leans on the EU sibling model fallback at the default region.
+    # unrestricted (dev/test): pro is the faster global-endpoint 3.7-flash
+    # (2026-08-13 — was 3.6-flash). Rung 0 MUST pin location="global" — the
+    # global endpoint is where these models serve; the default region-pinned
+    # client (europe-west1) 404s them (the live PPA-pipeline failure this fix
+    # addresses). A cross-*region* rung is still impossible (global serves
+    # nowhere else), so the chain is SHORTER (2 rungs) and leans on the EU
+    # sibling model fallback at the default region.
     monkeypatch.setenv("MODEL_RESIDENCY_POLICY", "unrestricted")
     chain = rg.gemini_chain_for("pro")
     labels = [r.label for r in chain]
-    assert chain[0].api_name.startswith("gemini-3.6-flash")
+    assert chain[0].api_name.startswith("gemini-3.7-flash")
     assert chain[0].location == "global"  # pinned to the global endpoint, not europe-west1
     assert not any("@europe-west" in label for label in labels)  # no cross-region rung possible
     assert any("flash" in label for label in labels[1:])  # EU sibling model fallback survives
@@ -145,12 +150,14 @@ def test_chain_for_lite_under_unrestricted_pins_global(monkeypatch):
 
 
 def test_chain_for_lite_under_eu_strict_stays_eu_no_global(monkeypatch):
-    # eu-strict (prod): `lite` resolves to the EU-resident 2.5-flash-lite, served
-    # at the default region — no global pin, no residency escape.
+    # eu-strict (prod): `lite` resolves to gemini-3.5-flash-lite pinned to the
+    # "eu" jurisdictional multi-region endpoint (2026-08-13 — was 2.5-flash-lite
+    # at the default region, which EOLs 2026-10-16). Still not "global" — no
+    # residency escape.
     monkeypatch.setenv("MODEL_RESIDENCY_POLICY", "eu-strict")
     chain = rg.gemini_chain_for("lite")
-    assert chain[0].api_name == "gemini-2.5-flash-lite"
-    assert chain[0].location is None
+    assert chain[0].api_name == "gemini-3.5-flash-lite"
+    assert chain[0].location == "eu"
     assert not any(r.location == "global" for r in chain)
 
 

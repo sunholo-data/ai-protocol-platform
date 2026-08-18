@@ -82,17 +82,22 @@ def _location_for(entry: ModelEntry | None, explicit: str | None) -> str | None:
     """Vertex location a rung's client must pin (None = the env default region).
 
     An explicit cross-region override (a tier-1a fallback ``ChainLink.location``)
-    wins. Otherwise a ``residency: global`` model MUST be called at
-    ``location="global"`` — it 404s on the default region-pinned client
-    (``GOOGLE_CLOUD_LOCATION=europe-west1``): the exact failure the PPA pipeline
-    hit on every *unrestricted* env once the ``lite``/``pro`` tiers resolved to
-    the global-endpoint 3.x line (e.g. ``gemini-3.5-flash-lite`` 404 in
-    europe-west1). Mirrors ``adk.agent.resolve_model``'s
-    ``RegionalGemini(location="global")`` branch — the agent path already pins it;
-    this raw-genai seam missed it.
+    wins. Otherwise an entry with its own pinned ``location`` (e.g. the
+    ``-eu`` entries added 2026-08-13 for Gemini 3.x models whose only EU
+    option is the "eu" jurisdictional multi-region endpoint, not a
+    europe-west* region) uses that. Otherwise a ``residency: global`` model
+    MUST be called at ``location="global"`` — it 404s on the default
+    region-pinned client (``GOOGLE_CLOUD_LOCATION=europe-west1``): the exact
+    failure the PPA pipeline hit on every *unrestricted* env once the
+    ``lite``/``pro`` tiers resolved to the global-endpoint 3.x line (e.g.
+    ``gemini-3.5-flash-lite`` 404 in europe-west1). Mirrors
+    ``adk.agent.resolve_model``'s ``RegionalGemini`` branches — the agent path
+    already pins both cases; this raw-genai seam missed them.
     """
     if explicit:
         return explicit
+    if entry is not None and entry.location:
+        return entry.location
     if entry is not None and entry.residency == "global":
         return "global"
     return None

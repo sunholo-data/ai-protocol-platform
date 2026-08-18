@@ -25,9 +25,7 @@ from aiplatform.commands.bq import bq
 OK = {"result": {"content": [{"type": "text", "text": '{"table_name":"PPA_sweden_4"}'}]}}
 REJECTED = {
     "result": {
-        "content": [
-            {"type": "text", "text": "query accesses dataset 'x', which is not in the allowed list"}
-        ],
+        "content": [{"type": "text", "text": "query accesses dataset 'x', which is not in the allowed list"}],
         "isError": True,
     }
 }
@@ -38,27 +36,58 @@ def runner():
     return CliRunner()
 
 
-class TestRouting:
-    def test_datasets_lists_both_families_from_the_shipped_config(self, runner):
-        result = runner.invoke(bq, ["datasets"])
-        if "no Toolbox config" in result.output:
-            pytest.skip("real tools.yaml absent (template fork)")
-        assert result.exit_code == 0
-        assert "market_prices" in result.output and "bq_market_*" in result.output
-        assert "deal_tracker" in result.output and "bq_analysis_*" in result.output
+def _routing_or_skip() -> dict[str, str]:
+    """{dataset: family} from the config present in this checkout, or skip.
 
-    @pytest.mark.parametrize(
-        ("dataset", "expected_tool"),
-        [("market_prices", "bq_market_query"), ("entsoe", "bq_market_query"), ("deal_tracker", "bq_analysis_query")],
-    )
-    def test_dataset_routes_to_its_regions_tool(self, runner, dataset, expected_tool):
-        """Routing comes from the config's allowedDatasets, not a hardcoded map."""
-        with patch("aiplatform.commands.bq.mcp_rpc", return_value=OK) as rpc:
-            result = runner.invoke(bq, ["tables", dataset])
-        if result.exit_code != 0 and "no Toolbox config" in result.output:
-            pytest.skip("real tools.yaml absent (template fork)")
+    A template fork has only the example toolset, which declares no executor
+    families — there is nothing to route, and that is a legitimate state rather
+    than a failure.
+    """
+    from aiplatform.commands.bq import _dataset_routing
+
+    routing = _dataset_routing()
+    if not routing:
+        pytest.skip("no routable Toolbox config in this checkout (template fork)")
+    return routing
+
+
+class TestRouting:
+    """Routing is READ FROM the config, so these assert against the config that
+    is actually present rather than naming datasets.
+
+    Hardcoded dataset names broke in TEMPLATE-INVERT M4: the real `tools.yaml`
+    is gitignored deployment config (so the scrub could not touch it) while the
+    tests are tracked (so it did). The two disagreed instantly. Deriving the
+    expectation from the config under test is correct in every tier — this
+    deployment's real datasets here, the example toolset upstream.
+    """
+
+    def test_datasets_lists_every_configured_dataset_with_its_family(self, runner):
+        routing = _routing_or_skip()
+        result = runner.invoke(bq, ["datasets"])
+
         assert result.exit_code == 0
-        assert rpc.call_args.args[2]["name"] == expected_tool
+        for dataset, family in routing.items():
+            assert dataset in result.output, f"{dataset} missing from `bq datasets`"
+            assert f"{family}_*" in result.output
+
+    def test_more_than_one_family_exists(self, runner):
+        """The multi-family case is the whole reason routing exists: a Toolbox
+        source declares ONE BigQuery location, so datasets spanning regions need
+        different tools. A config with one family would pass the test above
+        vacuously."""
+        routing = _routing_or_skip()
+
+        assert len(set(routing.values())) >= 2, "config has no multi-region routing to test"
+
+    def test_each_dataset_routes_to_its_own_familys_tool(self, runner):
+        routing = _routing_or_skip()
+
+        for dataset, family in routing.items():
+            with patch("aiplatform.commands.bq.mcp_rpc", return_value=OK) as rpc:
+                result = runner.invoke(bq, ["tables", dataset])
+            assert result.exit_code == 0, f"{dataset}: {result.output}"
+            assert rpc.call_args.args[2]["name"] == f"{family}_query"
 
     def test_unknown_dataset_names_what_is_reachable(self, runner):
         """Fails with the allowlist rather than a bare error — the useful answer
@@ -72,16 +101,27 @@ class TestRouting:
 
 
 class TestDiscoveryIsSql:
-    def test_tables_queries_information_schema(self, runner):
+    def test_tables_queries_information_schema(self, runner, monkeypatch):
         """Not Toolbox's list-table-ids tool — that resolves the dataset against
-        the BILLING project and cannot see a cross-project dataset."""
+        the BILLING project and cannot see a cross-project dataset.
+
+        The data project is read from the environment (TEMPLATE-INVERT M3) —
+        it used to be a hardcoded constant, which pointed every fork's queries
+        at a project it could not read.
+        """
+        monkeypatch.setenv("AIPLATFORM_BQ_DATA_PROJECT", "acme-warehouse")
         with patch("aiplatform.commands.bq.mcp_rpc", return_value=OK) as rpc:
             result = runner.invoke(bq, ["tables", "market_prices"])
         if result.exit_code != 0:
             pytest.skip("real tools.yaml absent (template fork)")
         sql = rpc.call_args.args[2]["arguments"]["sql"]
         assert "INFORMATION_SCHEMA.TABLES" in sql
-        assert "your-entsoe-project.market_prices" in sql
+        # Assert the PROJECT reached the query, not the project.dataset pair:
+        # writing the qualified form here would mint a new
+        # "<project>.<licensed-dataset>" literal that the scrub table does not
+        # cover, and the customer-identifier gate rejects it (it did, on the
+        # first version of this line).
+        assert "acme-warehouse." in sql
 
     def test_schema_requires_a_qualified_table(self, runner):
         result = runner.invoke(bq, ["schema", "PPA_sweden_4"])

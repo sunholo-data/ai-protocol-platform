@@ -39,9 +39,18 @@ def test_require_known_domain_truthy(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _require_known_domain() is True
 
 
-def test_operator_domains_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_operator_domains_default_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Empty, not this deployment's domains (TEMPLATE-INVERT M3).
+
+    The old default was `yourcompany.com,yourcompany.test`, rewritten at publish
+    time by the sanitizer. Publish-time rewriting cannot survive the
+    upstream/downstream inversion, so the default is now empty and every
+    deployment declares its own via AUTH_OPERATOR_DOMAINS. See
+    tests/unit/test_fork_safe_defaults.py, which also asserts cloudbuild.yaml
+    supplies the real value — without that half, dev/test 403 every operator.
+    """
     monkeypatch.delenv("AUTH_OPERATOR_DOMAINS", raising=False)
-    assert _operator_domains() == frozenset({"yourcompany.com", "yourcompany.test"})
+    assert _operator_domains() == frozenset()
 
 
 def test_operator_domains_csv_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,16 +62,18 @@ def test_operator_domains_csv_override(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_operator_domain_allowed_without_firestore(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("AUTH_OPERATOR_DOMAINS", raising=False)
+    # Now that the default is empty, the operator domain must be CONFIGURED —
+    # which is the point: it is deployment identity, not a constant.
+    monkeypatch.setenv("AUTH_OPERATOR_DOMAINS", "ops.example.com")
     # If Firestore were consulted this would blow up; operator check must short-circuit.
     with patch("db.clients.get_client_cached", side_effect=AssertionError("must not hit Firestore")):
-        assert _domain_allowed(_user("yourcompany.com")) is True
+        assert _domain_allowed(_user("ops.example.com")) is True
 
 
 def test_mapped_tenant_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AUTH_OPERATOR_DOMAINS", "yourcompany.com")
     with patch("db.clients.get_client_cached", return_value=object()):
-        assert _domain_allowed(_user("acme-energy.example")) is True
+        assert _domain_allowed(_user("acmeenergy.com")) is True
 
 
 def test_unmapped_domain_denied(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,7 +115,7 @@ def test_gate_on_mapped_tenant_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AUTH_REQUIRE_KNOWN_DOMAIN", "1")
     monkeypatch.setenv("AUTH_OPERATOR_DOMAINS", "yourcompany.com")
     with patch("db.clients.get_client_cached", return_value=object()), patch("auth.is_local_mode", return_value=False):
-        _enforce_domain_allowlist(_user("acme-energy.example"))  # no raise
+        _enforce_domain_allowlist(_user("acmeenergy.com"))  # no raise
 
 
 def test_local_mode_exempt(monkeypatch: pytest.MonkeyPatch) -> None:

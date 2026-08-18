@@ -33,7 +33,7 @@ hard blocker and a set of consolidation gaps.
 (`access_routes`, `analytics_routes`, `group_tags_routes`,
 `platform_config_routes`, `tool_permissions_routes`, `users_routes`).
 
-Consequences for a holder of `tenant-admin:acme-energy.example`:
+Consequences for a holder of `tenant-admin:acmeenergy.com`:
 
 - **They never see the Admin link.** `UserMenu.tsx:49` probes
   `GET /api/admin/clients`, which is `aitana-admin`-only → 403 → link hidden.

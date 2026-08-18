@@ -35,13 +35,13 @@ token for the Firebase project," and the API is directly reachable with a Bearer
 **Impact:** confidential customer content (contracts, financials) is readable by
 any authenticated principal. For a single-tenant ONE deployment the blast radius
 is "anyone who can sign up," but the requirement is explicit: **only
-`acme-energy.example` (the customer) and `yourcompany.com` (operators) should have
+`acmeenergy.com` (the customer) and `yourcompany.com` (operators) should have
 access.**
 
 **Current state (verified 2026-07-23):**
 - `thumbnail_bucket_object` / `preview_bucket_object` / `list_bucket_objects`: no
   `request.state.access` check; read by object name via `google.cloud.storage.Client()`.
-- `_apply_derived_group_tags` gives `@acme-energy.example` the `ONE` tag; skills ARE
+- `_apply_derived_group_tags` gives `@acmeenergy.com` the `ONE` tag; skills ARE
   tag-gated (`can_access_skill`). Only the **bucket file endpoints** bypass tags.
 - `TENANT_FALLBACK_FAIL_CLOSED` exists (off by default) — denies unmapped tenants
   a `documents_bucket`, but the bucket endpoints don't call `resolve_documents_bucket`.
@@ -120,7 +120,7 @@ invent a second error contract. `access.is_platform_admin` is the existing
 property (not the free function); `UnmappedTenantError` is caught so a fail-closed
 unmapped tenant denies rather than 500s.
 
-- **Tenant bucket:** a `@acme-energy.example` user's `documents_bucket` = the env
+- **Tenant bucket:** a `@acmeenergy.com` user's `documents_bucket` = the env
   llmops bucket → allowed. A user from another (or no) tenant resolves to a
   *different* bucket → denied for the llmops bucket. This is the case that fixes
   the leak.
@@ -161,7 +161,7 @@ if _require_known_domain() and not _domain_allowed(user):
   allowed if `clients/{domain}` exists (a mapped tenant — reuses the existing
   allowlist, so adding a customer is a Firestore write, no redeploy) **or** it is
   in `AUTH_OPERATOR_DOMAINS` (config; default `yourcompany.com,yourcompany.test`).
-  This keeps the ONE deployment to exactly `acme-energy.example` + operators without
+  This keeps the ONE deployment to exactly `acmeenergy.com` + operators without
   a hardcoded customer domain in code.
 - **Flag:** `AUTH_REQUIRE_KNOWN_DOMAIN` (default **off** → backward-compatible;
   every existing env keeps working until it opts in). Set on the ONE deployment.
@@ -215,7 +215,7 @@ belongs at the app layer (Axiom #9).
       window baked into `_fail_closed`'s docstring ("flip only AFTER mapping
       current unmapped uploaders to their own tenant bucket").
 - [ ] **Pre-flip decision — `yourcompany.com` upload home** (blocks the fail-closed
-      flip, not Gap-A/B): only `acme-energy.example` has a `documents_bucket` today;
+      flip, not Gap-A/B): only `acmeenergy.com` has a `documents_bucket` today;
       `yourcompany.com` operators rely on the shared fallback. The operator bypass
       covers *reads*, not *uploads*, so once fail-closed is on, `yourcompany.com`
       uploads 403 with `TENANT_NOT_PROVISIONED`. Either (a) map `yourcompany.com` to
@@ -339,7 +339,7 @@ identity / browser-driving tool) — best done by a human sign-in on dev.
   bucket** — `clients/yourcompany.com` grants `derived_group_tags:[aitana-admin]`,
   so every operator is a platform admin and reads any bucket via the Gap-A admin
   bypass (a `documents_bucket` buys nothing for reads). Operators don't upload
-  (customer corpus is uploaded by `@acme-energy.example` users), so under the
+  (customer corpus is uploaded by `@acmeenergy.com` users), so under the
   eventual fail-closed flip an operator upload-403 is **intended, not a
   regression** (option b). Net: the flip has **no bucket precondition** — no
   `yourcompany.com` bucket to provision. (Supersedes the earlier "map yourcompany.com
@@ -378,7 +378,7 @@ re-implement:**
 **Gap in the signed-off Decisions — `yourcompany.com` has no upload home under
 fail-closed.** The Decisions settle `yourcompany.com` as an **operator domain**
 (read bypass, no `documents_bucket`). But verified 2026-07-23: **only
-`acme-energy.example` has its own bucket; `yourcompany.com` currently relies on the
+`acmeenergy.com` has its own bucket; `yourcompany.com` currently relies on the
 shared fallback.** The operator bypass covers *reads* — it gives `yourcompany.com`
 users nowhere to *upload*. So the moment `TENANT_FALLBACK_FAIL_CLOSED=1` is set
 (which A/B enablement implies), **internal `yourcompany.com` uploads will 403**

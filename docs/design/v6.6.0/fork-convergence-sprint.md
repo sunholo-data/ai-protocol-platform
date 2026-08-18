@@ -1,7 +1,7 @@
 # Sprint Plan — ONE App Fork Convergence
 
 **Sprint ID:** ONE-FORK-CONVERGENCE
-**Design doc:** [one-app-fork-convergence.md](one-app-fork-convergence.md)
+**Design doc:** [fork-convergence.md](fork-convergence.md)
 **Created:** 2026-07-08
 **Duration:** ~8 working days (4 milestones)
 **Scope:** Fullstack

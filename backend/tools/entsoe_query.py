@@ -63,9 +63,15 @@ from adk.elicitation import (
 
 log = logging.getLogger(__name__)
 
-# Hard-coded to the configured data project. Forks override via env if they have
+# Defaults to the configured data project. Override via env if you have
 # their own ENTSO-E source.
-_ENTSOE_PROJECT = os.environ.get("ENTSOE_PROJECT", "your-entsoe-project")
+# Empty by default. A placeholder like "your-entsoe-project" is WORSE than
+# empty: it looks like a configured value, so the failure surfaces as a
+# BigQuery "dataset not found" deep in a tool call rather than as "this
+# deployment has not configured ENTSO-E". TEMPLATE-INVERT M4 scrubbed the old
+# hardcoded default to exactly such a placeholder and no pipeline supplied the
+# env var, which silently broke the day-ahead-prices tool.
+_ENTSOE_PROJECT = os.environ.get("ENTSOE_PROJECT", "")
 _ENTSOE_DATASET = os.environ.get("ENTSOE_DATASET", "entsoe")
 
 # Sanity cap on row count returned to the agent. 7 days * 24 hours = 168 rows
@@ -405,6 +411,27 @@ async def entsoe_day_ahead_prices(
         }
     table, price_col = resolved
     source_uri = _source_uri(table, bidding_zone, start_date, end_date)
+    # NEVER SILENT (CLAUDE.md #8). With no ENTSOE_PROJECT the query reads
+    # `bq://.entsoe.<table>` — a malformed reference that surfaces as an opaque
+    # BigQuery error, or worse as an empty result the agent reports as "no
+    # prices found". Name the missing knob instead.
+    #
+    # Placed AFTER zone/date validation on purpose: when both are wrong, "unknown
+    # bidding zone" is the more useful answer than "not configured".
+    #
+    # This is the failure TEMPLATE-INVERT M4 introduced — the scrub replaced a
+    # hardcoded project with a placeholder and no pipeline supplied the env var.
+    if not _ENTSOE_PROJECT:
+        return {
+            "error": (
+                "ENTSO-E prices are not configured for this deployment: "
+                "ENTSOE_PROJECT is unset, so there is no BigQuery project to "
+                "read the day-ahead price tables from. The deploy passes it "
+                "from the _ENTSOE_PROJECT substitution."
+            ),
+            "configured": False,
+            "source_uri": _source_uri(table, bidding_zone, start_date, end_date),
+        }
 
     try:
         from google.cloud import bigquery

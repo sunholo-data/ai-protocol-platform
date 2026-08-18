@@ -141,3 +141,36 @@ def test_no_build_step_arg_exceeds_cloud_builds_limit():
         f"{oversized}. Move explanatory comments OUT of the inline script and "
         "into a YAML comment above the step — they count toward the arg."
     )
+
+
+def test_comma_valued_env_vars_use_the_delimiter_override(steps, pipeline):
+    """A comma-bearing --set-env-vars value MUST use the `^|^` override.
+
+    gcloud treats comma as the KEY=VAL separator, so
+    `--set-env-vars=FOO=a,b` parses `b` as a second pair and the deploy dies
+    with "Bad syntax for dict arg". cloudbuild.yaml documents this rule (G18,
+    after a silently-dropped second service account) — and AUTH_OPERATOR_DOMAINS
+    was added four lines below the rule and broke it anyway, failing the first
+    dev deploy of TEMPLATE-INVERT.
+
+    Documented rules do not hold; this asserts it. Substitutions whose VALUE is
+    comma-bearing are known from the defaults block, so check those.
+    """
+    import re
+
+    text = CLOUDBUILD.read_text(encoding="utf-8")
+    subs = pipeline.get("substitutions", {})
+    comma_valued = {k for k, v in subs.items() if isinstance(v, str) and "," in v}
+    # AUTH_OPERATOR_DOMAINS is comma-valued by nature (a domain LIST) even when
+    # its default here is empty, so it is always in scope.
+    comma_valued.add("_AUTH_OPERATOR_DOMAINS")
+
+    offenders = []
+    for name in sorted(comma_valued):
+        for m in re.finditer(rf"--set-env-vars=(\S*?)\{{{name}\}}", text):
+            if "^|^" not in m.group(0):
+                offenders.append(f"{name}: {m.group(0)[:70]}")
+    assert offenders == [], (
+        "comma-valued env vars must use the ^|^ delimiter override, or gcloud "
+        f"parses the value as extra KEY=VAL pairs: {offenders}"
+    )

@@ -91,7 +91,7 @@ export function AccessControlEditor({
           <input
             className="w-full rounded-md border px-3 py-2 text-sm"
             value={v.domain ?? ""}
-            placeholder="acme-energy.example"
+            placeholder="acmeenergy.com"
             onChange={(e) => onChange({ ...v, domain: e.target.value || null })}
           />
         </label>

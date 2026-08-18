@@ -293,7 +293,7 @@ class DiscordChannel(BaseChannel):
 
         Called from app startup. Discord's gateway demands sub-second
         keepalive responses, so this requires `min_instances >= 1` in
-        Cloud Run — documented in `infrastructure/modules/cloud-run-channel`.
+        Cloud Run — documented in `deploy/terraform/cloud-run-channel`.
         """
         if not self._token:
             logger.warning("discord start_gateway: no DISCORD_TOKEN — gateway will not start")

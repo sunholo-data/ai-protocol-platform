@@ -22,9 +22,9 @@ _PLATFORM = User(
 )
 _TENANT = User(
     uid="tenant-uid",
-    email="ops@acme-energy.example",
-    domain="acme-energy.example",
-    group_tags=frozenset({"tenant-admin:acme-energy.example"}),
+    email="ops@acmeenergy.com",
+    domain="acmeenergy.com",
+    group_tags=frozenset({"tenant-admin:acmeenergy.com"}),
 )
 _MULTI = User(
     uid="multi-uid",
@@ -65,7 +65,7 @@ class TestWhoAmI:
         assert r.status_code == 200
         body = r.json()
         assert body["scope"] == "tenant"
-        assert body["domains"] == ["acme-energy.example"]
+        assert body["domains"] == ["acmeenergy.com"]
 
     def test_multi_domain_is_sorted_for_stable_ui(self):
         r = _client(_MULTI).get("/api/admin/whoami")

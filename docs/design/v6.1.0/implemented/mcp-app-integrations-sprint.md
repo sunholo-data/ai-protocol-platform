@@ -228,7 +228,7 @@ Land [docs/design/v6.1.0/mcp-app-integrations.md](mcp-app-integrations.md) in fu
 **Duration:** 1.25 day
 **Dependencies:** M3-DEV-DEMO (local end-to-end works → safe to deploy)
 
-**MUST READ before starting:** the [`platform-deploy` skill](../../../.claude/skills/platform-deploy/SKILL.md) at `.claude/skills/platform-deploy/SKILL.md`. Per the skill's Quick Start: read `resources/topology.md` (3-repo map), `resources/iam-cascade.md` (the bootstrap folder rule that prevents IAM drift), and check `resources/recipes.md` for "Add a new Cloud Run service" — there is a known recipe.
+**MUST READ before starting:** the `platform-deploy` skill (the deploy skill) at `.claude/skills/platform-deploy/SKILL.md`. Per the skill's Quick Start: read `resources/topology.md` (3-repo map), `resources/iam-cascade.md` (the bootstrap folder rule that prevents IAM drift), and check `resources/recipes.md` for "Add a new Cloud Run service" — there is a known recipe.
 
 **Tasks:**
 

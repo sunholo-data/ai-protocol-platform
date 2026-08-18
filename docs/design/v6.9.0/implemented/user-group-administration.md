@@ -4,7 +4,7 @@
 **Priority**: P1 (Medium)
 **Estimated**: ~5 days
 **Scope**: Fullstack
-**Dependencies**: [administration-overview.md](administration-overview.md) (9.1 — shared admin-identity model), 6.0.0 auth-and-permissions ✅, 6.0.0 resource-access-control ✅, 6.3.0 client-tenant-management ✅, 6.6.0 one-app-fork-convergence ✅
+**Dependencies**: [administration-overview.md](administration-overview.md) (9.1 — shared admin-identity model), 6.0.0 auth-and-permissions ✅, 6.0.0 resource-access-control ✅, 6.3.0 client-tenant-management ✅, 6.6.0 fork-convergence ✅
 **Created**: 2026-07-14
 **Last Updated**: 2026-07-16
 

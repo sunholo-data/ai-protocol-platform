@@ -52,8 +52,8 @@ def _app_for(user: User) -> TestClient:
 
 _ONE_USER = User(
     uid="one-user-1",
-    email="anders@acme-energy.example",
-    domain="acme-energy.example",
+    email="anders@acmeenergy.com",
+    domain="acmeenergy.com",
     group_tags=frozenset(),
 )
 _ADMIN_USER = User(
@@ -91,7 +91,7 @@ def test_one_tenant_user_sees_only_enabled_skills(all_skills: list[SkillConfig])
     """ONE-domain user with enabled_skills set sees ONLY those 3 slugs."""
     client = _app_for(_ONE_USER)
     one_config = ClientConfig(
-        domain="acme-energy.example",
+        domain="acmeenergy.com",
         documents_bucket="multivac-acme-energy-bucket",
         display_name="Acme Energy",
         enabled_skills=["one-ppa-expert", "one-doc-compare", "general-assistant"],
@@ -152,12 +152,12 @@ def test_admin_bypasses_active_enabled_skills_filter(all_skills: list[SkillConfi
     admin_in_one = User(
         uid="admin-one",
         email="owner@yourcompany.com",
-        domain="acme-energy.example",
+        domain="acmeenergy.com",
         group_tags=frozenset({"aitana-admin"}),
     )
     client = _app_for(admin_in_one)
     one_config = ClientConfig(
-        domain="acme-energy.example",
+        domain="acmeenergy.com",
         documents_bucket="multivac-acme-energy-bucket",
         display_name="Acme Energy",
         enabled_skills=["one-ppa-expert", "one-doc-compare"],
@@ -176,7 +176,7 @@ def test_non_admin_one_user_still_narrowed(all_skills: list[SkillConfig]) -> Non
     """Sanity: a normal ONE user in the same domain is still narrowed."""
     client = _app_for(_ONE_USER)
     one_config = ClientConfig(
-        domain="acme-energy.example",
+        domain="acmeenergy.com",
         documents_bucket="multivac-acme-energy-bucket",
         display_name="Acme Energy",
         enabled_skills=["one-ppa-expert", "one-doc-compare"],

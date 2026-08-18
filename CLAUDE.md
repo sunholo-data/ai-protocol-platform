@@ -252,6 +252,7 @@ Same GCP projects as v5, but v6 runs as **new parallel Cloud Run services** so v
   The older per-service branch triggers (`trigger-aitana-{test,prod}-platform-*`)
   remain enabled alongside the tag flow — the tag path was added beside them,
   not as a replacement. Default branch is `dev`.
+- **Terraform**: `<local-path>`
 - **Cloud Build connection**: `github-voight` in `your-deploy-project-id/europe-west1` (authorizer `sunholo-voight-kampff`). v5 still uses the older `github` connection.
 - **SA for Cloud Run**: `platform@{project_id}.iam.gserviceaccount.com`
 - **CI gate**: `.github/workflows/ci.yml` — lint + test-fast on PR and push to `dev`.
@@ -275,7 +276,7 @@ Same GCP projects as v5, but v6 runs as **new parallel Cloud Run services** so v
 ## Copying Code from v5
 
 When copying v5 code, follow this pattern:
-1. Read the v5 file from `<your-v5-source>/`
+1. Read the v5 file from `<your-v5-source>/backend/`
 2. Strip Sunholo imports and dependencies
 3. Wrap as ADK FunctionTool if it's a tool
 4. Place in the correct v6 directory (see design doc for mapping)
@@ -335,6 +336,7 @@ Skills available: `/adk-scaffold`, `/adk-cheatsheet`, `/adk-dev-guide`, `/adk-ev
 - Evaluation: `adk eval` CLI with evalsets and rubric-based scoring
 
 ### ADK Reference Project
+See `<local-path>` for a clean ADK scaffold to reference.
 
 ## Design Documents
 

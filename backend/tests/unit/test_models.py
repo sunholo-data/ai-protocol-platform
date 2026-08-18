@@ -13,7 +13,7 @@ _D = "A test skill."  # Valid default description for tests
 
 def test_skill_config_defaults():
     skill = SkillConfig(name="test-skill", description=_D)
-    assert skill.skill_metadata.model == "gemini-2.5-flash"
+    assert skill.skill_metadata.model == "pro"
     assert skill.protocols.agui.enabled is True
     assert skill.access_control.type == "private"
     assert skill.instructions == ""
@@ -144,7 +144,7 @@ def test_invalid_access_type():
 def test_skill_metadata_defaults():
     meta = SkillMetadata()
     assert meta.author == "aitana"
-    assert meta.model == "gemini-2.5-flash"
+    assert meta.model == "pro"
     assert meta.thinking_model is None
     assert meta.tools == []
     assert meta.tool_configs == {}

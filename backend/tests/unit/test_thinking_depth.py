@@ -98,13 +98,16 @@ class TestDictHelper:
 
 
 class TestTierRefsResolve:
-    def test_tier_name_resolves_to_the_right_family(self, monkeypatch):
-        # `pro` is a 3.x model on dev/test and a 2.5 model on prod, so the SAME
-        # tier ref must produce different parameters per residency policy.
+    def test_tier_ref_resolves_thinking_params_per_policy(self, monkeypatch):
+        # 2026-08-13: `pro` is a 3.x model under BOTH policies now (the eu-strict
+        # variant moved off the soon-EOL gemini-2-5-pro to the EU-pinned
+        # gemini-3-7-flash-eu — see models.yaml). thinking_level is LOW either
+        # way; what this test actually guards is that thinking_config_for
+        # RE-RESOLVES the tier ref against the active policy on every call
+        # rather than caching the first resolution.
         monkeypatch.setenv("MODEL_RESIDENCY_POLICY", "unrestricted")
         assert thinking_config_for(ThinkDepth.LOW, "pro").thinking_level == ThinkingLevel.LOW
 
         monkeypatch.setenv("MODEL_RESIDENCY_POLICY", "eu-strict")
         eu = thinking_config_for(ThinkDepth.LOW, "pro")
-        assert eu.thinking_level is None
-        assert eu.thinking_budget == 512
+        assert eu.thinking_level == ThinkingLevel.LOW

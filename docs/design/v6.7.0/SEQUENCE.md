@@ -1,6 +1,6 @@
 # v6.7.0 Build Sequence
 
-**Gate:** v6.6.0 one-app-fork-convergence substantially landed (model tiers ✅, Skill Studio ✅, per-skill persona ✅). v6.6.0 workstream D shipped named tiers with the *intent* of "deep work via sub-skill delegation, not router swap" — but delegation itself was never wired (every skill ships `subSkills=[]`, and the sub-skill access path was inert).
+**Gate:** v6.6.0 fork-convergence substantially landed (model tiers ✅, Skill Studio ✅, per-skill persona ✅). v6.6.0 workstream D shipped named tiers with the *intent* of "deep work via sub-skill delegation, not router swap" — but delegation itself was never wired (every skill ships `subSkills=[]`, and the sub-skill access path was inert).
 
 **Status as of 2026-07-08:** One doc planned — `skill-delegation.md` (7.1, sprint key SKILL-DELEGATION). Turns the anticipated-but-unbuilt delegation mechanism into a configurable, access-aware, UI-signaled feature.
 

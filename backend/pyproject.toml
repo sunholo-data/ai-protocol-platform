@@ -17,13 +17,18 @@ dependencies = [
     "google-genai>=1.19",
     "anthropic>=0.52.0",
     "openai>=1.59.0",
+    # ADK's Claude/OpenAI adapter needs the SDK directly. This reviewed release
+    # fixes CVE-2026-42208, CVE-2026-42271 and CVE-2026-59822; an exact pin
+    # also excludes the compromised 1.82.7, 1.82.8 and 1.107.0 releases.
+    "litellm==1.85.7",
     # Firebase / GCP
     "google-cloud-firestore>=2.20.2",
     "google-cloud-storage>=2.18.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
     # Read-aloud / TTS (v6.6.0 M2 voice provider abstraction)
     "google-cloud-texttospeech>=2.16.0,<3.0.0",
-    "google-cloud-aiplatform[evaluation]>=1.130.0",
+    # Evaluation tooling is enabled only by the ADK eval extra below.
+    "google-cloud-aiplatform>=1.165.1,<2.0.0",
     "firebase-admin>=6.0.0",
     "gcsfs>=2024.11.0",
     # AILANG Parse — deterministic document parsing

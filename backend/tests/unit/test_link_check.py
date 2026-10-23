@@ -93,8 +93,21 @@ class TestShippedWiring:
         assert "link-check:" in (REPO_ROOT / "Makefile").read_text()
 
     def test_ci_reports_dangling_links(self):
-        ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
-        assert "link-check.py" in ci
+        """The reporting gate survives a move between CI runners."""
+        import yaml
+
+        actions = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        if actions.is_file() and "link-check.py" in actions.read_text():
+            return
+        cloud_build = REPO_ROOT / "cloudbuild.ci.yaml"
+        assert cloud_build.is_file(), "no CI runner reports documentation links"
+        steps = yaml.safe_load(cloud_build.read_text()).get("steps", [])
+        safety_is_run = any(
+            "scripts/ci/check.sh" in " ".join(step.get("args", [])) and "safety" in " ".join(step.get("args", []))
+            for step in steps
+        )
+        assert safety_is_run, "Cloud Build must invoke the shared safety checks"
+        assert "link-check.py" in (REPO_ROOT / "scripts" / "ci" / "check.sh").read_text()
 
 
 class TestNoNewDanglingLinks:

@@ -1,0 +1,38 @@
+# Fixed questions for `aiplatform guide verify` (the design's self-verification).
+# <page>#<anchor> the answer must link ("a#x|b#y": either), TAB, the question exactly as a user asks it.
+# "-" = the guide does NOT cover it: the answer must say so and link /help,
+# with no invented UI labels.
+folders#upload-a-whole-folder	How do I upload a whole folder of documents at once?
+folders#rename-a-folder	How can I rename one of my folders?
+folders#delete-a-folder	Why can't I delete my folder? It says it still has documents.
+folders#move-documents-between-folders	How do I move a document into a different folder?
+folders#make-a-folder-searchable	How do I make a folder searchable?
+folders#let-a-skill-search-the-folder	How do I let a skill search one of my folders?
+folders#when-the-skill-isnt-yours-to-change	I want to add my folder to a skill a colleague shared with me but it won't let me. What do I do?
+folders#choose-who-can-search	How do I control who can search my folder?
+folders#stop-searching-a-folder	How do I stop a folder being searchable without deleting the documents?
+folders#upload-a-folder-from-the-command-line	Can I upload a folder from the command line?
+getting-started#pick-a-skill|skills#switch-to-another-skill	How do I switch to a different skill?
+getting-started#start-a-new-chat	How do I start a fresh conversation?
+getting-started#send-a-message	How do I stop the assistant while it's still answering?
+getting-started#find-a-past-conversation	Where can I find a conversation I had yesterday?
+documents#check-a-document-is-ready	My document has a red dot next to it — what does that mean and how do I fix it?
+documents#ask-about-a-document	How do I make the assistant read a document I've opened?
+documents#edit-a-passage	Can I get the assistant to rewrite just one paragraph of a document?
+documents#download-it-or-bring-back-an-earlier-version	How do I get back an earlier version of a document?
+documents#rename-a-document	How do I change the name of a document I uploaded?
+skills#make-your-own-copy-of-a-skill	How do I make my own editable copy of a built-in skill?
+skills#create-a-new-skill	How do I create a new skill?
+workspace#see-where-an-answer-came-from	Where can I see which websites or documents an answer was based on?
+workspace#read-a-document-beside-the-chat	How do I read a document next to the chat while I ask about it?
+workspace#watch-what-the-assistant-is-doing	How can I see which tools the assistant used to answer me?
+workspace#make-more-room-for-the-chat	How do I hide the panel on the right to make the chat bigger?
+sharing-and-access#choose-who-can-use-your-skill|skills#share-your-skill	How do I share my skill with everyone at my company?
+sharing-and-access#when-you-cant-open-a-skill	A colleague sent me a link to a skill but it says I don't have access. What do I do?
+sharing-and-access#what-a-group-is	What is a group and how do I get added to one?
+sharing-and-access#your-documents-stay-yours	Can other people see the documents I upload?
+admin#check-what-your-users-actually-see	A colleague says they can't see a skill I can see. How do I check what they see?
+admin#grant-or-revoke-a-persons-group-tags	How do I give someone access to a group tag?
+admin#control-which-tools-people-may-use	How do I stop people in my domain from using code execution?
+admin#read-the-audit-trail	Who changed our tenant's enabled skills, and when?
+-	How do I export my chat history to SAP?

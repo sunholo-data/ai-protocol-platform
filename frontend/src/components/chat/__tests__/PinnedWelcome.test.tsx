@@ -15,7 +15,7 @@ beforeEach(() => {
 
 describe("PinnedWelcome", () => {
   it("renders the content body via ChatMarkdown when expanded (default)", () => {
-    render(<PinnedWelcome content="Try clicking an example PPA." skillId="one-ppa-expert" />);
+    render(<PinnedWelcome content="Try clicking an example PPA." skillId="demo-ppa-expert" />);
     expect(screen.getByTestId("markdown")).toHaveTextContent("Try clicking an example PPA.");
   });
 

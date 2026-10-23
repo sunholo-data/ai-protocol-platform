@@ -219,7 +219,7 @@ class TestSend:
     async def test_media_attached_to_first_chunk_only(self, channel: WhatsAppChannel) -> None:
         mock_client = MagicMock()
         text = "X" * 3000  # 2 chunks
-        media_urls = ["https://aitana-public-bucket.example/img1.jpg"]
+        media_urls = ["https://example-public-documents.example/img1.jpg"]
         with patch.object(channel, "_get_client", return_value=mock_client):
             await channel.send(
                 "whatsapp:+34661856650",

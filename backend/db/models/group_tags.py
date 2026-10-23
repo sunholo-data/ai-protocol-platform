@@ -26,7 +26,7 @@ class GroupTag(BaseModel):
     """One entry in the identity/group-tag registry (``group_tags/{id}``).
 
     ``id`` is the canonical tag string as it appears in the JWT ``groupTags``
-    claim (e.g. ``"ONE"``, ``"aitana-admin"``). ``grants`` documents *what the
+    claim (e.g. ``"example-team"``, ``"aitana-admin"``). ``grants`` documents *what the
     tag unlocks* (skill slugs / tool names that reference it) — advisory
     metadata for the admin UI, not an enforcement input. ``tenant_scope`` marks
     a tag as belonging to a single tenant domain (``None`` == platform-wide);

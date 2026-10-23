@@ -1,6 +1,6 @@
 """compare_ppa_contracts — pairwise PPA diff with commercial-implication reasoning.
 
-v6.4.0 ONE-DEMO M3. Composes M2's extract_ppa_clauses across two documents
+v6.4.0 TENANT-DEMO M3. Composes M2's extract_ppa_clauses across two documents
 and returns a typed PpaComparison with one ClauseDifference per material
 divergence. Each diff carries both `left_block_id` + `right_block_id`
 citations, severity (material / moderate / cosmetic), and a one-sentence
@@ -23,6 +23,7 @@ import os
 
 from google.adk.tools import ToolContext
 
+from tools.document_identity import identity_mismatch, resolve_filename
 from tools.extract_ppa_clauses import (
     cache_variant_suffix,
     clause_cache_key,
@@ -86,9 +87,18 @@ async def compare_ppa_contracts(
     right_gs_url: str | None = None,
     clauses: list[str] | None = None,
     max_other_clauses: int | None = None,
+    left_expected_name: str = "",
+    right_expected_name: str = "",
     tool_context: ToolContext = None,
 ) -> str:
     """Compare two PPA contracts clause-by-clause with commercial reasoning.
+
+    ALWAYS pass `left_expected_name` / `right_expected_name` when the user named
+    the contracts — e.g. "compare the Vantage Grid PPA with the Brightfield PPA"
+    means left_expected_name="Vantage Grid PPA", right_expected_name="Brightfield
+    PPA". Each side is then checked to BE that document, and the tool refuses
+    rather than comparing a contract the user never asked about. Never invent a
+    value; leave blank only if the user named no document for that side.
 
     Use this tool when the user asks to "compare these two PPAs", "what's
     different between contracts A and B", "show me a side-by-side", or
@@ -195,6 +205,7 @@ async def compare_ppa_contracts(
             doc_id=left_doc_id,
             gs_url=left_gs_url,
             identity=left_id,
+            expected_name=left_expected_name,
             tool_context=tool_context,
             clauses=clauses,
             max_other_clauses=max_other_clauses,
@@ -207,6 +218,7 @@ async def compare_ppa_contracts(
             doc_id=right_doc_id,
             gs_url=right_gs_url,
             identity=right_id,
+            expected_name=right_expected_name,
             tool_context=tool_context,
             clauses=clauses,
             max_other_clauses=max_other_clauses,
@@ -318,6 +330,7 @@ async def _resolve_clauses(
     tool_context: ToolContext | None,
     clauses: list[str] | None = None,
     max_other_clauses: int | None = None,
+    expected_name: str = "",
 ) -> PpaClauses:
     """Use cached extraction from state if present, else extract fresh.
 
@@ -327,6 +340,21 @@ async def _resolve_clauses(
     extraction made with the exact same config. Reuse rather than burn a
     second Gemini call on the same identity in one turn.
     """
+    # BEFORE the cache. The cache is keyed on the document id alone, so checking
+    # identity after it would let a warm cache serve a wrong-document result with
+    # the guard skipped — it would only ever fire on a session's first call.
+    if expected_name and doc_id:
+        resolved_name = resolve_filename(normalize_doc_id(doc_id))
+        mismatch = identity_mismatch(expected_name, resolved_name)
+        if mismatch:
+            log.warning(
+                "compare_ppa_contracts: identity mismatch — expected %r, resolved %r (doc_id=%s)",
+                expected_name,
+                resolved_name,
+                doc_id,
+            )
+            raise _ExtractionError({"error": mismatch, "doc_id": doc_id, "filename": resolved_name})
+
     if tool_context is not None:
         cached_key = clause_cache_key(identity, clauses, max_other_clauses)
         cached = tool_context.state.get(cached_key)
@@ -347,6 +375,8 @@ async def _resolve_clauses(
         extra_kwargs["clauses"] = clauses
     if max_other_clauses is not None:
         extra_kwargs["max_other_clauses"] = max_other_clauses
+    if expected_name:
+        extra_kwargs["expected_name"] = expected_name
     raw = await extract_ppa_clauses(doc_id=doc_id, gs_url=gs_url, tool_context=tool_context, **extra_kwargs)
     parsed = json.loads(raw)
     if "error" in parsed:

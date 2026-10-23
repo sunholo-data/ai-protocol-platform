@@ -1,4 +1,4 @@
-"""Per-tenant skill visibility filter on GET /api/skills (v6.4.0 ONE-DEMO M1).
+"""Per-tenant skill visibility filter on GET /api/skills (v6.4.0 TENANT-DEMO M1).
 
 When `clients/{user_domain}.enabled_skills` is a non-empty list, the list
 response is narrowed to those slugs. None or missing falls through to the
@@ -29,7 +29,7 @@ def _make_config(slug: str, **overrides) -> SkillConfig:
         "instructions": "Help with stuff.",
         "skillId": f"id-{slug}",
         "displayName": slug.replace("-", " ").title(),
-        "ownerEmail": "platform@aitana.ai",
+        "ownerEmail": "platform@platform.example",
         "ownerId": "platform-uid",
         "slug": slug,
         "accessControl": {"type": "public"},
@@ -52,8 +52,8 @@ def _app_for(user: User) -> TestClient:
 
 _ONE_USER = User(
     uid="one-user-1",
-    email="anders@acmeenergy.com",
-    domain="acmeenergy.com",
+    email="anders@energy.example",
+    domain="energy.example",
     group_tags=frozenset(),
 )
 _ADMIN_USER = User(
@@ -73,8 +73,8 @@ _UNMAPPED_USER = User(
 @pytest.fixture()
 def all_skills() -> list[SkillConfig]:
     return [
-        _make_config("one-ppa-expert"),
-        _make_config("one-doc-compare"),
+        _make_config("demo-ppa-expert"),
+        _make_config("demo-doc-compare"),
         _make_config("general-assistant"),
         _make_config("web-researcher"),
         _make_config("code-assistant"),
@@ -91,10 +91,10 @@ def test_one_tenant_user_sees_only_enabled_skills(all_skills: list[SkillConfig])
     """ONE-domain user with enabled_skills set sees ONLY those 3 slugs."""
     client = _app_for(_ONE_USER)
     one_config = ClientConfig(
-        domain="acmeenergy.com",
-        documents_bucket="multivac-acme-energy-bucket",
+        domain="energy.example",
+        documents_bucket="example-customer-documents",
         display_name="Acme Energy",
-        enabled_skills=["one-ppa-expert", "one-doc-compare", "general-assistant"],
+        enabled_skills=["demo-ppa-expert", "demo-doc-compare", "general-assistant"],
     )
     with (
         patch("skills.routes.skill_config.list_skills", return_value=all_skills),
@@ -103,7 +103,7 @@ def test_one_tenant_user_sees_only_enabled_skills(all_skills: list[SkillConfig])
         resp = client.get("/api/skills")
     assert resp.status_code == 200
     slugs = sorted(s["slug"] for s in resp.json())
-    assert slugs == ["general-assistant", "one-doc-compare", "one-ppa-expert"]
+    assert slugs == ["demo-doc-compare", "demo-ppa-expert", "general-assistant"]
 
 
 # ---------------------------------------------------------------------------
@@ -152,15 +152,15 @@ def test_admin_bypasses_active_enabled_skills_filter(all_skills: list[SkillConfi
     admin_in_one = User(
         uid="admin-one",
         email="owner@yourcompany.com",
-        domain="acmeenergy.com",
+        domain="energy.example",
         group_tags=frozenset({"aitana-admin"}),
     )
     client = _app_for(admin_in_one)
     one_config = ClientConfig(
-        domain="acmeenergy.com",
-        documents_bucket="multivac-acme-energy-bucket",
+        domain="energy.example",
+        documents_bucket="example-customer-documents",
         display_name="Acme Energy",
-        enabled_skills=["one-ppa-expert", "one-doc-compare"],
+        enabled_skills=["demo-ppa-expert", "demo-doc-compare"],
     )
     with (
         patch("skills.routes.skill_config.list_skills", return_value=all_skills),
@@ -173,13 +173,13 @@ def test_admin_bypasses_active_enabled_skills_filter(all_skills: list[SkillConfi
 
 
 def test_non_admin_one_user_still_narrowed(all_skills: list[SkillConfig]) -> None:
-    """Sanity: a normal ONE user in the same domain is still narrowed."""
+    """Sanity: a normal tenant user in the same domain is still narrowed."""
     client = _app_for(_ONE_USER)
     one_config = ClientConfig(
-        domain="acmeenergy.com",
-        documents_bucket="multivac-acme-energy-bucket",
+        domain="energy.example",
+        documents_bucket="example-customer-documents",
         display_name="Acme Energy",
-        enabled_skills=["one-ppa-expert", "one-doc-compare"],
+        enabled_skills=["demo-ppa-expert", "demo-doc-compare"],
     )
     with (
         patch("skills.routes.skill_config.list_skills", return_value=all_skills),
@@ -187,4 +187,4 @@ def test_non_admin_one_user_still_narrowed(all_skills: list[SkillConfig]) -> Non
     ):
         resp = client.get("/api/skills")
     assert resp.status_code == 200
-    assert sorted(s["slug"] for s in resp.json()) == ["one-doc-compare", "one-ppa-expert"]
+    assert sorted(s["slug"] for s in resp.json()) == ["demo-doc-compare", "demo-ppa-expert"]

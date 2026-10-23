@@ -2,16 +2,19 @@
 
 import type { ParsedDocument } from "@/hooks/useDocBrowser";
 import { useDocBrowser } from "@/hooks/useDocBrowser";
+import { useKnowledgeBases } from "@/hooks/useKnowledgeBases";
 import { DocListFolder } from "./DocListFolder";
 import { DocListSearch } from "./DocListSearch";
 import { DocParseProgress } from "./DocParseProgress";
 
 interface DocListViewProps {
   uid: string;
+  /** The skill being chatted with — offered first when adding a folder to a skill. */
+  skillId?: string;
   onDocClick?: (doc: ParsedDocument) => void;
 }
 
-export function DocListView({ uid, onDocClick }: DocListViewProps) {
+export function DocListView({ uid, skillId, onDocClick }: DocListViewProps) {
   const {
     folders,
     activeFolderId,
@@ -20,7 +23,11 @@ export function DocListView({ uid, onDocClick }: DocListViewProps) {
     filteredDocuments,
     setActiveFolderId,
     setSearchQuery,
+    loading,
+    error,
+    retry,
   } = useDocBrowser(uid);
+  const knowledge = useKnowledgeBases();
 
   // Stats for active folder
   const activeFolder = folders.find((f) => f.id === activeFolderId) ?? null;
@@ -30,6 +37,14 @@ export function DocListView({ uid, onDocClick }: DocListViewProps) {
 
   function handleDocClick(doc: ParsedDocument) {
     onDocClick?.(doc);
+  }
+
+  // A deleted active folder must not leave the view pointing at nothing:
+  // select the next folder the user owns (else any remaining one).
+  function handleFolderDeleted(folderId: string) {
+    if (folderId !== activeFolderId) return;
+    const rest = folders.filter((f) => f.id !== folderId);
+    setActiveFolderId(rest.find((f) => !f.system)?.id ?? rest[0]?.id ?? null);
   }
 
   return (
@@ -46,7 +61,20 @@ export function DocListView({ uid, onDocClick }: DocListViewProps) {
       <DocListSearch value={searchQuery} onChange={setSearchQuery} />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
-        {folders.length === 0 && (
+        {error && (
+          <div role="alert" className="mx-2 my-2 rounded border border-destructive/40 px-2 py-1.5 text-xs text-destructive">
+            <span>{error}</span>{" "}
+            <button type="button" onClick={retry} className="font-medium underline underline-offset-2">
+              Retry
+            </button>
+          </div>
+        )}
+
+        {loading && folders.length === 0 && (
+          <p className="px-3 py-4 text-center text-xs text-muted-foreground">Loading documents…</p>
+        )}
+
+        {!loading && !error && folders.length === 0 && (
           <p className="px-3 py-4 text-center text-xs text-muted-foreground">
             No documents yet.
             <br />
@@ -85,6 +113,12 @@ export function DocListView({ uid, onDocClick }: DocListViewProps) {
                 isActive={folder.id === activeFolderId}
                 onSelect={setActiveFolderId}
                 onDocClick={handleDocClick}
+                folders={folders}
+                onDeleted={handleFolderDeleted}
+                searchAvailable={knowledge.available === true}
+                knowledgeBase={folder.knowledgeBaseId ? knowledge.byId[folder.knowledgeBaseId] : undefined}
+                uid={uid}
+                currentSkillId={skillId}
               />
             ))}
           </div>

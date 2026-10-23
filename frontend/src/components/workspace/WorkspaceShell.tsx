@@ -3,10 +3,10 @@
 import { useState, type ReactNode } from "react";
 
 // WorkspaceShell — split-pane container for workbench skills
-// (v6.4.0 ONE-DEMO M3, ported inline from fork-visual-demo-pullback 4.1 M1).
+// (v6.4.0 TENANT-DEMO M3, ported inline from fork-visual-demo-pullback 4.1 M1).
 //
 // Left pane: chat. Right pane: workbench artefact (SideBySideDocViewer
-// for one-doc-compare, or any future workbench). The middle divider is
+// for demo-doc-compare, or any future workbench). The middle divider is
 // resizable via WorkspaceDivider.
 //
 // Sized via CSS grid with a CSS variable for the left column width,

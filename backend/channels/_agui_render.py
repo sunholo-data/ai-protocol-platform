@@ -102,11 +102,12 @@ IGNORED_EVENT_TYPES = frozenset(
         "REASONING_MESSAGE_END",
         "REASONING_MESSAGE_CHUNK",
         "REASONING_ENCRYPTED_VALUE",
-        "THINKING_START",
-        "THINKING_END",
-        "THINKING_TEXT_MESSAGE_START",
-        "THINKING_TEXT_MESSAGE_CONTENT",
-        "THINKING_TEXT_MESSAGE_END",
+        # Nested-agent bookkeeping is not a second channel run. Its parent
+        # owns the visible reply and terminal RUN_ERROR/RUN_FINISHED; a nested
+        # error may be recovered by that parent and must not terminate it.
+        "SUBAGENT_STARTED",
+        "SUBAGENT_FINISHED",
+        "SUBAGENT_ERROR",
         # Shared-state mirroring — no channel-side state to mirror into.
         "STATE_SNAPSHOT",
         "STATE_DELTA",

@@ -87,3 +87,30 @@ async def test_search_documents_rag_error_returns_message():
 
     assert "failed" in result.lower()
     assert "Vertex unavailable" in result
+
+
+# --- Distance is not relevance (PRECUT-HARDENING M1a) ------------------------
+
+
+@pytest.mark.asyncio
+async def test_score_is_labelled_as_distance_not_relevance(monkeypatch):
+    """The corpus uses Vertex's default COSINE_DISTANCE, so `score` is a DISTANCE:
+    lower is closer, range [0, 2]. Calling it "relevance" inverted the meaning for
+    the model — 0.37 reads as "weak" but actually means a close match."""
+    from tools import rag_tool
+
+    async def _fake_search(corpus_name, query, top_k=5):
+        return [{"text": "Force majeure …", "source_file": "OtherContract.pdf", "score": 0.37}]
+
+    monkeypatch.setattr("rag.corpus.search_corpus", _fake_search)
+    ctx = MagicMock()
+    ctx.state = {rag_tool._STATE_RAG_CORPUS_NAME: "corpora/abc"}
+
+    out = await rag_tool.search_documents("Brightfield", tool_context=ctx)
+
+    assert "distance: 0.37" in out
+    assert "relevance: 0.37" not in out
+    # The header must not assert relevance it cannot support.
+    assert "relevant excerpt" not in out
+    # And it must tell the model which direction is better, or the number is noise.
+    assert "LOWER is closer" in out

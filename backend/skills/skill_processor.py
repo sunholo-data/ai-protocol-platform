@@ -18,6 +18,7 @@ and header handling; this module just produces the event stream.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncGenerator
@@ -88,6 +89,9 @@ async def process_skill_request(
     document_ids: list[str] | None = None,
     resumed_session: bool = False,
     a2ui_surface_state: dict[str, Any] | None = None,
+    turn_author: str | None = None,
+    author: dict[str, str] | None = None,
+    project_id: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Yield AG-UI events for one turn of `skill_id`.
 
@@ -117,6 +121,15 @@ async def process_skill_request(
             ``wrap_with_a2ui_surface_context`` InstructionProvider can
             inject it into the agent's prompt. None when no surfaces
             are active (the common case before any A2UI render).
+        turn_author: Set when a collaborator (a supervisor of a machine
+            principal) speaks in the owner's thread; ``user`` is then the
+            OWNER. The message is prefixed with ``[name]`` so the transcript
+            and the model both see who said it, and ``turn_author`` is put in
+            session state for tools that report who they acted for.
+        author: The AUTHENTICATED sender of this turn when it isn't ``user``
+            (a collaborator): ``{uid, email, name, authMode}``. Recorded per
+            turn (``record_turn_author``) — the transcript's ``author`` field
+            comes from this record, never from the ``[name]`` text prefix.
 
     Raises:
         SkillNotFoundError: when the skill is missing or not readable.
@@ -124,7 +137,7 @@ async def process_skill_request(
     # Canonical id first (the overwhelmingly common case, and the seam most
     # tests patch), then fall back to resolving a friendly slug (CLAUDE.md #9).
     # The frontend holds whichever identifier it happened to resolve — a UUID
-    # for one-assistant, the slug for skill-authoring-assistant — and only the
+    # for demo-assistant, the slug for skill-authoring-assistant — and only the
     # UUID used to work, so the slug 404'd deployed while passing locally
     # (local fixtures use slug-as-doc-id).
     skill = get_skill(skill_id)
@@ -162,7 +175,49 @@ async def process_skill_request(
     # closes the race window. The callback is now idempotent: it observes
     # the existing row and short-circuits.
     thread_id = session_id or f"thread-{uuid.uuid4().hex[:12]}"
-    _ensure_session_index(thread_id, skill_id, user.uid, document_ids, getattr(user, "email", "") or "")
+    # Projects (projects.md §6.3): a project the frontend sent is used only if it
+    # is the caller's; it is stamped on the row, and a resumed chat that sends
+    # nothing gets its project back from the row (re-checked, never trusted).
+    from adk.project_scope import owned_project, resolve_turn_project
+
+    requested_project = (project_id or "").strip()
+    if requested_project and await asyncio.to_thread(owned_project, user.uid, requested_project, fresh=True) is None:
+        logger.warning("project scope: %s sent project %s it does not own; ignoring it", user.uid, requested_project)
+        requested_project = ""
+    stored_project = _ensure_session_index(
+        thread_id,
+        skill_id,
+        user.uid,
+        document_ids,
+        getattr(user, "email", "") or "",
+        collaborators=getattr(user, "supervisors", ()) or (),
+        project_id=requested_project or None,
+    )
+    turn_project = requested_project or await asyncio.to_thread(resolve_turn_project, user.uid, None, stored_project)
+    if turn_project:
+        # Projects D4: the search index catches up on this project's documents
+        # in the background — never on this request's critical path.
+        from extensions import document_event
+
+        document_event("project_opened", {"uid": user.uid, "project_id": turn_project})
+    if message:
+        from db.chat_sessions import record_turn_author
+
+        who = author or {
+            "uid": user.uid,
+            "email": getattr(user, "email", "") or "",
+            "name": getattr(user, "display_name", "") or getattr(user, "email", "") or user.uid,
+            "authMode": getattr(user, "auth_mode", "") or "",
+        }
+        await asyncio.to_thread(
+            record_turn_author,
+            thread_id,
+            uid=who.get("uid", ""),
+            email=who.get("email", ""),
+            name=who.get("name", ""),
+            role="collaborator" if author else "owner",
+            auth_mode=who.get("authMode", ""),
+        )
 
     # Pass the per-request access context so skill delegation is access-filtered
     # (v6.7.0 SKILL-DELEGATION). Without this the delegate access check in
@@ -214,6 +269,9 @@ async def process_skill_request(
     agui_agent = build_agui_adk_agent(agent, user_id=user.uid, session_service=_session_service)
 
     initial_state: dict[str, Any] = {}
+    # Always written, "" when unscoped: a chat moved OUT of a project must stop
+    # carrying the previous turn's value in session state.
+    initial_state["project_id"] = turn_project
     if document_ids:
         # NOTE: bare ``document_ids`` round-trips on the AG-UI wire because
         # ag_ui_adk emits it in STATE_SNAPSHOT. We considered ``temp:`` prefix
@@ -242,6 +300,13 @@ async def process_skill_request(
         # no-op when state has neither this key nor namespaced action
         # writes).
         initial_state["a2ui_surface_state"] = a2ui_surface_state
+    if turn_author:
+        message = f"[{turn_author}] {message}"
+        initial_state["turn_author"] = turn_author
+    elif getattr(user, "supervisors", None):
+        # The owner of a shared thread is speaking again: clear the label so a
+        # tool doesn't report the previous collaborator as the sender.
+        initial_state["turn_author"] = ""
     run_input = RunAgentInput(
         threadId=thread_id,
         runId=f"run-{uuid.uuid4().hex[:8]}",
@@ -346,7 +411,9 @@ def _ensure_session_index(
     owner_uid: str,
     document_ids: list[str] | None,
     owner_email: str = "",
-) -> None:
+    collaborators: tuple[str, ...] | list[str] = (),
+    project_id: str | None = None,
+) -> str | None:
     """Synchronously create the chat_sessions/{thread_id} row if absent,
     and ArrayUnion this turn's document_ids onto it whether or not the
     row already existed.
@@ -366,6 +433,11 @@ def _ensure_session_index(
 
     Failures are logged and swallowed — the after_agent_callback still
     runs as a fallback flusher.
+
+    ``project_id`` (already checked to be the caller's) is stamped as the chat's
+    explicit project when it differs from the row's. Returns the project id the
+    row carries after this call (None when it has none, or the row could not be
+    read), for the caller to re-check.
     """
     from db.chat_sessions import (
         add_session_documents,
@@ -380,7 +452,7 @@ def _ensure_session_index(
         existing = get_session_index(thread_id)
     except Exception as exc:
         logger.warning("session-index existence check failed for %s: %s", thread_id, exc)
-        return
+        return None
 
     docs = list(document_ids) if document_ids else []
 
@@ -395,11 +467,13 @@ def _ensure_session_index(
                 owner_domain=owner_domain_of(owner_email),
                 access_control=access_control,
                 document_ids=docs,
+                collaborators=collaborators,
             )
             logger.info("chat_sessions/%s index created synchronously (owner=%s)", thread_id, owner_uid)
         except Exception as exc:
             logger.warning("synchronous session-index write failed for %s: %s", thread_id, exc)
-        return
+            return None
+        return _stamp_project(thread_id, None, project_id)
 
     # v6.10.0 unified-adk-handoff: the index FOLLOWS the current skill. The
     # confirm→switch re-issues this turn on the specialist over the SAME thread,
@@ -452,6 +526,22 @@ def _ensure_session_index(
                 thread_id,
                 exc,
             )
+    return _stamp_project(thread_id, getattr(existing, "project_id", None), project_id)
+
+
+def _stamp_project(thread_id: str, current: str | None, requested: str | None) -> str | None:
+    """Make ``requested`` the chat's explicit project when it differs. Best-effort:
+    a failed write leaves the row as it was, and this turn still runs scoped."""
+    if not requested or requested == current:
+        return current
+    try:
+        from db.projects import set_session_project
+
+        set_session_project(thread_id, requested)
+        logger.info("chat_sessions/%s project -> %s", thread_id, requested)
+    except Exception as exc:
+        logger.warning("session-index project stamp failed for %s: %s", thread_id, exc)
+    return requested
 
 
 def _derive_initial_access_control(document_id: str | None):

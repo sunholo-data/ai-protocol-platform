@@ -6,7 +6,7 @@ import { BRANDING } from "@/lib/branding";
 describe("TypingIndicator", () => {
   it("renders three animated dots when no tool is active", () => {
     const { container } = render(<TypingIndicator />);
-    const dots = container.querySelectorAll(".animate-bounce");
+    const dots = container.querySelectorAll("[class*=animate-bounce]");
     expect(dots).toHaveLength(3);
   });
 
@@ -15,15 +15,15 @@ describe("TypingIndicator", () => {
     expect(screen.getByRole("img", { name: BRANDING.appName })).toBeInTheDocument();
   });
 
-  it("shows tool name when activeToolName is provided", () => {
-    render(<TypingIndicator activeToolName="web_search" />);
-    expect(screen.getByText("web_search")).toBeInTheDocument();
+  it("shows the friendly tool label when activeToolName is provided", () => {
+    render(<TypingIndicator activeToolName="web_search_agent" />);
+    expect(screen.getByText("Web search")).toBeInTheDocument();
     expect(screen.queryAllByRole("presentation").length).toBeGreaterThanOrEqual(0);
   });
 
   it("hides three dots when activeToolName is provided", () => {
     const { container } = render(<TypingIndicator activeToolName="list_documents" />);
-    expect(container.querySelectorAll(".animate-bounce")).toHaveLength(0);
+    expect(container.querySelectorAll("[class*=animate-bounce]")).toHaveLength(0);
   });
 
   // ttft-instrumentation.md M2: STAGE_PROGRESS labels surface the
@@ -38,7 +38,7 @@ describe("TypingIndicator", () => {
 
     it("hides three dots when stageLabel is provided", () => {
       const { container } = render(<TypingIndicator stageLabel="Thinking…" />);
-      expect(container.querySelectorAll(".animate-bounce")).toHaveLength(0);
+      expect(container.querySelectorAll("[class*=animate-bounce]")).toHaveLength(0);
     });
 
     it("stageLabel takes priority over activeToolName", () => {
@@ -51,13 +51,13 @@ describe("TypingIndicator", () => {
     });
 
     it("falls back to activeToolName when stageLabel is null", () => {
-      render(<TypingIndicator stageLabel={null} activeToolName="ai_search" />);
-      expect(screen.getByText("ai_search")).toBeInTheDocument();
+      render(<TypingIndicator stageLabel={null} activeToolName="search_documents" />);
+      expect(screen.getByText("Search your documents")).toBeInTheDocument();
     });
 
     it("falls back to dots when both stageLabel and activeToolName are absent", () => {
       const { container } = render(<TypingIndicator stageLabel={null} />);
-      expect(container.querySelectorAll(".animate-bounce")).toHaveLength(3);
+      expect(container.querySelectorAll("[class*=animate-bounce]")).toHaveLength(3);
     });
   });
 });

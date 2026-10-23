@@ -136,7 +136,9 @@ def test_probe_calls_tool_with_args() -> None:
     route = respx.post(url).mock(
         side_effect=[
             httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {"tools": [{"name": "t"}]}}),
-            httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "42"}]}}),
+            httpx.Response(
+                200, json={"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "42"}]}}
+            ),
         ]
     )
     result = CliRunner().invoke(main, ["toolbox", "probe", url, "--call", "t", "--args", '{"market":"sweden_4"}'])

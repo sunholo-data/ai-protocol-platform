@@ -67,9 +67,17 @@ class AccessContext:
         """True iff the user owns the resource."""
         return bool(resource.owner_id) and resource.owner_id == self.uid
 
+    def is_collaborator(self, resource: object) -> bool:
+        """True iff the resource names this user's email in ``collaborators``
+        (shared machine threads: read AND reply, without owning)."""
+        email = (self.email or "").strip().lower()
+        return bool(email) and email in (getattr(resource, "collaborators", None) or ())
+
     def can_access(self, resource: _HasAccess) -> bool:
-        """Apply the 5-type evaluator to any resource with access_control + owner_id."""
-        return can_access(resource.access_control, self, resource.owner_id)
+        """Apply the 5-type evaluator to any resource with access_control + owner_id.
+
+        A collaborator may always read, whatever the access type."""
+        return self.is_collaborator(resource) or can_access(resource.access_control, self, resource.owner_id)
 
     # --- Skill-specific shims (keep callsites readable) --------------------
 
@@ -85,10 +93,10 @@ class AccessContext:
         """True iff the user may MANAGE this skill (edit/delete via Skill Studio).
 
         Owner OR a holder of a skill-admin tag (`one-admin` OR the platform
-        `aitana-admin`). The tag lets ONE's admin team — and platform admins —
+        `aitana-admin`). The tag lets the tenant's admin team — and platform admins —
         manage skills they don't personally own, without granting ownership
         (is_skill_owner stays strict). Delegates to `auth.admin_roles`
-        (v6.9.0 unified role model; v6.6.0 ONE-FORK-CONVERGENCE).
+        (v6.9.0 unified role model; v6.6.0 TENANT-FORK-CONVERGENCE).
         """
         return self.is_skill_owner(skill) or _is_skill_admin_tags(self.group_tags)
 

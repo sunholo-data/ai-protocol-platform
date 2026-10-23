@@ -217,7 +217,7 @@ export default function GroupsPage() {
         <div className="grid gap-2">
           <input
             className="rounded-md border px-3 py-2 text-sm"
-            placeholder="tag id (e.g. ONE, beta-tester)"
+            placeholder="tag id (e.g. finance-team, beta-tester)"
             value={id}
             onChange={(e) => setId(e.target.value)}
           />

@@ -1,4 +1,4 @@
-// Block-level alignment for side-by-side PPA contract diff (v6.4.0 ONE-DEMO M3).
+// Block-level alignment for side-by-side PPA contract diff (v6.4.0 TENANT-DEMO M3).
 //
 // Two PPA contracts derived from the same template usually share AILANG
 // `block_id` values for clauses that the lawyer didn't change. For those,

@@ -77,7 +77,7 @@ One-time Sunholo-level setup. Independent of the platform code.
   Labs (the product brand)? Probably Aitana Labs since the platform
   is the listed product, but Sunholo owns the upstream A2A
   infrastructure. Pick before form submission.
-- Does the existing Holosun Billing account work, or does Marketplace
+- Does an existing organizational billing account work, or does Marketplace
   payout require a separate billing entity?
 
 ---

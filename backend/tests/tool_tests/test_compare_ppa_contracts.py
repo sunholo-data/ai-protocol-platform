@@ -1,4 +1,4 @@
-"""Tests for tools/compare_ppa_contracts.py (v6.4.0 ONE-DEMO M3).
+"""Tests for tools/compare_ppa_contracts.py (v6.4.0 TENANT-DEMO M3).
 
 Covers:
   - Happy path: two PpaClauses → Gemini comparison → typed PpaComparison
@@ -293,8 +293,8 @@ async def test_gs_url_pair_path_compares_bucket_resident_contracts():
     compare_ppa_contracts. No parsed_documents/ entries required."""
     from tools.compare_ppa_contracts import compare_ppa_contracts
 
-    left_url = "gs://multivac-acme-energy-bucket/PPAs/longform/contract-A.pdf"
-    right_url = "gs://multivac-acme-energy-bucket/PPAs/longform/contract-B.pdf"
+    left_url = "gs://example-customer-documents/PPAs/longform/contract-A.pdf"
+    right_url = "gs://example-customer-documents/PPAs/longform/contract-B.pdf"
     left = _sample_clauses(left_url)
     right = _sample_clauses(right_url, settlement="PaN", price="CPI-indexed")
 

@@ -18,14 +18,14 @@ function mockFetch(status: number, body: unknown): void {
 }
 
 /** Resolve when the rejection event fires, or reject after a short timeout. */
-function waitForDeniedEvent(timeoutMs = 1000): Promise<CustomEvent<{ message?: string }>> {
+function waitForDeniedEvent(timeoutMs = 1000): Promise<CustomEvent<{ message?: string; code?: string }>> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("no domain-rejection event")), timeoutMs);
     window.addEventListener(
       DOMAIN_NOT_PERMITTED_EVENT,
       (e) => {
         clearTimeout(timer);
-        resolve(e as CustomEvent<{ message?: string }>);
+        resolve(e as CustomEvent<{ message?: string; code?: string }>);
       },
       { once: true },
     );
@@ -47,6 +47,15 @@ describe("fetchWithAuth domain-rejection signal", () => {
     expect(ev.detail?.message).toBe("nope");
     // The caller's response body is still readable (we parsed a clone).
     expect((await res.json()).detail.code).toBe("DOMAIN_NOT_PERMITTED");
+  });
+
+  it("dispatches the event, with its code, on an EMAIL_NOT_VERIFIED 403 (unverified-email gate)", async () => {
+    mockFetch(403, { detail: { code: "EMAIL_NOT_VERIFIED", message: "unverified" } });
+    const eventP = waitForDeniedEvent();
+    await fetchWithAuth("/api/proxy/api/auth/whoami");
+    const ev = await eventP;
+    expect(ev.detail?.code).toBe("EMAIL_NOT_VERIFIED");
+    expect(ev.detail?.message).toBe("unverified");
   });
 
   it("does NOT dispatch on an unrelated 403", async () => {

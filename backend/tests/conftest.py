@@ -33,9 +33,55 @@ authoritative gate everywhere.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from unittest import mock
 
 import pytest
+
+
+# --- Isolate the suite from backend/.env -------------------------------------
+#
+# `litellm/__init__.py` calls `load_dotenv()` AT IMPORT TIME, so any test that
+# imports litellm — directly or transitively — pulls the developer's entire .env
+# into os.environ, and everything running after it inherits that. The suite's
+# result then depends on what happens to be in one machine's .env.
+#
+# Not hypothetical: a downstream fork reported "three tests fail on a full-suite
+# run but pass in isolation" and it stayed unexplained for weeks. Their .env sets
+# AI_SEARCH_SOURCE_BUCKET_OVERRIDE, so importing litellm rewrote every gs://
+# bucket assertion after it. The identical suite passed here, because this .env
+# does not set that key.
+#
+# ORDER IS THE WHOLE FIX, and the obvious version is wrong. Doing this in a
+# session fixture runs too late: test modules are imported during collection and
+# any module-level `os.environ.get(...)` has already cached a .env value, so
+# clearing afterwards leaves a MIXED state that breaks more than it fixes
+# (verified — it broke five otherwise-passing tests).
+#
+# So: import litellm HERE, which triggers its load_dotenv once, then strip the
+# keys .env defines. conftest is imported before any test module, and litellm is
+# module-cached afterwards, so nothing re-pollutes.
+#
+# Only keys .env actually defines are removed — a genuinely exported variable
+# still reaches the suite. Tests that want one of these set it via monkeypatch.
+def _isolate_from_developer_dotenv() -> None:
+    import os
+
+    dotenv = Path(__file__).resolve().parents[1] / ".env"
+    if not dotenv.is_file():
+        return
+    try:
+        import litellm  # noqa: F401  — triggers its load_dotenv() now, not later
+    except Exception:
+        pass
+    for line in dotenv.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            os.environ.pop(line.split("=", 1)[0].strip(), None)
+
+
+_isolate_from_developer_dotenv()
+
 
 # MODEL-RELIABILITY M3: the test suite runs under the `unrestricted`
 # residency policy by default, mirroring the Aitana dev deployment (the
@@ -153,3 +199,16 @@ def _reset_agent_and_mcp_caches():
     _agent_cache.clear()
     _mcp_registry.clear_registry_cache()
     _sources.clear_resolution_cache()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_after_seed(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The platform seed ends with ``extensions.after_seed`` — e.g. the user-guide
+    KB sync, which queues background indexing against the real datastore. No unit
+    test may reach that. Tests of the hook itself opt in with
+    ``@pytest.mark.real_after_seed``."""
+    if request.node.get_closest_marker("real_after_seed"):
+        return
+    import extensions
+
+    monkeypatch.setattr(extensions, "after_seed", lambda **_: {})

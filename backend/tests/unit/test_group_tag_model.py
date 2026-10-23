@@ -7,7 +7,7 @@ from db.models.group_tags import GroupTag as GroupTagDirect
 
 
 def test_grouptag_defaults() -> None:
-    t = GroupTag(id="ONE")
+    t = GroupTag(id="example-team")
     assert t.label == ""
     assert t.grants == []
     assert t.tenant_scope is None
@@ -16,12 +16,12 @@ def test_grouptag_defaults() -> None:
 
 
 def test_grouptag_alias_roundtrip() -> None:
-    t = GroupTag(id="ONE", tenantScope="one.com", createdBy="admin", createdAt=123.0)
-    assert t.tenant_scope == "one.com"
+    t = GroupTag(id="example-team", tenantScope="customer.example", createdBy="admin", createdAt=123.0)
+    assert t.tenant_scope == "customer.example"
     assert t.created_by == "admin"
     assert t.created_at == 123.0
     dumped = t.model_dump(by_alias=True)
-    assert dumped["tenantScope"] == "one.com"
+    assert dumped["tenantScope"] == "customer.example"
     assert dumped["createdBy"] == "admin"
 
 

@@ -51,7 +51,10 @@ export function ChatDrawer({
       data-side={side}
       data-open={open ? "true" : "false"}
       className={`flex h-full shrink-0 flex-col bg-background transition-[width] duration-200 ${borderClass}`}
-      style={{ width: open ? width : 44 }}
+      // `min(…, 100%)`: on a phone the fixed drawer width is wider than the
+      // screen, so an open drawer takes the whole row (the workbench is one
+      // collapse-click away) instead of overflowing it.
+      style={{ width: open ? `min(${width}px, 100%)` : 44 }}
     >
       <button
         type="button"

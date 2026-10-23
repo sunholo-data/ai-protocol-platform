@@ -63,7 +63,7 @@ gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
 #
 # All three (and the cross-project Cloud Build SA's objectCreator grant on
 # the log bucket) are declared in
-#   multivac-aitana/infrastructure/environments/<env>/runtime_buckets.tf
+#   deployment-infrastructure/infrastructure/environments/<env>/runtime_buckets.tf
 # For a fresh env the FIRST terraform apply creates them; existing envs adopt
 # them via import blocks. This ordering is safe because the terraform apply
 # runs before any app-deploy build (which is what needs cloudbuild-logs) and

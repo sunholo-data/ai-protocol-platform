@@ -85,8 +85,8 @@ itself is captured as a follow-up in the design doc.
 
 - `infrastructure/mcp-sandbox/Dockerfile` — multi-stage Node build
 - `infrastructure/mcp-sandbox/cloudbuild-mcp-sandbox.yaml` — branch-based deploy
-- `multivac-aitana` terraform: new `cloud_run_multiple` entry `mcp-sandbox-{env}`
-- `multivac-apps` terraform: new Cloud Build trigger
+- `deployment-infrastructure` terraform: new `cloud_run_multiple` entry `mcp-sandbox-{env}`
+- `deployment-config` terraform: new Cloud Build trigger
 - `platform-frontend-{env}` env: `NEXT_PUBLIC_MCP_SANDBOX_URL` set from
   the sandbox service's URL
 - `mcp-sandbox-{env}` env: `ALLOWED_HOST_ORIGINS` set to the deployed

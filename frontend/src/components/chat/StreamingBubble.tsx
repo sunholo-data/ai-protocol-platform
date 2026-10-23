@@ -24,28 +24,32 @@ interface StreamingBubbleProps {
 
 export function StreamingBubble({ message, skillId, botAvatarUrl, botLabel, thinkingContent, isThinking }: StreamingBubbleProps) {
   return (
+    // Same frame as the finished assistant MessageBubble, so the swap on
+    // TEXT_MESSAGE_END causes no layout shift.
     <div className="flex items-start gap-3">
-      {botAvatarUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={botAvatarUrl}
-          alt={skillId}
-          className="h-7 w-7 shrink-0 rounded-full border border-border bg-background object-cover"
-        />
-      ) : (
-        <BrandAvatar />
-      )}
-      <div className="flex max-w-[80%] flex-col gap-1">
+      <div className="mt-0.5 hidden shrink-0 md:block">
+        {botAvatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={botAvatarUrl}
+            alt={skillId}
+            className="h-7 w-7 rounded-full border border-border bg-background object-cover"
+          />
+        ) : (
+          <BrandAvatar />
+        )}
+      </div>
+      <div className="flex min-w-0 max-w-[68ch] flex-1 flex-col gap-1.5">
         <div className="flex items-baseline gap-2">
-          <span className="text-xs font-medium text-orange-600">{botLabel || skillId}</span>
+          <span className="text-sm font-semibold text-foreground">{botLabel || skillId}</span>
         </div>
-        <div className="rounded-[2px_8px_8px_8px] border-l-[3px] border-orange-400 bg-[hsl(0,0%,98%)] px-3 py-2 text-sm">
+        <div className="min-w-0 space-y-3 text-[15px] leading-[1.7] text-foreground md:text-base">
           {thinkingContent && (
             <ThinkingPanel content={thinkingContent} isThinking={isThinking ?? false} />
           )}
-          <p className="whitespace-pre-wrap">
+          <p className="whitespace-pre-wrap break-words">
             {message.content}
-            <span className="ml-0.5 inline-block h-3.5 w-0.5 bg-orange-400 animate-pulse align-middle" />
+            <span className="ml-0.5 inline-block h-3.5 w-0.5 bg-primary motion-safe:animate-pulse align-middle" />
           </p>
         </div>
       </div>

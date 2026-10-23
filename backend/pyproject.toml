@@ -8,13 +8,13 @@ dependencies = [
     # our custom layer rides ADK's control-flow contracts (is_final_response,
     # per-member model stamping, callback signatures), so a silent minor bump
     # moves the ground under us. Upgrades are a deliberate PR gated by
-    # `make adk-conformance`. (>=1.28.0 also required by a2ui-agent-sdk.)
-    "google-adk==1.31.1",
+    # `make adk-conformance`. Extras preserve the integrations split out in ADK 2.
+    "google-adk[gcp,mcp,a2a,db]==2.12.0",
     # Core framework
     "fastapi>=0.115.8,<1.0.0",
     "uvicorn>=0.35.0,<1.0.0",
     # AI model providers
-    "google-genai>=1.19",
+    "google-genai>=2.30.0",
     "anthropic>=0.52.0",
     "openai>=1.59.0",
     # ADK's Claude/OpenAI adapter needs the SDK directly. This reviewed release
@@ -28,30 +28,47 @@ dependencies = [
     # Read-aloud / TTS (v6.6.0 M2 voice provider abstraction)
     "google-cloud-texttospeech>=2.16.0,<3.0.0",
     # Evaluation tooling is enabled only by the ADK eval extra below.
-    "google-cloud-aiplatform>=1.165.1,<2.0.0",
+    "google-cloud-aiplatform>=2.6.0,<3.0.0",
     "firebase-admin>=6.0.0",
     "gcsfs>=2024.11.0",
     # AILANG Parse — deterministic document parsing
-    "ailang-parse[gcs]>=0.7.1",
+    "ailang-parse[gcs]>=0.13.1",
     # MCP
-    "mcp>=1.7.1",
+    "mcp>=1.30.0,<2.0.0",
+    # Coordinated ADK 2 / AG-UI 1.0 bridge; requires Context-stable streaming.
     # AG-UI protocol bridge (ADK -> AG-UI events over SSE)
-    "ag-ui-adk>=0.6.0,<1.0.0",
+    "ag-ui-adk==0.10.0",
     # HTTP client
     "httpx>=0.28.0",
     # Observability — OpenTelemetry first (ADK native)
-    "opentelemetry-instrumentation-google-genai>=0.1.0,<1.0.0",
+    "opentelemetry-instrumentation-google-genai>=0.7b1,<1.0.0",
     # Cloud Trace span export (issue #39). Was present transitively and used by
     # nothing; declared explicitly now that the request path depends on it.
     "opentelemetry-exporter-gcp-trace>=1.11.0,<2.0.0",
+    # Keep the OTLP encoder compatible with the API/SDK; 1.38 imports removed
+    # private types even though its metadata allows a newer SDK.
+    "opentelemetry-exporter-otlp-proto-http==1.45.1",
+    "opentelemetry-exporter-gcp-logging>=1.12.0a0,<2.0.0",
     # Utilities
     "rich>=14.0.0",
     "markdown>=3.8",
-    "json-repair>=0.46.2",
+    "json-repair>=0.60.1",
     "tiktoken>=0.11.0",
     "email-validator>=2.0.0",
     "psutil>=7.0.0",
     "pydantic>=2.11.4",
+    # HTML extraction for url_processing. Declared DIRECTLY, not via
+    # google-adk[extensions]: that extra also drags in crewai, langgraph,
+    # docker and kubernetes. LiteLLM is declared directly above for our model
+    # adapter; the other extension dependencies are not needed here.
+    #
+    # ADK's load_web_page imports bs4 INSIDE the function, so a missing dep
+    # fails at CALL time, not import time: the module imports, the tool
+    # registers, unit tests that mock the fetch stay green, and the failure
+    # only appears in production. It did — for four and a half months, on
+    # every environment, and the model answered from invention instead.
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.3.0",
     # Channels
     "twilio>=8.0.0",
     "requests>=2.31.0",
@@ -60,12 +77,13 @@ dependencies = [
     "pynacl>=1.5.0,<2.0.0",
     # DB sessions
     "asyncpg>=0.30.0,<1.0.0",
-    "a2ui-agent-sdk>=0.2.1",
+    "a2ui-agent-sdk==0.2.2",
     "a2a-sdk<1.0.0",
     "python-telegram-bot>=22.7",
     "pypdfium2>=5.11.0",
-    "pillow>=12.3.0",
+    "pillow>=13.0.0",
     "google-cloud-tasks>=2.24.0",
+    "pywebpush>=2.5.0",
 ]
 
 [dependency-groups]
@@ -85,7 +103,7 @@ dev = [
 [project.optional-dependencies]
 eval = [
     # Pinned in lockstep with the core google-adk pin above (v6.17.0).
-    "google-adk[eval]==1.31.1",
+    "google-adk[eval]==2.12.0",
 ]
 lint = [
     "ruff>=0.4.6,<1.0.0",
@@ -112,11 +130,43 @@ testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow",
     "integration: marks tests requiring external services",
+    "real_after_seed: run the real extensions.after_seed (tests of the hook itself; see tests/conftest.py)",
     "adk_contract: hermetic 'real ADK flow' guard for a custom<->ADK contract (make adk-conformance); see docs/design/v6.17.0/adk-contract-checklist.md",
 ]
 
 [tool.codespell]
 skip = ".venv,uv.lock"
+
+[tool.uv]
+# CVE-2026-114603: the patched tracestate parser requires OTel 1.45.1. ADK 2.12 still caps the
+# API/SDK at 1.42.1; deliberately override that ceiling, with the real parser,
+# GCP/OTLP imports and ADK conformance covered by regression tests. Remove this
+# override once an ADK release permits the patched stack natively.
+override-dependencies = ["opentelemetry-api==1.45.1", "opentelemetry-sdk==1.45.1"]
+# Security floors; ADK and its eval extra stay pinned in lockstep.
+constraint-dependencies = [
+    "aiohttp>=3.14.4",
+    "authlib>=1.7.2",
+    "cryptography>=50.0.0",
+    "h2>=4.4.1",
+    "hpack>=4.2.0",
+    "httplib2>=0.32.0",
+    "joserfc>=1.6.8",
+    "msgpack>=1.2.1",
+    "oauthlib>=4.0.0",
+    "pyasn1>=0.6.4",
+    "pydantic-settings>=2.14.2",
+    "pyjwt>=2.15.0",
+    "python-multipart>=0.0.32",
+    "sqlparse>=0.6.0",
+    "urllib3>=2.8.0",
+    "anyio>=4.14.2",
+    "certifi>=2026.10.19",
+    "fsspec>=2026.6.0",
+    "idna>=3.15",
+    "mako>=1.4.2",
+    "multidict>=6.9.1",
+]
 
 [build-system]
 requires = ["hatchling"]

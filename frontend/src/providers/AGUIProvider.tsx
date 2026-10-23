@@ -16,6 +16,7 @@ import {
   useMemo,
 } from "react";
 import { subscribeToIdToken } from "@/lib/firebase";
+import { logger } from "@/lib/logger";
 
 /**
  * AG-UI-native provider. Exposes one `HttpAgent` per `skillId`, targeting the
@@ -66,6 +67,18 @@ export function AGUIProvider({
   // ``agent.headers.Authorization`` in place from the subscribeToIdToken
   // effect below. Rebuilding the agent on every silent ~hourly refresh
   // is wasteful AND throws away any in-flight SSE stream state.
+  // FRONTEND-OBS: every browser log line should carry the ids an operator joins
+  // on. This is the one place that knows both — the skill, and the AG-UI thread,
+  // which IS the chat session id in this app. Without it the first real event
+  // on prod (2026-09-05) arrived with no session, thread or skill.
+  useEffect(() => {
+    logger.setContext({
+      skillId,
+      sessionId: sessionId ?? undefined,
+      threadId: sessionId ?? undefined,
+    });
+  }, [skillId, sessionId]);
+
   const agent = useMemo(() => {
     return new HttpAgent({
       url: `/api/proxy/api/skill/${encodeURIComponent(skillId)}/stream`,

@@ -187,7 +187,7 @@ class TestAccessCheckScoping:
 
     def test_tenant_can_inspect_own_user(self):
         with (
-            patch("admin.access_routes._direct_tags", return_value=("u1", ["ONE"], True)),
+            patch("admin.access_routes._direct_tags", return_value=("u1", ["example-team"], True)),
             patch("admin.access_routes.resolve_derived_group_tags", return_value=[]),
         ):
             r = self._app(_TENANT_A).post("/api/admin/access/check", json={"email": "someone@a.com"})

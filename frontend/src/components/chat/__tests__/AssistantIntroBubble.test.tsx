@@ -14,12 +14,12 @@ vi.mock("@/components/chat/ChatMarkdown", () => ({
 }));
 
 describe("AssistantIntroBubble", () => {
-  it("renders the content via ChatMarkdown + 'not stored' caption", () => {
+  it("renders the content via ChatMarkdown + 'not saved' caption", () => {
     render(<AssistantIntroBubble content="PPA, PtX, BESS — what would you like to analyse?" />);
     expect(screen.getByTestId("markdown")).toHaveTextContent(
       "PPA, PtX, BESS — what would you like to analyse?",
     );
-    expect(screen.getByText(/Intro · not stored/i)).toBeInTheDocument();
+    expect(screen.getByText(/Intro · not saved/i)).toBeInTheDocument();
   });
 
   it("defaults the skill name to 'Assistant' when skillName prop omitted", () => {

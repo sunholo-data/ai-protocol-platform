@@ -43,14 +43,17 @@ def test_seed_populates_collections_in_local_mode(monkeypatch):
     # workshop-helper (Path B — RAG over the docs corpus),
     # skill-authoring-assistant (v6.6.0 M3 — Skill Studio copilot),
     # plus web-researcher (owned by PLATFORM_OWNER_UID) = 9.
-    # ONE production (owned by PLATFORM_OWNER_UID): one-assistant (8.2 front
-    # door), one-ppa-expert, one-obligation-analysis (8.3 job), one-doc-compare
+    # deployment production (owned by PLATFORM_OWNER_UID): demo-assistant (8.2 front
+    # door), demo-ppa-expert, demo-obligation-analysis (8.3 job), demo-doc-compare
     # — seeded only when their SKILL.md template ships (the customer templates
     # are stripped from the public template fork, where this must still pass).
     from db.local_fixture import _TEMPLATES_DIR
+    from extensions import deployment_local_skills
 
-    one_skills = ("one-assistant", "one-ppa-expert", "one-obligation-analysis", "one-doc-compare")
-    expected = 9 + sum(1 for s in one_skills if (_TEMPLATES_DIR / s / "SKILL.md").exists())
+    extras = deployment_local_skills(
+        0, lambda name: "fixture" if (_TEMPLATES_DIR / name / "SKILL.md").exists() else None
+    )
+    expected = 9 + sum(1 for skill in extras if skill["instructions"] is not None)
     assert len(list(client.collection("skills").stream())) == expected
     assert len(list(client.collection("documents").stream())) == 1
 
@@ -89,7 +92,7 @@ def test_seeded_skills_have_required_fields(monkeypatch):
         assert s["instructions"]
         assert s["accessControl"]["type"] == "public"
         # Workshop/demo skills are owned by the workshop-user; the ONE
-        # production skills (ONE-FORK-CONVERGENCE) are owned by the
+        # production skills (TENANT-FORK-CONVERGENCE) are owned by the
         # platform owner. Both are valid seed owners.
         assert s["ownerId"] in ("workshop-user", PLATFORM_OWNER_UID)
 

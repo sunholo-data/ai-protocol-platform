@@ -1,18 +1,19 @@
-// Default avatar gallery for the skill editor.
+// Default avatar gallery for the Skill Studio ("Create a new skill").
 //
-// A small curated set of professional, cohesive flat-vector portrait avatars
-// plus per-skill glyph avatars (coloured circle + domain icon). The picker in
-// the Skill Studio renders these; selecting one sets `persona.avatar` to its
-// `src` (a /public path served by Next).
+// One cohesive set of 3D icons in the template's house style (the Sunholo
+// brand's service-icon renders: a matte clay object on a slate plinth,
+// slate/coral/teal/off-white, on white). Each names a KIND of skill, not a
+// specific one, so any new skill finds a fitting icon. Selecting one sets
+// `persona.avatar` to its `src` (a /public path served by Next).
 //
-// To add more portraits: generate a matching image (see
-// frontend/public/images/avatars/README.md for the exact style spec), drop it
-// in frontend/public/images/avatars/, and append an entry here. Keep the set
-// stylistically consistent — that's what makes the gallery look intentional.
+// Adding one: see frontend/public/images/avatars/README.md for the style spec
+// and how they are generated, drop `<id>.webp` in public/images/avatars/
+// gallery/, and append an entry here. Keep the set consistent — a matched set
+// looks intentional; a grab-bag looks cheap.
 //
-// Glyphs are SVG circles with a domain icon; they scale perfectly and are
-// served from the same directory. The colour palette is brand-consistent and
-// distinct enough to tell skills apart in the switcher at 20 px.
+// The previous set (flat portrait JPGs and coloured-circle glyph SVGs in
+// public/images/avatars/) is no longer offered, but the files stay: existing
+// skills, template SKILL.md frontmatter and forks' stored skills point at them.
 
 export interface DefaultAvatar {
   id: string;
@@ -20,30 +21,40 @@ export interface DefaultAvatar {
   src: string;
 }
 
-// Portrait avatars — head & shoulders, flat-vector illustration style.
-export const PORTRAIT_AVATARS: DefaultAvatar[] = [
-  { id: "ana", label: "Ana", src: "/images/avatars/ana.jpg" },
-  { id: "marco", label: "Marco", src: "/images/avatars/marco.jpg" },
+const gallery = (id: string, label: string): DefaultAvatar => ({
+  id,
+  label,
+  src: `/images/avatars/gallery/${id}.webp`,
+});
+
+export const DEFAULT_AVATARS: DefaultAvatar[] = [
+  gallery("assistant", "Assistant"),
+  gallery("research", "Research"),
+  gallery("knowledge", "Knowledge search"),
+  gallery("documents", "Documents"),
+  gallery("writing", "Writing"),
+  gallery("data", "Data extraction"),
+  gallery("analytics", "Analytics & costs"),
+  gallery("dashboard", "Dashboard"),
+  gallery("code", "Engineering"),
+  gallery("language", "Programming language"),
+  gallery("builder", "Builder"),
+  gallery("browser", "Web browsing"),
+  gallery("cloud", "Cloud"),
+  gallery("maps", "Maps & places"),
+  gallery("reasoning", "Reasoning"),
+  gallery("orchestrator", "Orchestrator"),
+  gallery("ideas", "Ideas"),
+  gallery("learning", "Learning"),
+  gallery("translation", "Translation"),
+  gallery("email", "Email"),
+  gallery("scheduling", "Scheduling"),
+  gallery("legal", "Legal"),
+  gallery("security", "Security"),
+  gallery("lab", "Testing"),
 ];
 
-// Glyph avatars — coloured circle + stroke icon, one per built-in skill.
-// Also available as user picks in the Studio gallery.
-export const GLYPH_AVATARS: DefaultAvatar[] = [
-  { id: "skill-ppa-expert", label: "PPA Expert", src: "/images/avatars/skill-ppa-expert.svg" },
-  { id: "skill-doc-compare", label: "Doc Compare", src: "/images/avatars/skill-doc-compare.svg" },
-  { id: "skill-general-assistant", label: "General Assistant", src: "/images/avatars/skill-general-assistant.svg" },
-  { id: "skill-document-analyst", label: "Document Analyst", src: "/images/avatars/skill-document-analyst.svg" },
-  { id: "skill-web-researcher", label: "Web Researcher", src: "/images/avatars/skill-web-researcher.svg" },
-  { id: "skill-data-extractor", label: "Data Extractor", src: "/images/avatars/skill-data-extractor.svg" },
-  { id: "skill-code-assistant", label: "Code Assistant", src: "/images/avatars/skill-code-assistant.svg" },
-  { id: "skill-authoring-assistant", label: "Authoring Assistant", src: "/images/avatars/skill-authoring-assistant.svg" },
-  { id: "skill-workspace-demo", label: "Workspace Demo", src: "/images/avatars/skill-workspace-demo.svg" },
-  { id: "skill-workspace-demo-interactive", label: "Interactive Demo", src: "/images/avatars/skill-workspace-demo-interactive.svg" },
-];
-
-export const DEFAULT_AVATARS: DefaultAvatar[] = [...PORTRAIT_AVATARS, ...GLYPH_AVATARS];
-
-/** Pick a random glyph avatar src for new skills that haven't been assigned one. */
-export function randomGlyphAvatar(): string {
-  return GLYPH_AVATARS[Math.floor(Math.random() * GLYPH_AVATARS.length)]!.src;
+/** A random gallery icon for a new skill that hasn't picked one yet. */
+export function randomDefaultAvatar(): string {
+  return DEFAULT_AVATARS[Math.floor(Math.random() * DEFAULT_AVATARS.length)]!.src;
 }

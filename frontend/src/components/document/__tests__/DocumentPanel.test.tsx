@@ -117,14 +117,19 @@ describe("DocumentPanel", () => {
     expect(screen.queryByText(/changes/)).toBeNull();
   });
 
+  // v6.34.0: a .docx now opens in the STYLED view by default (the block view
+  // carries no formatting, so applying a template showed nothing). These three
+  // are about BLOCK rendering, so they use a format that has only that view.
+  const BLOCKS_ONLY_DOC = { ...FIXTURE_DOC, sourceFormat: "csv" };
+
   it("renders heading text from blocks", () => {
-    _mockUseDocument.mockReturnValue({ doc: FIXTURE_DOC, isLoading: false, error: null });
+    _mockUseDocument.mockReturnValue({ doc: BLOCKS_ONLY_DOC, isLoading: false, error: null });
     render(<DocumentPanel docId="doc-1" />);
     expect(screen.getByText("Quarterly Report")).toBeInTheDocument();
   });
 
   it("renders table content from blocks", () => {
-    _mockUseDocument.mockReturnValue({ doc: FIXTURE_DOC, isLoading: false, error: null });
+    _mockUseDocument.mockReturnValue({ doc: BLOCKS_ONLY_DOC, isLoading: false, error: null });
     render(<DocumentPanel docId="doc-1" />);
     expect(screen.getByText("Region")).toBeInTheDocument();
     expect(screen.getByText("$1.2M")).toBeInTheDocument();
@@ -132,7 +137,7 @@ describe("DocumentPanel", () => {
 
   it("shows 'no preview content' message when parsed doc has empty blocks", () => {
     _mockUseDocument.mockReturnValue({
-      doc: { ...FIXTURE_DOC, blocks: [] },
+      doc: { ...BLOCKS_ONLY_DOC, blocks: [] },
       isLoading: false,
       error: null,
     });

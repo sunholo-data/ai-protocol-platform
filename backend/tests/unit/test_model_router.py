@@ -81,7 +81,8 @@ def test_claude_5_family_uses_adaptive_thinking_not_reasoning_effort(monkeypatch
     a hard 400 on these models (every sonnet-5 handoff RUN_ERRORed, 2026-07-24).
     They must get `thinking={type:adaptive}` + `output_config.effort` instead."""
     monkeypatch.delenv("CLAUDE_ADAPTIVE_THINKING", raising=False)
-    for mid in ("claude-sonnet-5", "claude-fable-5"):
+    # Point releases too: opus-5-5 was missed by the matcher and 400'd on prod.
+    for mid in ("claude-sonnet-5", "claude-fable-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"):
         model = resolve_model(mid)
         extra = getattr(model, "_additional_args", None) or {}
         assert "reasoning_effort" not in extra, f"{mid} must NOT send reasoning_effort (400s)"

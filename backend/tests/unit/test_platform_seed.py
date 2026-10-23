@@ -99,31 +99,31 @@ def test_parse_template_no_shell_is_none(tmp_path):
 
 
 def test_one_doc_compare_template_is_chat_primary():
-    """v6.6.0 ONE-FORK-CONVERGENCE: one-doc-compare was standardised onto the
+    """v6.6.0 TENANT-FORK-CONVERGENCE: demo-doc-compare was standardised onto the
     chat-primary ChatShell — its `doc-compare` shell block was retired from the
     production path (the specialised shell read as "a different app"). The
     side-by-side comparison still renders to the A2UI `workspace` surface, which
     ChatShell shows in its workbench. So the template now declares NO shell."""
     from admin.platform_seed import DEFAULT_TEMPLATES_ROOT
 
-    skill_md = DEFAULT_TEMPLATES_ROOT / "one-doc-compare" / "SKILL.md"
+    skill_md = DEFAULT_TEMPLATES_ROOT / "demo-doc-compare" / "SKILL.md"
     if not skill_md.exists():
-        pytest.skip("one-doc-compare template not present")
+        pytest.skip("demo-doc-compare template not present")
     parsed = _parse_template(skill_md)
-    assert parsed["shell"] is None, "one-doc-compare should no longer declare a specialised shell"
+    assert parsed["shell"] is None, "demo-doc-compare should no longer declare a specialised shell"
     # shell=None → ShellRouter falls back to ChatShell.
-    cfg = SkillConfig(name="one-doc-compare", description=parsed["description"], shell=parsed["shell"])
+    cfg = SkillConfig(name="demo-doc-compare", description=parsed["description"], shell=parsed["shell"])
     assert cfg.shell is None
 
 
 def test_one_ppa_expert_template_has_no_shell():
-    """Backwards-compat: the chat-primary one-ppa-expert skill declares no
+    """Backwards-compat: the chat-primary demo-ppa-expert skill declares no
     shell block, so it parses to shell=None and renders ChatShell."""
     from admin.platform_seed import DEFAULT_TEMPLATES_ROOT
 
-    skill_md = DEFAULT_TEMPLATES_ROOT / "one-ppa-expert" / "SKILL.md"
+    skill_md = DEFAULT_TEMPLATES_ROOT / "demo-ppa-expert" / "SKILL.md"
     if not skill_md.exists():
-        pytest.skip("one-ppa-expert template not present")
+        pytest.skip("demo-ppa-expert template not present")
     parsed = _parse_template(skill_md)
     assert parsed.get("shell") is None
 
@@ -587,3 +587,250 @@ def test_seed_summary_includes_refreshed_and_purged_counts():
     assert d["created"] == 1
     assert d["refreshed"] == 5
     assert d["purged"] == 2
+
+
+# === skills pinned to a disabled provider ===
+
+
+def test_seed_skips_skills_pinned_to_disabled_provider(tmp_path, monkeypatch):
+    """A skill pinned to Claude/GPT in an env without that provider's key would
+    silently answer on Gemini while its name says otherwise — never create it."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    _fake_template_dir(tmp_path, "claude-assistant", metadata={"model": "claude-sonnet-5"})
+    _fake_template_dir(tmp_path, "gpt-assistant", metadata={"model": "gpt-5-6-luna"})
+    _fake_template_dir(tmp_path, "general-assistant")
+
+    with (
+        patch("admin.platform_seed.skill_config.list_skills", return_value=[]),
+        patch("admin.platform_seed.skill_config.create_skill") as mock_create,
+    ):
+        mock_create.side_effect = lambda **kw: _make_config(name=kw["name"])
+        summary = seed(templates_root=tmp_path)
+
+    assert {c.kwargs["name"] for c in mock_create.call_args_list} == {"general-assistant"}
+    assert sorted(summary.skipped_disabled_provider) == ["claude-assistant", "gpt-assistant"]
+    assert summary.as_dict()["skipped_disabled_provider"] == summary.skipped_disabled_provider
+
+
+def test_seed_keeps_provider_skill_when_key_mounted(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _fake_template_dir(tmp_path, "claude-assistant", metadata={"model": "claude-sonnet-5"})
+
+    with (
+        patch("admin.platform_seed.skill_config.list_skills", return_value=[]),
+        patch("admin.platform_seed.skill_config.create_skill") as mock_create,
+    ):
+        mock_create.side_effect = lambda **kw: _make_config(name=kw["name"])
+        summary = seed(templates_root=tmp_path)
+
+    assert summary.created == 1
+    assert summary.skipped_disabled_provider == []
+
+
+def test_seed_deletes_already_seeded_disabled_provider_skill(tmp_path, monkeypatch):
+    """Rows seeded before the filter existed are removed from the marketplace —
+    but a durably-managed (in-product-edited) skill is never deleted."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _fake_template_dir(tmp_path, "claude-assistant", metadata={"model": "claude-sonnet-5"})
+    _fake_template_dir(tmp_path, "deep-reasoner", metadata={"model": "claude-opus-4-8"})
+    template_row = _make_config("claude-assistant", managedBy="template")
+    durable_row = _make_config("deep-reasoner", managedBy="firestore")
+
+    with (
+        patch("admin.platform_seed.skill_config.list_skills", return_value=[template_row, durable_row]),
+        patch("admin.platform_seed.skill_config.delete_skill", return_value=True) as mock_delete,
+        patch("admin.platform_seed.skill_config.update_skill") as mock_update,
+    ):
+        seed(templates_root=tmp_path)
+
+    mock_delete.assert_called_once_with(template_row.skill_id)
+    mock_update.assert_not_called()
+
+
+def test_seed_purge_keeps_durable_skills_of_previous_owner(tmp_path, monkeypatch):
+    """Rotating the owner uid re-creates template rows under the
+    new owner, but an in-product-edited skill has no template to come back
+    from — the purge must never delete it."""
+    monkeypatch.setenv("PLATFORM_PREVIOUS_OWNER_UIDS", "aitana-platform")
+    template_row = _make_config("general-assistant", managedBy="template")
+    durable_row = _make_config("hand-edited", managedBy="firestore")
+
+    def list_skills_by_owner(owner_id=None, **_):
+        return [template_row, durable_row] if owner_id == "aitana-platform" else []
+
+    with (
+        patch("admin.platform_seed.skill_config.list_skills", side_effect=list_skills_by_owner),
+        patch("admin.platform_seed.skill_config.delete_skill", return_value=True) as mock_delete,
+    ):
+        summary = seed(templates_root=tmp_path)
+
+    mock_delete.assert_called_once_with(template_row.skill_id)
+    assert summary.purged == 1
+
+
+# ─── deployment-controlled access (PLATFORM_SEED_DEFAULT_ACCESS / _ACCESS_OVERRIDES) ──
+
+
+def _seed_creates(tmp_path, *names):
+    for n in names:
+        _fake_template_dir(tmp_path, n)
+    with (
+        patch("admin.platform_seed.skill_config.list_skills") as mock_list,
+        patch("admin.platform_seed.skill_config.create_skill") as mock_create,
+    ):
+        mock_list.return_value = []
+        mock_create.side_effect = lambda **kw: _make_config(name=kw["name"])
+        seed(templates_root=tmp_path)
+    return {c.kwargs["name"]: c.kwargs["accessControl"] for c in mock_create.call_args_list}
+
+
+def test_seed_default_access_env_replaces_public_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv("PLATFORM_SEED_DEFAULT_ACCESS", '{"type": "private"}')
+    assert _seed_creates(tmp_path, "alpha") == {"alpha": {"type": "private"}}
+
+
+def test_seed_access_override_wins_on_create(tmp_path, monkeypatch):
+    monkeypatch.setenv("PLATFORM_SEED_DEFAULT_ACCESS", '{"type": "private"}')
+    monkeypatch.setenv("PLATFORM_SEED_ACCESS_OVERRIDES", '{"alpha": {"type": "tagged", "tags": ["staff", "agent"]}}')
+    assert _seed_creates(tmp_path, "alpha", "beta") == {
+        "alpha": {"type": "tagged", "tags": ["staff", "agent"]},
+        "beta": {"type": "private"},
+    }
+
+
+def test_seed_access_override_is_pushed_on_refresh(tmp_path, monkeypatch):
+    """Without this, a re-seed would leave an existing public skill public."""
+    monkeypatch.setenv("PLATFORM_SEED_ACCESS_OVERRIDES", '{"alpha": {"type": "tagged", "tags": ["staff"]}}')
+    _fake_template_dir(tmp_path, "alpha")
+    with (
+        patch("admin.platform_seed.skill_config.list_skills") as mock_list,
+        patch("admin.platform_seed.skill_config.update_skill") as mock_update,
+    ):
+        mock_list.return_value = [_make_config("alpha")]
+        seed(templates_root=tmp_path)
+    _skill_id, updates = mock_update.call_args.args
+    assert updates["accessControl"] == {"type": "tagged", "tags": ["staff"]}
+
+
+def test_seed_access_env_rejects_bad_json(monkeypatch):
+    from admin.platform_seed import _seed_access_overrides
+
+    monkeypatch.setenv("PLATFORM_SEED_ACCESS_OVERRIDES", "{nope")
+    with pytest.raises(ValueError, match="not valid JSON"):
+        _seed_access_overrides()
+
+
+def test_seed_avatar_override_wins_on_create_and_refresh(tmp_path, monkeypatch):
+    monkeypatch.setenv("PLATFORM_SEED_AVATAR_OVERRIDES", '{"alpha": "/brand/fork/skills/alpha.webp"}')
+    _fake_template_dir(tmp_path, "alpha")
+    _fake_template_dir(tmp_path, "beta")
+    with (
+        patch("admin.platform_seed.skill_config.list_skills") as mock_list,
+        patch("admin.platform_seed.skill_config.create_skill") as mock_create,
+    ):
+        mock_list.return_value = []
+        mock_create.side_effect = lambda **kw: _make_config(name=kw["name"])
+        seed(templates_root=tmp_path)
+    avatars = {c.kwargs["name"]: c.kwargs.get("avatar") for c in mock_create.call_args_list}
+    assert avatars == {"alpha": "/brand/fork/skills/alpha.webp", "beta": None}
+
+    with (
+        patch("admin.platform_seed.skill_config.list_skills") as mock_list,
+        patch("admin.platform_seed.skill_config.update_skill") as mock_update,
+    ):
+        mock_list.return_value = [_make_config("alpha")]
+        seed(templates_root=tmp_path)
+    updates = {c.args[1].get("avatar") for c in mock_update.call_args_list}
+    assert "/brand/fork/skills/alpha.webp" in updates
+
+
+def test_seed_avatar_overrides_reject_bad_shape(monkeypatch):
+    from admin.platform_seed import _seed_avatar_overrides
+
+    monkeypatch.setenv("PLATFORM_SEED_AVATAR_OVERRIDES", '{"alpha": ""}')
+    with pytest.raises(ValueError, match="non-empty avatar paths"):
+        _seed_avatar_overrides()
+
+
+# === templates/.fork-skip — upstream skills a fork never offers ===
+
+
+def test_fork_skip_list_skips_and_removes_previously_seeded_row(tmp_path):
+    _fake_template_dir(tmp_path, "maps-assistant")
+    _fake_template_dir(tmp_path, "general-assistant")
+    (tmp_path / ".fork-skip").write_text("# comment\nmaps-assistant   # needs Maps\n")
+    stale = _make_config("maps-assistant", managedBy="template")
+
+    with (
+        patch("admin.platform_seed.skill_config.list_skills", return_value=[stale]),
+        patch("admin.platform_seed.skill_config.create_skill") as mock_create,
+        patch("admin.platform_seed.skill_config.update_skill", return_value=stale),
+        patch("admin.platform_seed.skill_config.delete_skill", return_value=True) as mock_delete,
+    ):
+        mock_create.side_effect = lambda **kw: _make_config(name=kw["name"])
+        summary = seed(templates_root=tmp_path)
+
+    assert {c.kwargs["name"] for c in mock_create.call_args_list} == {"general-assistant"}
+    assert summary.skipped_by_fork == ["maps-assistant"]
+    mock_delete.assert_called_once_with(stale.skill_id)
+
+
+def test_fork_skipped_skill_is_not_an_mcp_gate_failure(tmp_path):
+    _fake_template_dir(tmp_path, "web-browser")
+    (tmp_path / ".fork-skip").write_text("web-browser\n")
+    check = {"mcp_missing": ["web-browser -> browser"], "mcp_warnings": []}
+
+    with (
+        patch("admin.platform_seed.skill_config.list_skills", return_value=[]),
+        patch("admin.mcp_registry_check.verify_mcp_registry", return_value=check),
+    ):
+        summary = seed(templates_root=tmp_path)
+
+    assert summary.mcp_missing == []
+
+
+# --- access_control.tags_from (user guide: the skill gets the deployment's guide tags) ---
+
+
+def _tags_from_template(tmp_path, name: str = "guide"):
+    skill_dir = tmp_path / name
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: d\naccess_control:\n  type: tagged\n  tags_from: user_guide\n---\nBe helpful.\n"
+    )
+    return tmp_path
+
+
+def test_tags_from_resolves_to_the_extension_tags(tmp_path, monkeypatch):
+    import extensions
+
+    monkeypatch.setattr(
+        extensions, "access_tags", lambda name: ["acme", "platform-admin"] if name == "user_guide" else None
+    )
+    _tags_from_template(tmp_path)
+    with (
+        patch("admin.platform_seed.skill_config.list_skills", return_value=[]),
+        patch("admin.platform_seed.skill_config.create_skill") as mock_create,
+    ):
+        mock_create.side_effect = lambda **kw: _make_config(name=kw["name"])
+        summary = seed(templates_root=tmp_path)
+    assert summary.created == 1 and summary.notes == []
+    assert mock_create.call_args.kwargs["accessControl"] == {"type": "tagged", "tags": ["acme", "platform-admin"]}
+
+
+def test_tags_from_with_no_tags_skips_the_skill_and_says_why(tmp_path, monkeypatch):
+    """Never seeded public or tag-less: no guide tags on this deployment → no guide skill."""
+    import extensions
+
+    monkeypatch.setattr(extensions, "access_tags", lambda name: None)
+    _tags_from_template(tmp_path)
+    with (
+        patch("admin.platform_seed.skill_config.list_skills", return_value=[]),
+        patch("admin.platform_seed.skill_config.create_skill") as mock_create,
+    ):
+        summary = seed(templates_root=tmp_path)
+    mock_create.assert_not_called()
+    assert summary.skipped == 1
+    assert summary.notes and "tags_from 'user_guide' resolved to no tags" in summary.notes[0]
+    assert "notes" in summary.as_dict() and "extensions" in summary.as_dict()

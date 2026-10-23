@@ -123,9 +123,11 @@ class _Selection:
 def _select_range(events: list[Event], notes: list[str]) -> _Selection | None:
     """The raw events to re-summarise, and the range the new event must claim.
 
-    Selection uses ADK's own helpers rather than a local reimplementation —
-    replicating the logic would drift from ADK and quietly invalidate the
-    supersede guarantee (same reasoning as the replay route).
+    Selection uses ADK's own compaction helpers, through `compaction_compat`.
+    The pending-call check is the one exception: ADK 2.x removed it, so it is
+    a pinned in-tree port of the 1.39.1 original. The strict semantics are
+    what we want here even on 2.x, whose live path may compact past a
+    "provably dead" call (ADK 2 upgrade sub-doc 04).
 
     The claimed range is the union of every prior compaction's range (plus the
     earliest selected raw event), so the new event CONTAINS all of them and
@@ -133,13 +135,13 @@ def _select_range(events: list[Event], notes: list[str]) -> _Selection | None:
     already claimed — events past the latest compaction end stay raw, which is
     also what keeps the live retention floor respected by construction.
     """
-    from google.adk.apps.compaction import (
-        _pending_function_call_ids,
-        _truncate_events_before_pending_function_call,
-        _valid_compactions,
+    from adk.compaction_compat import (
+        pending_function_call_ids,
+        truncate_events_before_pending_function_call,
+        valid_compactions,
     )
 
-    compactions = _valid_compactions(events)
+    compactions = valid_compactions(events)
     if not compactions:
         notes.append("no existing compaction — the second pass improves summaries, it does not introduce them")
         return None
@@ -152,7 +154,7 @@ def _select_range(events: list[Event], notes: list[str]) -> _Selection | None:
         notes.append("no raw events inside the compacted span (nothing to re-derive)")
         return None
 
-    truncated = _truncate_events_before_pending_function_call(raw, _pending_function_call_ids(events))
+    truncated = truncate_events_before_pending_function_call(raw, pending_function_call_ids(events))
     if len(truncated) != len(raw):
         # A pending (never-answered) function call sits inside the compacted
         # span. Claiming the full range while summarising only part of it would
@@ -211,9 +213,9 @@ async def run_second_pass(
     outcome = SecondPassOutcome(total_events=len(events), dry_run=dry_run)
 
     if for_compaction_end_ts is not None:
-        from google.adk.apps.compaction import _latest_compaction_event
+        from adk.compaction_compat import latest_compaction_event
 
-        latest = _latest_compaction_event(events)
+        latest = latest_compaction_event(events)
         latest_comp = latest.actions.compaction if latest is not None else None
         latest_end = getattr(latest_comp, "end_timestamp", None)
         if latest_end is not None and latest_end > for_compaction_end_ts:

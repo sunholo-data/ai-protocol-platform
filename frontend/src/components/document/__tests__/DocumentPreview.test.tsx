@@ -14,11 +14,12 @@ const mockUseDocument = vi.mocked(useDocument);
 
 beforeEach(() => {
   mockFetch.mockReset();
+  mockUseDocument.mockReset();
   mockFetch.mockResolvedValue({
     ok: true,
     blob: async () => new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" }),
   } as unknown as Response);
-  mockUseDocument.mockReturnValue({ doc: null, isLoading: false, error: null });
+  mockUseDocument.mockReturnValue({ doc: null, isLoading: false, error: null, retry: vi.fn() });
   if (!("createObjectURL" in URL)) {
     // @ts-expect-error test shim
     URL.createObjectURL = vi.fn(() => "blob:mock");
@@ -71,11 +72,14 @@ describe("DocumentPreview", () => {
         parseError: null,
         sourceUrl: "gs://b/contract.docx",
         parsedAt: null,
+        template: null,
+        updatedAt: null,
         summary: null,
         blocks: [{ type: "heading", level: 1, text: "Master Services Agreement" }],
       },
       isLoading: false,
       error: null,
+      retry: vi.fn(),
     });
     render(
       <DocumentPreview source={{ kind: "doc", docId: "d1" }} label="contract.docx">
@@ -86,6 +90,41 @@ describe("DocumentPreview", () => {
     // Radix Tooltip can render the content text more than once — assert presence.
     expect((await screen.findAllByText("Master Services Agreement")).length).toBeGreaterThan(0);
     // A docx renders from blocks, not the image thumbnail route.
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+  it("goes straight to the owner-checked doc thumbnail route when the format is known (pdf) — no record load", async () => {
+    render(
+      <DocumentPreview source={{ kind: "doc", docId: "d9", format: "pdf" }} label="a.pdf">
+        <button>Open pdf</button>
+      </DocumentPreview>,
+    );
+    await userEvent.tab();
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith("/api/proxy/api/documents/d9/thumbnail?width=400"),
+    );
+    expect(mockUseDocument).not.toHaveBeenCalled();
+  });
+
+  it("shows 'Preview unavailable' when the thumbnail fetch fails", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 403 } as unknown as Response);
+    render(
+      <DocumentPreview source={{ kind: "doc", docId: "d-denied", format: "png" }} label="x.png">
+        <button>Open png</button>
+      </DocumentPreview>,
+    );
+    await userEvent.tab();
+    expect((await screen.findAllByText("Preview unavailable")).length).toBeGreaterThan(0);
+  });
+
+  it("shows 'Preview unavailable' when the document record can't be loaded", async () => {
+    mockUseDocument.mockReturnValue({ doc: null, isLoading: false, error: "Document not found.", retry: vi.fn() });
+    render(
+      <DocumentPreview source={{ kind: "doc", docId: "gone", format: "docx" }} label="gone.docx">
+        <button>Open gone</button>
+      </DocumentPreview>,
+    );
+    await userEvent.tab();
+    expect((await screen.findAllByText("Preview unavailable")).length).toBeGreaterThan(0);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });

@@ -128,6 +128,18 @@ class TestGetFolderDocuments:
         assert len(resp.json()["documents"]) == 1
         assert resp.json()["documents"][0]["parseStatus"] == "parsed"
 
+    def test_listing_omits_parsed_blocks(self, app_a: TestClient):
+        """A listing is metadata only — blocks made one folder a 2.2 MB response."""
+        docs = [{"id": "doc1", "parseStatus": "parsed", "blockCount": 2, "blocks": [{"type": "text"}] * 2}]
+        with (
+            patch("db.folders.get_folder", return_value={"id": "f1", "userId": "user_a"}),
+            patch("db.folders.list_folder_documents", return_value=docs),
+        ):
+            resp = app_a.get("/api/folders/f1/documents")
+        assert resp.status_code == 200
+        doc = resp.json()["documents"][0]
+        assert "blocks" not in doc and doc["blockCount"] == 2
+
     def test_returns_empty_for_new_folder(self, app_a: TestClient):
         with (
             patch("db.folders.get_folder", return_value={"id": "f1", "userId": "user_a"}),

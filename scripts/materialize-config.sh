@@ -51,7 +51,7 @@ esac
 # example -> real
 PAIRS=(
   "infrastructure/mcp-toolbox/tools.example.yaml:infrastructure/mcp-toolbox/tools.yaml"
-  "docs/ops/deployed-urls.example.md:docs/ops/deployed-urls.md"
+  "docs/deployment/deployed-urls.example.md:docs/ops/deployed-urls.md"
   "deploy.env.example:deploy.env"
   "cli/aiplatform/config.example.yaml:cli/aiplatform/config.yaml"
 )

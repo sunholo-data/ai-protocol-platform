@@ -38,6 +38,7 @@ _ALLOWLIST: dict[str, str] = {
     "adk/agent.py": "the model resolver — constructs Gemini/LiteLlm/RegionalGemini and wraps them in ResilientLlm via resolve_model_chain",
     "adk/resilient_llm.py": "the ResilientLlm wrapper itself (its generate_content_async IS the retry/fallback loop)",
     "tools/resilient_genai.py": "the generate_content_resilient wrapper itself (its genai.Client + generate_content ARE the resilient call)",
+    "tools/visual_evidence.py": "invokes resolve_model_chain, validates every actual recipient, and retains ResilientLlm retries for a single member; test_visual_evidence pins this approved chain seam, never a raw client",
     "db/title_generator.py": "cosmetic ≤6-word session title; best-effort, fails soft (returns None), off the critical path — an accepted exemption, not a gap",
 }
 

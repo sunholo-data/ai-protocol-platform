@@ -35,9 +35,15 @@ const toList = (s: string): string[] | null => {
 export function AccessControlEditor({
   value,
   onChange,
+  label = "Who can use this skill",
+  types,
 }: {
   value?: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
+  /** The select's label — reused for "Who can search this folder". */
+  label?: string;
+  /** Restrict the access types offered (default: all five). */
+  types?: string[];
 }) {
   const v = (value ?? { type: "private" }) as Access;
   const type = v.type ?? "private";
@@ -45,7 +51,7 @@ export function AccessControlEditor({
   return (
     <div className="space-y-2">
       <label className="block">
-        <span className="mb-1 block text-sm font-medium">Who can use this skill</span>
+        <span className="mb-1 block text-sm font-medium">{label}</span>
         <select
           className="w-full rounded-md border px-3 py-2 text-sm"
           value={type}
@@ -63,7 +69,7 @@ export function AccessControlEditor({
             onChange({ ...v, type: nextType });
           }}
         >
-          {TYPES.map((t) => (
+          {TYPES.filter((t) => !types || types.includes(t.v) || t.v === type).map((t) => (
             <option key={t.v} value={t.v}>
               {t.label}
             </option>
@@ -79,7 +85,7 @@ export function AccessControlEditor({
           <input
             className="w-full rounded-md border px-3 py-2 text-sm"
             value={csv(v.tags)}
-            placeholder="ONE, aitana-admin"
+            placeholder="finance-team, beta-tester"
             onChange={(e) => onChange({ ...v, tags: toList(e.target.value) })}
           />
         </label>
@@ -91,7 +97,7 @@ export function AccessControlEditor({
           <input
             className="w-full rounded-md border px-3 py-2 text-sm"
             value={v.domain ?? ""}
-            placeholder="acmeenergy.com"
+            placeholder="energy.example"
             onChange={(e) => onChange({ ...v, domain: e.target.value || null })}
           />
         </label>

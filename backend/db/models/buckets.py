@@ -65,7 +65,7 @@ class BucketConfig(BaseModel):
     access_control: AccessControl = Field(default_factory=AccessControl, alias="accessControl")
     # Login-domain binding (v6.18.1, issue #37). A bucket-config is an OPERATOR
     # blessing of a real GCS bucket for a specific installation ("this bucket is
-    # ONE's"), so it also names the email domains allowed to read it. Enforced by
+    # the tenant's"), so it also names the email domains allowed to read it. Enforced by
     # `_authorize_bucket_read` IN ADDITION to `access_control` — belt and braces:
     # even if an ACL is mis-scoped (or a config is somehow created by a non-admin),
     # a caller from an unrelated domain is still denied. EMPTY MEANS DENY: a config

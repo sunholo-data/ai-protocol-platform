@@ -62,10 +62,10 @@ def test_grant_unknown_tag_422_when_registry_populated(admin_client: TestClient)
     fb, _ = _fake_fb(tags=[])
     # Registry populated but does NOT contain "TYPO" → is_known_tag False → 422.
     with (
-        patch("admin.group_tags_routes.query_documents", return_value=[{"__id": "ONE"}]),
+        patch("admin.group_tags_routes.query_documents", return_value=[{"__id": "example-team"}]),
         patch("admin.users_routes._fb_auth", return_value=fb),
     ):
-        resp = admin_client.post("/api/admin/users/alice@one.com/groups", json={"tag": "TYPO"})
+        resp = admin_client.post("/api/admin/users/alice@customer.example/groups", json={"tag": "TYPO"})
     assert resp.status_code == 422
     assert "Unknown group tag" in resp.json()["detail"]
 
@@ -73,12 +73,12 @@ def test_grant_unknown_tag_422_when_registry_populated(admin_client: TestClient)
 def test_grant_known_registry_tag_ok(admin_client: TestClient) -> None:
     fb, _ = _fake_fb(tags=[])
     with (
-        patch("admin.group_tags_routes.query_documents", return_value=[{"__id": "ONE"}]),
+        patch("admin.group_tags_routes.query_documents", return_value=[{"__id": "example-team"}]),
         patch("admin.users_routes._fb_auth", return_value=fb),
     ):
-        resp = admin_client.post("/api/admin/users/alice@one.com/groups", json={"tag": "ONE"})
+        resp = admin_client.post("/api/admin/users/alice@customer.example/groups", json={"tag": "example-team"})
     assert resp.status_code == 200
-    assert resp.json()["group_tags"] == ["ONE"]
+    assert resp.json()["group_tags"] == ["example-team"]
 
 
 def test_grant_bootstrap_when_registry_empty(admin_client: TestClient) -> None:
@@ -88,7 +88,7 @@ def test_grant_bootstrap_when_registry_empty(admin_client: TestClient) -> None:
         patch("admin.group_tags_routes.query_documents", return_value=[]),
         patch("admin.users_routes._fb_auth", return_value=fb),
     ):
-        resp = admin_client.post("/api/admin/users/alice@one.com/groups", json={"tag": "BRAND-NEW"})
+        resp = admin_client.post("/api/admin/users/alice@customer.example/groups", json={"tag": "BRAND-NEW"})
     assert resp.status_code == 200
     assert resp.json()["group_tags"] == ["BRAND-NEW"]
 
@@ -100,7 +100,7 @@ def test_grant_carries_propagation_block(admin_client: TestClient) -> None:
     fb, _ = _fake_fb(tags=[])
     with patch("admin.users_routes._fb_auth", return_value=fb):
         # structural tag → no registry read needed
-        resp = admin_client.post("/api/admin/users/alice@one.com/groups", json={"tag": "aitana-admin"})
+        resp = admin_client.post("/api/admin/users/alice@customer.example/groups", json={"tag": "aitana-admin"})
     assert resp.status_code == 200
     prop = resp.json()["propagation"]
     assert prop["effective"] == "on_next_refresh"
@@ -108,9 +108,9 @@ def test_grant_carries_propagation_block(admin_client: TestClient) -> None:
 
 
 def test_revoke_carries_propagation_block(admin_client: TestClient) -> None:
-    fb, _ = _fake_fb(tags=["ONE"])
+    fb, _ = _fake_fb(tags=["example-team"])
     with patch("admin.users_routes._fb_auth", return_value=fb):
-        resp = admin_client.delete("/api/admin/users/alice@one.com/groups/ONE")
+        resp = admin_client.delete("/api/admin/users/alice@customer.example/groups/example-team")
     assert resp.status_code == 200
     assert resp.json()["propagation"]["effective"] == "on_next_refresh"
 
@@ -119,12 +119,12 @@ def test_revoke_carries_propagation_block(admin_client: TestClient) -> None:
 
 
 def test_refresh_claims_revokes_and_audits(admin_client: TestClient) -> None:
-    fb, _rec = _fake_fb(tags=["ONE"])
+    fb, _rec = _fake_fb(tags=["example-team"])
     with (
         patch("admin.users_routes._fb_auth", return_value=fb),
         patch("admin.users_routes.record_admin_action") as mock_audit,
     ):
-        resp = admin_client.post("/api/admin/users/alice@one.com/refresh-claims")
+        resp = admin_client.post("/api/admin/users/alice@customer.example/refresh-claims")
     assert resp.status_code == 200
     fb.revoke_refresh_tokens.assert_called_once_with("u1")
     body = resp.json()

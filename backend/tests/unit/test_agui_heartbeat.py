@@ -139,7 +139,7 @@ async def test_heartbeat_shape_is_agui_custom_event(noop_tracker):
     """Heartbeats must be spec-legal AG-UI CUSTOM events the client's
     onCustomEvent branch can ignore by name — a malformed data line would
     error the whole @ag-ui/client stream."""
-    agent = _SlowAguiAgent([_FakeEvent("RUN_FINISHED")], delay_before_each=0.1)
+    agent = _SlowAguiAgent([_FakeEvent("RUN_STARTED"), _FakeEvent("RUN_FINISHED")], delay_before_each=0.1)
 
     events = await _collect(stream_agui_events(agent, _make_run_input(), heartbeat_seconds=0.03))
 

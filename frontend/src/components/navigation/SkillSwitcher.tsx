@@ -7,7 +7,10 @@ import { Check, ChevronsUpDown, Star } from "lucide-react";
 import type { Skill } from "@/types/skill";
 import { cn } from "@/lib/utils";
 import { skillHref } from "./skillHref";
+import { headerControl } from "./headerControls";
+import { PLATFORM_OWNER_UID } from "@/lib/platformOwner";
 import { SkillStatusBadge } from "@/components/skills/SkillStatusBadge";
+import { FLOATING_SURFACE } from "@/lib/surfaces";
 
 /**
  * SkillSwitcher — a single, professional skill picker that replaces the old
@@ -52,10 +55,8 @@ const TEST_TAGS = new Set([
  * is still enforced by `accessControl` on the backend. */
 const SYSTEM_TAG = "system";
 
-/** Sentinel ownerId for skills shipped by Aitana Labs (mirrors
- * backend/skills/platform.py + useUserSkills). Platform skills are NEVER
- * treated as the user's "own" skills, even for a platform-admin viewer. */
-const PLATFORM_OWNER_UID = "aitana-platform";
+// Platform skills (PLATFORM_OWNER_UID) are NEVER treated as the user's "own"
+// skills, even for a platform-admin viewer.
 
 /** Category → section label + order. Free-form `category` values fall through to
  * the "Other skills" bucket, so a fork can introduce its own taxonomy without a
@@ -86,24 +87,26 @@ function categoryOf(skill: Skill): string | null {
   return c ? c.trim().toLowerCase() : null;
 }
 
-function monogram(skill: Skill): string {
-  const n = skillName(skill).trim();
-  return n ? n[0]!.toUpperCase() : "?";
-}
-
+/**
+ * A skill's own avatar — an image URL or a short glyph (emoji). Nothing at all
+ * when it has none: a generated letter chip ("D", "W") carries no meaning and
+ * reads as a decorative badge.
+ */
 function SkillAvatar({ skill }: { skill: Skill }) {
-  if (skill.avatar) {
+  const avatar = skill.avatar?.trim();
+  if (!avatar) return null;
+  if (/^(https?:|data:|\/)/.test(avatar)) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={skill.avatar} alt="" className="h-5 w-5 shrink-0 rounded-sm object-cover" />;
+    return <img src={avatar} alt="" className="h-5 w-5 shrink-0 rounded-[var(--radius)] object-cover" />;
   }
-  return (
-    <span
-      aria-hidden
-      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-muted text-[10px] font-medium text-muted-foreground"
-    >
-      {monogram(skill)}
-    </span>
-  );
+  if ([...avatar].length <= 2) {
+    return (
+      <span aria-hidden className="flex h-5 w-5 shrink-0 items-center justify-center text-base leading-none">
+        {avatar}
+      </span>
+    );
+  }
+  return null;
 }
 
 interface SkillSwitcherProps {
@@ -210,7 +213,7 @@ export function SkillSwitcher({
         type="button"
         onClick={() => selectSkill(s)}
         className={cn(
-          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
+          "flex min-h-[44px] w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm text-foreground transition-colors hover:bg-muted md:min-h-[36px]",
           highlight && "bg-accent/60 ring-1 ring-border",
           isActive && !highlight && "bg-muted/60",
         )}
@@ -236,12 +239,20 @@ export function SkillSwitcher({
         <button
           type="button"
           aria-label="Switch skill"
-          className="flex h-8 max-w-[16rem] items-center gap-2 rounded-md border px-2 text-sm text-foreground transition-colors hover:bg-muted"
+          // Phones: the skill name IS the page title — borderless, semibold,
+          // allowed two lines instead of truncating to "Demo Resear…". From
+          // `sm` it is a bordered control like the rest of the header.
+          className={cn(
+            headerControl,
+            "min-w-0 shrink justify-start border-transparent px-1.5 text-left max-sm:h-auto max-sm:min-h-11 max-sm:py-1 sm:max-w-[16rem] sm:border-border sm:px-3",
+          )}
         >
           {active ? (
             <>
               <SkillAvatar skill={active} />
-              <span className="min-w-0 truncate">{skillName(active)}</span>
+              <span className="min-w-0 font-semibold leading-tight max-sm:line-clamp-2 max-sm:break-words sm:truncate sm:font-medium">
+                {skillName(active)}
+              </span>
             </>
           ) : (
             <span className="text-muted-foreground">Select a skill</span>
@@ -254,11 +265,13 @@ export function SkillSwitcher({
           align="start"
           sideOffset={6}
           onOpenAutoFocus={(e) => {
-            // Focus the search input rather than the first row.
+            // Focus the search input rather than the first row — but not on a
+            // touch screen, where focusing it pops the keyboard over the very
+            // list the user opened the menu to tap.
             e.preventDefault();
-            searchRef.current?.focus();
+            if (!window.matchMedia?.("(pointer: coarse)").matches) searchRef.current?.focus();
           }}
-          className="z-50 w-72 rounded-md border bg-background p-1 shadow-md outline-none"
+          className={`${FLOATING_SURFACE} w-[min(20rem,calc(100vw-1.5rem))] p-1.5 outline-none`}
         >
           <input
             ref={searchRef}
@@ -267,17 +280,17 @@ export function SkillSwitcher({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search skills…"
             aria-label="Search skills"
-            className="mb-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
+            className="mb-1 h-11 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus:border-ring md:h-9"
           />
-          <div className="max-h-[70vh] overflow-y-auto">
+          <div className="max-h-[min(70vh,32rem)] overflow-y-auto">
             {groups.length === 0 ? (
-              <div className="px-2 py-3 text-sm text-muted-foreground">No skills found</div>
+              <div className="px-3 py-3 text-sm text-muted-foreground">No skills found</div>
             ) : (
               groups.map((g, i) => (
                 <div key={g.key} className="py-1">
-                  {i > 0 ? <div className="mx-2 mb-1 border-t" /> : null}
+                  {i > 0 ? <div className="mx-3 mb-1 border-t border-border" /> : null}
                   {g.label ? (
-                    <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                    <div className="px-3 pb-1 pt-2 text-xs font-medium text-muted-foreground">
                       {g.label}
                     </div>
                   ) : null}

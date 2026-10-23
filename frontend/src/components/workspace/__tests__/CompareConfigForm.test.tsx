@@ -14,7 +14,7 @@ import { CompareConfigForm } from "../CompareConfigForm";
 import type { CompareConfig } from "../CompareConfigForm";
 
 function renderForm(props: Partial<React.ComponentProps<typeof CompareConfigForm>> = {}) {
-  const onSubmit = vi.fn<[CompareConfig], void>();
+  const onSubmit = vi.fn<(config: CompareConfig) => void>();
   const onCancel = vi.fn();
   const utils = render(<CompareConfigForm onSubmit={onSubmit} onCancel={onCancel} {...props} />);
   return { ...utils, onSubmit, onCancel };

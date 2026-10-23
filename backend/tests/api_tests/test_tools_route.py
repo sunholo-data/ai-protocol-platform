@@ -43,3 +43,34 @@ class TestGetTools:
         picker entry. Every catalog name must be a tool the resolver accepts."""
         orphans = catalog_tool_names() - known_tool_names()
         assert not orphans, f"catalog tools not resolvable by agent: {orphans}"
+
+
+class TestCallerFilteredCatalog:
+    """An authenticated caller sees only the tools its tool_permissions allow —
+    the same rule enforced at call time — so an agent authoring skills isn't
+    told it has tools that would be refused."""
+
+    def test_authenticated_caller_gets_only_permitted_tools(self, monkeypatch):
+        from unittest.mock import AsyncMock, patch
+
+        from auth.firebase_auth import User
+
+        caller = User(uid="machine:agent", email="agent@machine.local", domain="machine.local", auth_mode="machine")
+        allowed = {"google_search", "url_processing"}
+        with (
+            patch("auth.get_current_user", AsyncMock(return_value=caller)),
+            patch("auth.permissions.can_use_tool", side_effect=lambda email, domain, name: name in allowed),
+        ):
+            response = client.get("/api/tools", headers={"Authorization": "Bearer t"})
+        assert response.status_code == 200
+        assert {t["name"] for t in response.json()["tools"]} == allowed & set(catalog_tool_names())
+
+    def test_bad_credentials_fall_back_to_the_public_catalog(self):
+        from unittest.mock import AsyncMock, patch
+
+        from fastapi import HTTPException
+
+        with patch("auth.get_current_user", AsyncMock(side_effect=HTTPException(status_code=401))):
+            response = client.get("/api/tools", headers={"Authorization": "Bearer nope"})
+        assert response.status_code == 200
+        assert {t["name"] for t in response.json()["tools"]} == set(catalog_tool_names())

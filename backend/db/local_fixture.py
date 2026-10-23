@@ -11,9 +11,7 @@ What gets seeded:
   W7 (placeholder), the multi-surface A2UI rendering demos, the click
   counter, the workshop helper, and the Skill Studio copilot. Owned by
   the workshop-user and marked ``public``.
-- 3 ONE production skills (``one-ppa-expert``, ``one-doc-compare``,
-  ``web-researcher``) owned by ``PLATFORM_OWNER_UID`` so the local sandbox
-  mirrors the deployed ONE app. Tools are stripped for clean local chat.
+- Optional deployment-local skills, supplied by private extensions.
 - 1 demo parsed Markdown document so the document-analyst skill has
   something to point at.
 
@@ -53,7 +51,7 @@ def _load_template_instructions(name: str) -> str:
 
 def _optional_template_instructions(name: str) -> str | None:
     """Like ``_load_template_instructions`` but returns None when the bundled
-    template directory is absent. The customer (ONE) skill templates are
+    template directory is absent. The private customer skill templates are
     stripped from the public template fork — the local fixture must seed
     cleanly without them (their entries are dropped) instead of crashing
     LOCAL_MODE with FileNotFoundError."""
@@ -151,7 +149,7 @@ def _demo_skills(now: float) -> list[dict]:
     The skill IDs are stable so URLs/docs can reference them deterministically.
 
     Entries whose bundled SKILL.md template is absent (``instructions`` is
-    None) are dropped: the customer (ONE) skill templates are stripped from
+    None) are dropped: the private customer skill templates are stripped from
     the public template fork, and LOCAL_MODE must seed the remaining generic
     skills cleanly there.
     """
@@ -706,7 +704,7 @@ def _demo_skills(now: float) -> list[dict]:
             ),
         },
         # ────────────────────────────────────────────────────────────────────
-        # ONE-FORK-CONVERGENCE M3 — Skill Studio authoring copilot
+        # TENANT-FORK-CONVERGENCE M3 — Skill Studio authoring copilot
         # ────────────────────────────────────────────────────────────────────
         # Propose-only copilot the Skill Studio embeds. Runs the `smart`
         # (Anthropic) tier — authoring is reasoning-heavy. Emits a fenced
@@ -749,181 +747,6 @@ def _demo_skills(now: float) -> list[dict]:
             ),
         },
         # ────────────────────────────────────────────────────────────────────
-        # ONE-FORK-CONVERGENCE — the 3 ONE production skills, seeded locally so
-        # the local sandbox mirrors the deployed ONE app. Owned by
-        # PLATFORM_OWNER_UID (aitana-platform), not the workshop-user, and made
-        # `public` for local-sandbox visibility (deployed they're tag-gated to
-        # ONE + aitana-admin). Descriptive tags only (no experimental / dev-tool
-        # / a2ui-demo / demo / workshop / admin status tags) so the frontend
-        # switcher groups them under "Production". Tools stripped to [] — the
-        # GCP-bound tools (ai_search over ONE's datastore, bucket browsing,
-        # ENTSO-E, PPA clause extraction) don't resolve in the local sandbox;
-        # local ONE skills are clean chat. Single source of truth for the
-        # instruction body is skills/templates/<name>/SKILL.md.
-        # 8.2 FIRST-IMPRESSION: the ONE front door — fast, delegates to the
-        # specialists via transparent transfer_to_agent (all floor=auto; confirm
-        # levels are reserved for the expensive job skills, 8.3).
-        {
-            "ownerId": PLATFORM_OWNER_UID,
-            "ownerEmail": "aitana@platform",
-            "accessControl": {"type": "public"},
-            "skillMetadata": {
-                "author": "aitana",
-                "version": "1.0",
-                "model": "lite",
-                "category": "assistant",
-                # Lean front-door router: no request_confirmation tool (TTFT).
-                "enableConfirmation": False,
-                "thinkingModel": None,
-                "tools": [],
-                "toolConfigs": {},
-                "subSkills": [],
-                "delegation": {
-                    "enabled": True,
-                    "discoverJobs": True,  # 8.3: auto-discover job skills (obligation analysis)
-                    "allow": [
-                        {"skill": "one-ppa-expert", "floor": "auto"},
-                        {"skill": "web-researcher", "floor": "auto"},
-                        {"skill": "one-doc-compare", "floor": "auto"},
-                    ],
-                },
-            },
-            "tags": ["general", "acmeenergy.com"],
-            "featured": True,
-            "usageCount": 0,
-            "createdAt": now,
-            "updatedAt": now,
-            "skillId": "one-assistant",
-            "slug": "one-assistant",
-            "displayName": "ONE Assistant",
-            "name": "one-assistant",
-            "description": (
-                "Acme Energy's front-door assistant — fast, general chat that "
-                "answers questions directly and hands deeper work to the "
-                "specialists on demand: clause extraction, settlement-obligation "
-                "analysis, side-by-side contract comparison, PPA/PtX/BESS "
-                "vocabulary, and open-web research. The default landing skill for "
-                "ONE."
-            ),
-            "instructions": _optional_template_instructions("one-assistant"),
-            "initialMessage": (
-                "Hi — I'm ONE's assistant. Ask me anything, and I'll answer "
-                "directly or bring in the right specialist for deeper work: "
-                "clause extraction, contract comparison, settlement-obligation "
-                "analysis, market research, or PPA/PtX/BESS vocabulary. What are "
-                "you working on?"
-            ),
-        },
-        {
-            "ownerId": PLATFORM_OWNER_UID,
-            "ownerEmail": "aitana@platform",
-            "accessControl": {"type": "public"},
-            "skillMetadata": {
-                "author": "aitana",
-                "version": "1.0",
-                "model": "lite",
-                "category": "specialist",
-                "thinkingModel": "smart",
-                "tools": [],
-                "toolConfigs": {},
-                "subSkills": [],
-                # 8.3: obligation analysis moved to the job; the expert delegates to it.
-                "delegation": {
-                    "enabled": True,
-                    "maxDepth": 1,
-                    "allow": [{"skill": "one-obligation-analysis", "floor": "confirm"}],
-                },
-            },
-            "tags": ["ppa", "energy", "acmeenergy.com"],
-            "featured": True,
-            "usageCount": 0,
-            "createdAt": now,
-            "updatedAt": now,
-            "skillId": "one-ppa-expert",
-            "slug": "one-ppa-expert",
-            "displayName": "Contract Expert",
-            "name": "one-ppa-expert",
-            "description": (
-                "Power Purchase Agreement specialist — vocabulary, clause "
-                "extraction, side-by-side comparison, and ENTSO-E "
-                "market-grounded valuation. Use when the user asks about "
-                "PPAs, settlement types (PaP/PaN/BL), contract forms, "
-                "electrolyser technology (SOEC/PEM/Alkaline), or battery "
-                "storage (BESS)."
-            ),
-            "instructions": _optional_template_instructions("one-ppa-expert"),
-            "initialMessage": "PPA, PtX, BESS — what would you like to analyse?",
-        },
-        {
-            "ownerId": PLATFORM_OWNER_UID,
-            "ownerEmail": "aitana@platform",
-            "accessControl": {"type": "public"},
-            "skillMetadata": {
-                "author": "aitana",
-                "version": "1.0",
-                "model": "lite",
-                "category": "specialist",
-                "thinkingModel": "smart",
-                "tools": [],
-                "toolConfigs": {},
-                "subSkills": [],
-                # 8.3 JOBS: a delegatable job the front door auto-discovers.
-                "job": True,
-                "jobFloor": "confirm",
-            },
-            "tags": ["ppa", "obligations", "acmeenergy.com"],
-            "featured": False,
-            "usageCount": 0,
-            "createdAt": now,
-            "updatedAt": now,
-            "skillId": "one-obligation-analysis",
-            "slug": "one-obligation-analysis",
-            "displayName": "PPA Obligation Analysis",
-            "name": "one-obligation-analysis",
-            "description": (
-                "Deep PPA settlement-obligation analysis — reads a contract, "
-                "extracts the settlement mechanics, and computes the net "
-                "settlement behind an engine-validated assumptions form. A "
-                "confirmable job the front door hands off to."
-            ),
-            "instructions": _optional_template_instructions("one-obligation-analysis"),
-            "initialMessage": "Which PPA's settlement obligations should I analyse?",
-        },
-        {
-            "ownerId": PLATFORM_OWNER_UID,
-            "ownerEmail": "aitana@platform",
-            "accessControl": {"type": "public"},
-            "skillMetadata": {
-                "author": "aitana",
-                "version": "1.0",
-                "model": "lite",
-                "category": "specialist",
-                "thinkingModel": "smart",
-                "tools": [],
-                "toolConfigs": {},
-                "subSkills": [],
-            },
-            "tags": ["ppa", "energy", "comparison", "acmeenergy.com"],
-            "featured": True,
-            "usageCount": 0,
-            "createdAt": now,
-            "updatedAt": now,
-            "skillId": "one-doc-compare",
-            "slug": "one-doc-compare",
-            "displayName": "PPA Contract Compare",
-            "name": "one-doc-compare",
-            "description": (
-                "Compare two Power Purchase Agreement contracts side-by-side "
-                "with block-level diff highlights, structured clause "
-                "comparison, and commercial-implication reasoning. The "
-                "workbench centerpiece for ONE's PPA contract review "
-                "workflow. Use when the user has two documents and asks to "
-                '"compare", "diff", "show differences between", or "find '
-                'what changed in" them.'
-            ),
-            "instructions": _optional_template_instructions("one-doc-compare"),
-            "initialMessage": ("Pick two PPA contracts and I'll show you the differences side-by-side."),
-        },
         {
             "ownerId": PLATFORM_OWNER_UID,
             "ownerEmail": "aitana@platform",
@@ -956,6 +779,9 @@ def _demo_skills(now: float) -> list[dict]:
             "initialMessage": "Hi! What would you like me to research?",
         },
     ]
+    from extensions import deployment_local_skills
+
+    skills.extend(deployment_local_skills(now, _optional_template_instructions))
     # Drop entries whose bundled SKILL.md is absent (customer templates are
     # excluded from the public template fork) — seed what actually ships.
     return [s for s in skills if s["instructions"] is not None]

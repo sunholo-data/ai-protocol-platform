@@ -1,8 +1,8 @@
 """Workshop docs search — RAG-lite over the platform's docs/ tree.
 
 Powers the `workshop-helper` skill. Walks
-`docs/workshop/`, `docs/integrations/`, `docs/design/v6.X.Y/implemented/`,
-and `docs/talks/ai-ui-protocol-stack.md` at first call, builds an
+`docs/workshop/`, `docs/integrations/`, `docs/design/template/`,
+and `docs/user-guide/` at first call, builds an
 in-memory keyword index, and answers queries with the top-K matching
 documents + a snippet around the first hit.
 
@@ -37,13 +37,10 @@ _DOCS_DIR = _REPO_ROOT / "docs"
 _INCLUDE_DIRS = [
     "workshop",
     "integrations",
-    "design/v6.0.0/implemented",
-    "design/v6.1.0/implemented",
-    "design/v6.2.0/implemented",
+    "design/template",
+    "user-guide",
 ]
-_INCLUDE_FILES = [
-    "talks/ai-ui-protocol-stack.md",
-]
+_INCLUDE_FILES: list[str] = []
 
 # Cap individual doc size we read into the index — protects against
 # pathological files. The talk doc is the only one near this size today.

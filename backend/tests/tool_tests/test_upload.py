@@ -11,6 +11,15 @@ from fastapi.testclient import TestClient
 
 from auth import User, get_current_user
 
+
+@pytest.fixture(autouse=True)
+def _no_version_store():
+    """Version snapshotting reaches GCS for credentials; unit tests must not.
+    Covered on its own in tests/tool_tests/test_document_versions.py."""
+    with patch("tools.documents.ingest._save_version", return_value=None):
+        yield
+
+
 _USER = User(uid="user123", email="test@example.com", domain="example.com")
 
 
@@ -70,12 +79,12 @@ def _file(name: str = "report.docx") -> dict:
 
 def _common_patches(parse_return=("parsed", [{"type": "paragraph", "text": "Hi"}], 10, None)):
     return [
-        patch("tools.documents.upload.resolve_documents_bucket", return_value="test-bucket"),
-        patch("tools.documents.upload._upload_to_gcs"),
-        patch("tools.documents.upload._run_parse", return_value=parse_return),
-        patch("tools.documents.upload.set_document"),
-        patch("tools.documents.upload.folders_db.ensure_default_folder", return_value="folder1"),
-        patch("tools.documents.upload.folders_db.update_folder_counts"),
+        patch("tools.documents.ingest.resolve_documents_bucket", return_value="test-bucket"),
+        patch("tools.documents.ingest._upload_to_gcs"),
+        patch("tools.documents.ingest._run_parse", return_value=parse_return),
+        patch("tools.documents.ingest.set_document"),
+        patch("tools.documents.ingest.folders_db.ensure_default_folder", return_value="folder1"),
+        patch("tools.documents.ingest.folders_db.update_folder_counts"),
     ]
 
 
@@ -91,12 +100,12 @@ class TestUploadEndpoint:
     def test_docx_upload_success(self, upload_client):
         fake_blocks = [{"type": "paragraph", "text": "Hello"}]
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="test-bucket"),
-            patch("tools.documents.upload._upload_to_gcs"),
-            patch("tools.documents.upload._run_parse", return_value=("parsed", fake_blocks, 11, None)),
-            patch("tools.documents.upload.set_document") as mock_set,
-            patch("tools.documents.upload.folders_db.ensure_default_folder", return_value="folder1"),
-            patch("tools.documents.upload.folders_db.update_folder_counts"),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="test-bucket"),
+            patch("tools.documents.ingest._upload_to_gcs"),
+            patch("tools.documents.ingest._run_parse", return_value=("parsed", fake_blocks, 11, None)),
+            patch("tools.documents.ingest.set_document") as mock_set,
+            patch("tools.documents.ingest.folders_db.ensure_default_folder", return_value="folder1"),
+            patch("tools.documents.ingest.folders_db.update_folder_counts"),
         ):
             resp = upload_client.post("/api/documents/upload", files=_file(), data={"skill_id": "my-skill"})
 
@@ -117,12 +126,12 @@ class TestUploadEndpoint:
             stored.update(doc)
 
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="test-bucket"),
-            patch("tools.documents.upload._upload_to_gcs"),
-            patch("tools.documents.upload._run_parse", return_value=("parsed", fake_blocks, 20, None)),
-            patch("tools.documents.upload.set_document", side_effect=capture_set),
-            patch("tools.documents.upload.folders_db.ensure_default_folder", return_value="f1"),
-            patch("tools.documents.upload.folders_db.update_folder_counts"),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="test-bucket"),
+            patch("tools.documents.ingest._upload_to_gcs"),
+            patch("tools.documents.ingest._run_parse", return_value=("parsed", fake_blocks, 20, None)),
+            patch("tools.documents.ingest.set_document", side_effect=capture_set),
+            patch("tools.documents.ingest.folders_db.ensure_default_folder", return_value="f1"),
+            patch("tools.documents.ingest.folders_db.update_folder_counts"),
         ):
             upload_client.post("/api/documents/upload", files=_file())
 
@@ -137,12 +146,12 @@ class TestUploadEndpoint:
             stored.update(doc)
 
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="test-bucket"),
-            patch("tools.documents.upload._upload_to_gcs"),
-            patch("tools.documents.upload._run_parse", return_value=("failed", [], 5, "timeout")),
-            patch("tools.documents.upload.set_document", side_effect=capture_set),
-            patch("tools.documents.upload.folders_db.ensure_default_folder", return_value="f1"),
-            patch("tools.documents.upload.folders_db.update_folder_counts"),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="test-bucket"),
+            patch("tools.documents.ingest._upload_to_gcs"),
+            patch("tools.documents.ingest._run_parse", return_value=("failed", [], 5, "timeout")),
+            patch("tools.documents.ingest.set_document", side_effect=capture_set),
+            patch("tools.documents.ingest.folders_db.ensure_default_folder", return_value="f1"),
+            patch("tools.documents.ingest.folders_db.update_folder_counts"),
         ):
             upload_client.post("/api/documents/upload", files=_file())
 
@@ -151,12 +160,12 @@ class TestUploadEndpoint:
 
     def test_ailang_parse_failure_returns_failed_status(self, upload_client):
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="test-bucket"),
-            patch("tools.documents.upload._upload_to_gcs"),
-            patch("tools.documents.upload._run_parse", return_value=("failed", [], 5, "parse error")),
-            patch("tools.documents.upload.set_document"),
-            patch("tools.documents.upload.folders_db.ensure_default_folder", return_value="folder1"),
-            patch("tools.documents.upload.folders_db.update_folder_counts"),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="test-bucket"),
+            patch("tools.documents.ingest._upload_to_gcs"),
+            patch("tools.documents.ingest._run_parse", return_value=("failed", [], 5, "parse error")),
+            patch("tools.documents.ingest.set_document"),
+            patch("tools.documents.ingest.folders_db.ensure_default_folder", return_value="folder1"),
+            patch("tools.documents.ingest.folders_db.update_folder_counts"),
         ):
             resp = upload_client.post("/api/documents/upload", files=_file())
 
@@ -172,12 +181,12 @@ class TestUploadEndpoint:
         parse path. Force the gate closed here to exercise the legacy fallback.
         """
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="test-bucket"),
-            patch("tools.documents.upload._upload_to_gcs"),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="test-bucket"),
+            patch("tools.documents.ingest._upload_to_gcs"),
             patch("tools.documents.ailang_parse.is_parseable", return_value=False),
-            patch("tools.documents.upload.set_document"),
-            patch("tools.documents.upload.folders_db.ensure_default_folder", return_value="folder1"),
-            patch("tools.documents.upload.folders_db.update_folder_counts"),
+            patch("tools.documents.ingest.set_document"),
+            patch("tools.documents.ingest.folders_db.ensure_default_folder", return_value="folder1"),
+            patch("tools.documents.ingest.folders_db.update_folder_counts"),
         ):
             resp = upload_client.post(
                 "/api/documents/upload",
@@ -194,12 +203,12 @@ class TestUploadEndpoint:
             calls.append(bucket_name)
 
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="client-specific-bucket"),
-            patch("tools.documents.upload._upload_to_gcs", side_effect=capture_upload),
-            patch("tools.documents.upload._run_parse", return_value=("parsed", [], 0, None)),
-            patch("tools.documents.upload.set_document"),
-            patch("tools.documents.upload.folders_db.ensure_default_folder", return_value="f1"),
-            patch("tools.documents.upload.folders_db.update_folder_counts"),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="client-specific-bucket"),
+            patch("tools.documents.ingest._upload_to_gcs", side_effect=capture_upload),
+            patch("tools.documents.ingest._run_parse", return_value=("parsed", [], 0, None)),
+            patch("tools.documents.ingest.set_document"),
+            patch("tools.documents.ingest.folders_db.ensure_default_folder", return_value="f1"),
+            patch("tools.documents.ingest.folders_db.update_folder_counts"),
         ):
             upload_client.post("/api/documents/upload", files=_file())
 
@@ -214,17 +223,17 @@ class TestUploadEndpoint:
             stored_ids.append(doc_id)
 
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="test-bucket"),
-            patch("tools.documents.upload._upload_to_gcs"),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="test-bucket"),
+            patch("tools.documents.ingest._upload_to_gcs"),
             patch(
-                "tools.documents.upload._run_parse",
+                "tools.documents.ingest._run_parse",
                 return_value=("parsed", [{"type": "paragraph", "text": "v2"}], 10, None),
             ),
-            patch("tools.documents.upload.set_document", side_effect=capture_set),
-            patch("tools.documents.upload.folders_db.ensure_default_folder", return_value="f1"),
-            patch("tools.documents.upload.folders_db.update_folder_counts"),
+            patch("tools.documents.ingest.set_document", side_effect=capture_set),
+            patch("tools.documents.ingest.folders_db.ensure_default_folder", return_value="f1"),
+            patch("tools.documents.ingest.folders_db.update_folder_counts"),
             patch(
-                "tools.documents.upload.query_documents",
+                "tools.documents.ingest.query_documents",
                 return_value=[{"__id": existing_doc_id, "originalFilename": "report.docx"}],
             ),
         ):
@@ -238,17 +247,17 @@ class TestUploadEndpoint:
         count_calls: list = []
 
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="test-bucket"),
-            patch("tools.documents.upload._upload_to_gcs"),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="test-bucket"),
+            patch("tools.documents.ingest._upload_to_gcs"),
             patch(
-                "tools.documents.upload._run_parse",
+                "tools.documents.ingest._run_parse",
                 return_value=("parsed", [{"type": "paragraph", "text": "v2"}], 10, None),
             ),
-            patch("tools.documents.upload.set_document"),
-            patch("tools.documents.upload.folders_db.ensure_default_folder", return_value="f1"),
-            patch("tools.documents.upload.folders_db.update_folder_counts", side_effect=count_calls.append),
+            patch("tools.documents.ingest.set_document"),
+            patch("tools.documents.ingest.folders_db.ensure_default_folder", return_value="f1"),
+            patch("tools.documents.ingest.folders_db.update_folder_counts", side_effect=count_calls.append),
             patch(
-                "tools.documents.upload.query_documents",
+                "tools.documents.ingest.query_documents",
                 return_value=[{"__id": "existing-id", "originalFilename": "report.docx"}],
             ),
         ):
@@ -261,15 +270,102 @@ class TestUploadEndpoint:
         stored_ids: list[str] = []
 
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="test-bucket"),
-            patch("tools.documents.upload._upload_to_gcs"),
-            patch("tools.documents.upload._run_parse", return_value=("parsed", [], 0, None)),
-            patch("tools.documents.upload.set_document", side_effect=lambda _c, doc_id, _d: stored_ids.append(doc_id)),
-            patch("tools.documents.upload.folders_db.ensure_default_folder", return_value="f1"),
-            patch("tools.documents.upload.folders_db.update_folder_counts"),
-            patch("tools.documents.upload.query_documents", return_value=[]),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="test-bucket"),
+            patch("tools.documents.ingest._upload_to_gcs"),
+            patch("tools.documents.ingest._run_parse", return_value=("parsed", [], 0, None)),
+            patch("tools.documents.ingest.set_document", side_effect=lambda _c, doc_id, _d: stored_ids.append(doc_id)),
+            patch("tools.documents.ingest.folders_db.ensure_default_folder", return_value="f1"),
+            patch("tools.documents.ingest.folders_db.update_folder_counts"),
+            patch("tools.documents.ingest.query_documents", return_value=[]),
         ):
             upload_client.post("/api/documents/upload", files=_file())
 
         assert len(stored_ids) > 0
         assert stored_ids[0] != "existing-id"
+
+
+class TestFolderIdIsAFormField:
+    """`folder_id` must arrive from the multipart BODY, not the query string.
+
+    Both real clients send it as a form field — `UploadDropZone.tsx` does
+    `formData.append("folder_id", …)` and the CLI passes `data={"folder_id": …}`.
+    Declared as a bare `str = ""` beside an `UploadFile`, FastAPI reads it as a
+    QUERY parameter, so the field was dropped and every upload silently landed
+    in the default folder. The user picked a folder, got no error, and the
+    document was somewhere else.
+    """
+
+    def test_form_folder_id_is_honoured(self, upload_client):
+        with (
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="test-bucket"),
+            patch("tools.documents.ingest._upload_to_gcs"),
+            patch("tools.documents.ingest._run_parse", return_value=("parsed", [], 5, None)),
+            patch("tools.documents.ingest.set_document"),
+            patch(
+                "tools.documents.ingest.folders_db.ensure_default_folder", return_value="the-default"
+            ) as mock_default,
+            patch("tools.documents.ingest.folders_db.update_folder_counts"),
+            patch(
+                "tools.documents.ingest.folders_db.get_folder",
+                return_value={"id": "contracts-folder", "name": "Contracts", "userId": _USER.uid},
+            ),
+        ):
+            resp = upload_client.post(
+                "/api/documents/upload",
+                files=_file(),
+                data={"folder_id": "contracts-folder"},
+            )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["folderId"] == "contracts-folder"
+        # The explicit folder must short-circuit the default entirely — falling
+        # back to it IS the bug, and asserting only the id above would pass if
+        # the default happened to be asked for first.
+        mock_default.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "stored",
+        [None, {"id": "contracts-folder", "name": "Contracts", "userId": "someone-else"}],
+        ids=["unknown-folder", "another-users-folder"],
+    )
+    def test_unknown_or_foreign_folder_id_is_refused_not_orphaned(self, upload_client, stored):
+        """An id naming no folder of the caller's is a visible 404, and nothing
+        is stored. It used to be written verbatim, so the document existed but
+        appeared in no folder (found 2026-10-15 via `aiplatform docs upload
+        --folder <name>`, which sent the NAME as the id)."""
+        with (
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="test-bucket"),
+            patch("tools.documents.ingest._upload_to_gcs") as gcs,
+            patch("tools.documents.ingest.set_document") as stored_doc,
+            patch("tools.documents.ingest.folders_db.get_folder", return_value=stored),
+        ):
+            resp = upload_client.post(
+                "/api/documents/upload",
+                files=_file(),
+                data={"folder_id": "contracts-folder"},
+            )
+
+        assert resp.status_code == 404, resp.text
+        detail = resp.json()["detail"]
+        assert detail["code"] == "FOLDER_NOT_FOUND"
+        assert "contracts-folder" in detail["message"]
+        gcs.assert_not_called()
+        stored_doc.assert_not_called()
+
+    def test_the_route_declares_them_as_body_not_query(self):
+        """Pin the FastAPI binding itself, so the `Annotated[str, Form()]` can't
+        be simplified back to `str = ""` by a well-meaning cleanup."""
+        from fastapi.routing import APIRoute
+
+        from tools.documents.upload import router
+
+        route = next(r for r in router.routes if isinstance(r, APIRoute) and r.path == "/api/documents/upload")
+        query_names = {p.name for p in route.dependant.query_params}
+        body_names = {p.name for p in route.dependant.body_params}
+
+        assert {"folder_id", "skill_id"} <= body_names, (
+            f"folder_id/skill_id must be Form fields; body params are {sorted(body_names)}"
+        )
+        assert not ({"folder_id", "skill_id"} & query_names), (
+            f"folder_id/skill_id must NOT be query params; query params are {sorted(query_names)}"
+        )

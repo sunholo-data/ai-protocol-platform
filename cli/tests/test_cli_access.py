@@ -20,7 +20,7 @@ EMAIL = "alice@example.com"
 @respx.mock
 def test_access_check_email_only() -> None:
     route = respx.post(f"{BASE}/api/admin/access/check").mock(
-        return_value=httpx.Response(200, json={"tags": [{"tag": "ONE", "provenances": ["direct"]}]})
+        return_value=httpx.Response(200, json={"tags": [{"tag": "example-team", "provenances": ["direct"]}]})
     )
     runner = CliRunner()
     result = runner.invoke(main, ["--env", "local", "access", "check", "--email", EMAIL])
@@ -28,14 +28,12 @@ def test_access_check_email_only() -> None:
     assert route.called
     body = json.loads(route.calls.last.request.content)
     assert body == {"email": EMAIL}
-    assert "ONE" in result.output
+    assert "example-team" in result.output
 
 
 @respx.mock
 def test_access_check_with_skill_and_tool() -> None:
-    route = respx.post(f"{BASE}/api/admin/access/check").mock(
-        return_value=httpx.Response(200, json={"tags": []})
-    )
+    route = respx.post(f"{BASE}/api/admin/access/check").mock(return_value=httpx.Response(200, json={"tags": []}))
     runner = CliRunner()
     result = runner.invoke(
         main,

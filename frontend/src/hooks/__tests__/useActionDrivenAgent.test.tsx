@@ -229,7 +229,7 @@ describe("useActionDrivenAgent", () => {
   });
 
   it("Model-B path: dispatches an out-of-model A2UI_SURFACE CUSTOM event into the SurfaceRegistry (the 'launcher does nothing' regression)", async () => {
-    // one-doc-compare / one-ppa-expert (a2ui.enabled: false) never call
+    // demo-doc-compare / demo-ppa-expert (a2ui.enabled: false) never call
     // send_a2ui_json_to_client — their surface arrives as a CUSTOM event from
     // the backend result→A2UI emitter. Before the fix this hook ignored CUSTOM
     // events, so a launcher-triggered compare/analyze rendered nothing.
@@ -255,7 +255,7 @@ describe("useActionDrivenAgent", () => {
     );
 
     const { result } = renderHook(() =>
-      useActionDrivenAgent({ skillId: "one-doc-compare", sessionId: "sess-1" }),
+      useActionDrivenAgent({ skillId: "demo-doc-compare", sessionId: "sess-1" }),
     );
 
     await expect(
@@ -441,7 +441,7 @@ describe("useActionDrivenAgent", () => {
 
     const { result } = renderHook(() =>
       useActionDrivenAgent({
-        skillId: "one-doc-compare",
+        skillId: "demo-doc-compare",
         sessionId: "sess-1",
         activitySink: sink,
       }),
@@ -486,7 +486,7 @@ describe("useActionDrivenAgent", () => {
 
     const { result } = renderHook(() =>
       useActionDrivenAgent({
-        skillId: "one-ppa-expert",
+        skillId: "demo-ppa-expert",
         sessionId: "sess-1",
         activitySink: sink,
       }),
@@ -513,7 +513,7 @@ describe("useActionDrivenAgent", () => {
         frame({
           type: "CUSTOM",
           name: "AGENT_DELEGATION",
-          value: { parent: "one-ppa-expert", target: "clause-extractor", target_display: "Clause Extractor", mode: "auto" },
+          value: { parent: "demo-ppa-expert", target: "clause-extractor", target_display: "Clause Extractor", mode: "auto" },
         }),
         frame({ type: "RUN_FINISHED" }),
       ]),
@@ -521,7 +521,7 @@ describe("useActionDrivenAgent", () => {
 
     const { result } = renderHook(() =>
       useActionDrivenAgent({
-        skillId: "one-ppa-expert",
+        skillId: "demo-ppa-expert",
         sessionId: "sess-1",
         activitySink: sink,
       }),

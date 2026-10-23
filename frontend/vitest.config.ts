@@ -24,13 +24,9 @@ export default defineConfig({
     globals: true,
     passWithNoTests: true,
     css: true,
-    reporters: process.env.CI ? ['basic'] : ['verbose'],
-    pool: 'forks',
-    poolOptions: {
-      forks: {
-        singleFork: process.env.CI === 'true'
-      }
-    },
+    reporters: process.env.CI ? [['default', { summary: false }]] : ['verbose'],
+    pool: 'threads',
+    ...(process.env.CI === 'true' ? { maxWorkers: 2 } : {}),
     testTimeout: process.env.CI ? 30000 : 10000,
     coverage: {
       provider: 'v8',

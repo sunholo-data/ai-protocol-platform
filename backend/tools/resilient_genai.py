@@ -191,7 +191,7 @@ def _client_for(rung: _Rung) -> Any:
 
 async def generate_content_resilient(
     *,
-    prompt: str,
+    prompt: str | list[Any],
     model_ref: str,
     config: dict,
     progress_label: str | None = None,
@@ -201,7 +201,7 @@ async def generate_content_resilient(
     """Run a Vertex structured-output call with retry + Gemini failover.
 
     Args:
-        prompt: The full prompt string (``contents``).
+        prompt: Text or multimodal parts passed as ``contents``.
         model_ref: A tier name (``"pro"``), registry id, or raw ``gemini-*`` api
             name. Resolved to the primary + a Gemini-only failover chain.
         config: The ``generate_content`` config dict (e.g. ``response_mime_type``,

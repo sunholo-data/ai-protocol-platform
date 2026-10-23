@@ -5,7 +5,7 @@ avatar: /images/avatars/skill-data-extractor.svg
 # 2026-06-11 demo-focus: redundant with extract_ppa_clauses in one-doc-
 # compare AND has ~10s TTFT in current probe. Marked experimental and
 # tag-gated until a TTFT pass + UX rework lands. Admins still see it
-# (aitana-admin tag); ONE customers don't.
+# (aitana-admin tag); example customers don't.
 access_control:
   type: tagged
   tags:

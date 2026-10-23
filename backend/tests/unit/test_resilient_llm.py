@@ -27,6 +27,7 @@ here with scripted fakes:
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import litellm
@@ -444,3 +445,198 @@ def test_sanitize_noop_on_native_idd_history():
 def test_sanitize_noop_when_no_tool_history():
     req = _Req([_mc("user", [types.Part(text="hello")])])
     assert sanitize_cross_provider_tool_history(req) is False
+
+
+# --- 7. Silence is a failure too (first-token deadline) ---------------------
+#
+# The classifier only ever saw exceptions. A provider that accepts a streamed
+# request and sends NOTHING raises nothing, so retries and fallbacks never
+# fired: a deployed fork's prod logged six turns at 48-105 s to first token in
+# thirty days, on requests logged as sent and then silent, while the client
+# abandoned the stream at 30 s. The deadline turns silence into a
+# ``SilentStallError`` BEFORE any output, where the existing rule (retry the
+# transient, then fall back) already knows what to do.
+
+
+class _Stall:
+    """Marker in a scripted run: 'this attempt would hang here'."""
+
+
+class _StallingLlm(_ScriptedLlm):
+    """``_ScriptedLlm`` that sleeps forever on a ``_Stall`` marker and records
+    whether an abandoned generator was closed."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.closed = 0
+
+    async def generate_content_async(self, llm_request: Any, stream: bool = False):
+        run = self.runs[min(self.calls, len(self.runs) - 1)]
+        self.calls += 1
+        try:
+            for item in run:
+                if isinstance(item, _Stall):
+                    await asyncio.sleep(3600)
+                elif isinstance(item, Exception):
+                    raise item
+                yield item
+        finally:
+            self.closed += 1
+
+
+@pytest.fixture
+def _short_deadline(monkeypatch):
+    monkeypatch.setenv(rl.FIRST_TOKEN_DEADLINE_ENV, "0.05")
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_first_attempt_is_retried_and_the_retry_answers(_clean_slate, _short_deadline):
+    llm = _StallingLlm("m1", [[_Stall()], [_text("hej"), _text(" der", partial=False)]])
+    wrapper, events = _wrap(llm)
+
+    out = await _run(wrapper)
+
+    assert [r.content.parts[0].text for r in out] == ["hej", " der"]
+    assert llm.calls == 2
+    assert llm.closed == 2  # the abandoned request was torn down, not left streaming into nowhere
+    assert [name for name, _ in events] == [rl.MODEL_RETRY_EVENT]
+    assert events[0][1]["code"] == "MODEL_SILENT_STALL"
+
+
+@pytest.mark.asyncio
+async def test_a_persistent_stall_falls_back_down_the_chain(_clean_slate, _short_deadline):
+    primary = _StallingLlm("m1", [[_Stall()]])
+    fallback = _ScriptedLlm("m2", [[_text("ok", partial=False)]])
+    wrapper, events = _wrap(primary, fallback, max_retries_per_model=1)
+
+    out = await _run(wrapper)
+
+    assert [r.content.parts[0].text for r in out] == ["ok"]
+    assert primary.calls == 2  # first try + one retry, then the chain moved on
+    assert [name for name, _ in events] == [rl.MODEL_RETRY_EVENT, rl.MODEL_FALLBACK_EVENT]
+    assert events[1][1]["code"] == "MODEL_SILENT_STALL"
+
+
+@pytest.mark.asyncio
+async def test_a_stall_with_no_fallback_left_is_a_typed_error(_clean_slate, _short_deadline):
+    llm = _StallingLlm("m1", [[_Stall()]])
+    wrapper, _ = _wrap(llm, max_retries_per_model=1)
+
+    with pytest.raises(ModelTurnError) as info:
+        await _run(wrapper)
+    assert info.value.error_class.code == "MODEL_SILENT_STALL"
+
+
+@pytest.mark.asyncio
+async def test_the_deadline_never_applies_once_output_has_started(_clean_slate, _short_deadline):
+    """A slow tail is not a stall: once anything has arrived the stream runs
+    to completion however long the rest takes."""
+
+    class _SlowTail(_ScriptedLlm):
+        async def generate_content_async(self, llm_request: Any, stream: bool = False):
+            yield _text("first")
+            await asyncio.sleep(0.2)  # well past the 0.05 s deadline
+            yield _text("second", partial=False)
+
+    wrapper, events = _wrap(_SlowTail("m1", [[]]))
+    out = await _run(wrapper)
+    assert [r.content.parts[0].text for r in out] == ["first", "second"]
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_a_thought_counts_as_life_for_the_deadline(_clean_slate, _short_deadline):
+    """Visible output gates retries; ANY output gates the stall clock. A model
+    that thinks for a while before speaking is alive, not stalled."""
+
+    class _ThinksFirst(_ScriptedLlm):
+        async def generate_content_async(self, llm_request: Any, stream: bool = False):
+            yield _thought("hmm")
+            await asyncio.sleep(0.2)
+            yield _text("answer", partial=False)
+
+    wrapper, events = _wrap(_ThinksFirst("m1", [[]]))
+    out = await _run(wrapper)
+    assert len(out) == 2 and events == []
+
+
+@pytest.mark.asyncio
+async def test_a_non_streamed_call_is_never_bounded(_clean_slate, _short_deadline):
+    """Its single chunk IS the whole answer; a long answer is not a stall."""
+
+    class _SlowWhole(_ScriptedLlm):
+        async def generate_content_async(self, llm_request: Any, stream: bool = False):
+            await asyncio.sleep(0.2)
+            yield _text("the whole answer", partial=False)
+
+    wrapper, events = _wrap(_SlowWhole("m1", [[]]))
+    out = [r async for r in wrapper.generate_content_async(llm_request=None, stream=False)]
+    assert len(out) == 1 and events == []
+
+
+def test_deadline_config(monkeypatch):
+    monkeypatch.delenv(rl.FIRST_TOKEN_DEADLINE_ENV, raising=False)
+    assert rl.first_token_deadline() == 10.0
+    monkeypatch.setenv(rl.FIRST_TOKEN_DEADLINE_ENV, "0")
+    assert rl.first_token_deadline() is None
+    monkeypatch.setenv(rl.FIRST_TOKEN_DEADLINE_ENV, "soon")
+    assert rl.first_token_deadline() == 10.0  # garbage must not crash a turn
+
+
+# A flat 10 s killed a document-heavy specialist skill on a deployed fork's prod
+# (2026-10-16/21): its long history put
+# gemini's first chunk at ~10-12 s, so every member of the chain "stalled" three
+# times on a request that was simply big, and the turn died with RUN_ERROR.
+
+
+def test_the_deadline_grows_with_the_prompt_and_is_capped(monkeypatch):
+    monkeypatch.delenv(rl.FIRST_TOKEN_DEADLINE_ENV, raising=False)
+    assert rl.first_token_deadline_for(0) == 10.0  # small prompts keep the measured 10 s
+    assert rl.first_token_deadline_for(1_200_000) == pytest.approx(22.0)  # probed 9.6-15.4 s
+    assert rl.first_token_deadline_for(100_000_000) == rl.FIRST_TOKEN_DEADLINE_MAX_S
+    monkeypatch.setenv(rl.FIRST_TOKEN_DEADLINE_ENV, "0")
+    assert rl.first_token_deadline_for(1_200_000) is None  # disabled stays disabled
+
+
+def test_a_stall_doubles_the_deadline_once(monkeypatch):
+    monkeypatch.delenv(rl.FIRST_TOKEN_DEADLINE_ENV, raising=False)
+    assert rl.first_token_deadline_for(0, stalls=1) == 20.0
+    assert rl.first_token_deadline_for(0, stalls=3) == 20.0  # not compounding: real stalls run 48-105 s
+
+
+def test_prompt_size_counts_instruction_text_and_tool_traffic():
+    class _Cfg:
+        system_instruction = "x" * 100
+
+    req = _Req(
+        [
+            _mc("user", [types.Part(text="y" * 1000)]),
+            _mc("model", [types.Part(function_call=types.FunctionCall(name="t", args={"q": "z" * 50}))]),
+            _mc("user", [types.Part(function_response=types.FunctionResponse(name="t", response={"r": "w" * 5000}))]),
+        ]
+    )
+    req.config = _Cfg()
+    assert rl._prompt_chars(req) > 100 + 1000 + 50 + 5000
+    assert rl._prompt_chars(None) == 0  # never raises on a missing request
+
+
+@pytest.mark.asyncio
+async def test_a_request_that_needs_slightly_longer_than_the_deadline_answers_on_retry(_clean_slate, monkeypatch):
+    """The prod failure shape: first chunk just past the deadline on every
+    attempt. Re-sending under the same deadline can never succeed; the retry
+    gets more room and answers."""
+    monkeypatch.setenv(rl.FIRST_TOKEN_DEADLINE_ENV, "0.2")
+
+    class _SlowFirstChunk(_ScriptedLlm):
+        async def generate_content_async(self, llm_request: Any, stream: bool = False):
+            self.calls += 1
+            await asyncio.sleep(0.3)  # past 0.2, inside the doubled 0.4
+            yield _text("answer", partial=False)
+
+    llm = _SlowFirstChunk("m1", [[]])
+    wrapper, events = _wrap(llm)
+    out = await _run(wrapper)
+
+    assert [r.content.parts[0].text for r in out] == ["answer"]
+    assert llm.calls == 2
+    assert [name for name, _ in events] == [rl.MODEL_RETRY_EVENT]

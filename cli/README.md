@@ -91,9 +91,11 @@ aiplatform --help
 aiplatform bucket  { list | show | create | grant | revoke }
 aiplatform folder  { list | create }
 aiplatform docs    { folder { list | new } | upload }
-aiplatform groups  { add-user | remove-user | list-user }   # backend TODO
-aiplatform access  { check }                                # backend TODO
-aiplatform skill   { probe }
+aiplatform user    { find | show | activity | refresh-claims }   # start from a PERSON
+aiplatform groups  { grant | revoke | show }
+aiplatform access  { check }
+aiplatform skill   { probe | chat | … }
+aiplatform logs    [ -g … ] | logs client
 ```
 
 ### Bucket
@@ -156,17 +158,29 @@ aiplatform --env local skill probe my-skill --json
 
 See [docs/design/v6.1.0/implemented/ttft-instrumentation.md](../docs/design/v6.1.0/implemented/ttft-instrumentation.md).
 
-### Groups (backend TODO)
+### User — who is this person, which env, why can't they see X
 
 ```bash
-aiplatform --env dev groups add-user    --group ops --uid u-1
-aiplatform --env dev groups remove-user --group ops --uid u-1
-aiplatform --env dev groups list-user   --uid u-1
+aiplatform user find arias                                 # name/email needle across dev+test+prod
+aiplatform --env prod user show msc@example.com            # record, tags, effective roles, claim propagation
+aiplatform --env prod user activity msc@example.com --since 2h
+aiplatform --env prod user refresh-claims msc@example.com  # force a fresh grant into their token (admin token)
 ```
 
-> The `/api/groups/*` and `/api/users/*/groups` endpoints are not yet
-> implemented server-side. The CLI targets the planned shape so wiring lands
-> cleanly.
+Reads need only gcloud application-default credentials with Firebase Auth
+viewer + Firestore read on the target project — no backend token. `find`
+prints matches only; it is deliberately not a user-list export.
+
+### Groups
+
+```bash
+aiplatform --env prod groups grant  --email a@b.com --tag tenant-admin:b.com
+aiplatform --env prod groups revoke --email a@b.com --tag tenant-admin:b.com
+aiplatform --env prod groups show   --email a@b.com
+```
+
+Aitana-admin gated server-side; a grant is `on_next_refresh` (≤1h) unless
+you follow it with `user refresh-claims`.
 
 ### Access check (backend TODO)
 

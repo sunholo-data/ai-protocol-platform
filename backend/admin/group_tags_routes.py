@@ -27,7 +27,7 @@ from pydantic import BaseModel
 
 from admin.audit import record_admin_action
 from admin.scope import PlatformScope, Scope
-from auth.admin_roles import PLATFORM_ADMIN_TAG, TENANT_ADMIN_PREFIX
+from auth.admin_roles import PLATFORM_ADMIN_TAG, RESIDENT_USER_TAG, TENANT_ADMIN_PREFIX
 from db.firestore import get_document, query_documents, set_document
 from db.models.group_tags import GroupTag
 
@@ -73,6 +73,11 @@ def is_known_tag(tag: str) -> bool:
       - the tag **is** a registry entry.
     """
     if tag == PLATFORM_ADMIN_TAG or tag.startswith(TENANT_ADMIN_PREFIX):
+        return True
+    # Code-defined capability tags. The backend branches on these, so a
+    # registry-only definition would let a typo'd entry fail silently: the grant
+    # would report success and the capability would never arrive.
+    if tag == RESIDENT_USER_TAG:
         return True
     ids = registry_ids()
     if not ids:

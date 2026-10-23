@@ -63,13 +63,21 @@ def test_every_other_step_waits_for_both_gates(steps):
     gate_positions = [index_of[g] for g in GATE_IDS if g in index_of]
     earliest_gate = min(gate_positions) if gate_positions else len(steps)
 
-    def reaches_gate(pos: int, seen: set[int]) -> bool:
+    # Memoised, not a shared `seen` set: a step reached by two paths (a diamond —
+    # e.g. bundle-user-guide feeds both image builds) must give the same answer
+    # both times. In-progress = False only guards a cycle.
+    memo: dict[int, bool] = {}
+
+    def reaches_gate(pos: int) -> bool:
+        if pos not in memo:
+            memo[pos] = False
+            memo[pos] = _reaches(pos)
+        return memo[pos]
+
+    def _reaches(pos: int) -> bool:
         step = steps[pos]
         if step.get("id") in GATE_IDS:
             return True
-        if pos in seen:
-            return False
-        seen.add(pos)
 
         deps = step.get("waitFor")
         if deps is None:
@@ -78,12 +86,12 @@ def test_every_other_step_waits_for_both_gates(steps):
             return pos > earliest_gate
         if deps == ["-"]:
             return False
-        return all(d in index_of and reaches_gate(index_of[d], seen) for d in deps)
+        return all(d in index_of and reaches_gate(index_of[d]) for d in deps)
 
     offenders = [
         s.get("id") or f"<unnamed step #{i}>"
         for i, s in enumerate(steps)
-        if s.get("id") not in GATE_IDS and not reaches_gate(i, set())
+        if s.get("id") not in GATE_IDS and not reaches_gate(i)
     ]
     assert not offenders, (
         f"these steps can start before the CI gate passes: {offenders}. "

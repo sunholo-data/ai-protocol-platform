@@ -605,21 +605,21 @@ class TestSkillIdMismatch:
 
 
 # ---------------------------------------------------------------------------
-# one-doc-compare template opt-in (7.2-M2 PPA-COMPARE-LAUNCHER M1)
+# demo-doc-compare template opt-in (7.2-M2 PPA-COMPARE-LAUNCHER M1)
 # ---------------------------------------------------------------------------
 
 
 def _load_one_doc_compare_frontmatter() -> dict:
-    """Parse the REAL one-doc-compare SKILL.md frontmatter (same split the
+    """Parse the REAL demo-doc-compare SKILL.md frontmatter (same split the
     canonical seeder uses) so these tests exercise the shipped template, not
     a hand-rolled fixture."""
     import yaml
 
-    template = Path(__file__).resolve().parents[2] / "skills" / "templates" / "one-doc-compare" / "SKILL.md"
+    template = Path(__file__).resolve().parents[2] / "skills" / "templates" / "demo-doc-compare" / "SKILL.md"
     if not template.exists():
-        pytest.skip("one-doc-compare template not present (customer skill; excluded from the public template)")
+        pytest.skip("demo-doc-compare template not present (customer skill; excluded from the public template)")
     parts = template.read_text().split("---", 2)
-    assert len(parts) >= 3, "one-doc-compare SKILL.md is missing frontmatter fences"
+    assert len(parts) >= 3, "demo-doc-compare SKILL.md is missing frontmatter fences"
     return yaml.safe_load(parts[1]) or {}
 
 
@@ -631,7 +631,7 @@ def _one_doc_compare_skill() -> SkillConfig:
     return SkillConfig(
         skillId="skill-1",  # matches URL + session index in this suite
         name=front["name"],
-        description=(front.get("description") or "one-doc-compare").strip(),
+        description=(front.get("description") or "demo-doc-compare").strip(),
         ownerId="viewer",
         ownerEmail="viewer@example.com",
         accessControl=AccessControl(type="public"),

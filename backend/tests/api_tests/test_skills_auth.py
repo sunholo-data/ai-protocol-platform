@@ -404,3 +404,37 @@ def test_list_skills_owner_sees_own_private(app: FastAPI, client: TestClient) ->
         assert len(resp.json()) == 1
     finally:
         cleanup()
+
+
+# ---------------------------------------------------------------------------
+# canEdit — the UI's "can I change this?" comes from the PUT guard's own rule
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("caller", "owner", "expected"),
+    [
+        (_make_user(uid=OWNER_UID, email=OWNER_EMAIL), OWNER_UID, True),
+        (_make_user(uid="coworker"), OWNER_UID, False),
+        (_make_user(uid="coworker", group_tags=frozenset({"one-admin"})), OWNER_UID, True),
+        (_make_user(uid="coworker", group_tags=frozenset({"one-admin"})), "aitana-platform", False),
+        (_make_user(uid="coworker", group_tags=frozenset({"aitana-admin"})), "aitana-platform", True),
+    ],
+)
+def test_can_edit_matches_the_put_guard(app: FastAPI, client: TestClient, caller, owner, expected) -> None:
+    """Every row is checked against BOTH the flag and a real PUT, so they can't drift."""
+    skill = _make_skill(ownerId=owner, accessControl={"type": "domain", "domain": "yourcompany.com"})
+    cleanup = _install_user(app, caller)
+    try:
+        with (
+            patch("skills.routes.skill_config.get_skill", return_value=skill),
+            patch("skills.routes.skill_config.update_skill", return_value=skill),
+            patch("skills.routes.validate_skill_extensions"),
+        ):
+            got = client.get("/api/skills/skill-1")
+            put = client.put("/api/skills/skill-1", json={"displayName": "x"})
+        assert got.status_code == 200
+        assert got.json()["canEdit"] is expected
+        assert (put.status_code == 200) is expected, put.text
+    finally:
+        cleanup()

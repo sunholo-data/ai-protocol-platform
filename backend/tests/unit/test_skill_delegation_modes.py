@@ -120,7 +120,7 @@ def test_no_sub_agents_when_no_accessible_delegate():
 
 
 def test_mixed_floors_all_delegates_are_sub_agents_no_handoff_tool():
-    """The one-assistant front-door shape (v6.10.0): auto AND confirm delegates are
+    """The demo-assistant front-door shape (v6.10.0): auto AND confirm delegates are
     BOTH sub_agents behind the single transfer_to_agent; the floor policy is in the
     before_tool_callback, so there is NO request_handoff tool."""
     parent = _skill(
@@ -142,24 +142,24 @@ def test_mixed_floors_all_delegates_are_sub_agents_no_handoff_tool():
 
 
 def test_all_auto_front_door_wires_sub_agents_no_handoff_tool():
-    """The one-assistant front door shape (all delegates floor=auto, decided
+    """The demo-assistant front door shape (all delegates floor=auto, decided
     2026-07-14): transparent transfer_to_agent for every specialist, and NO
     request_handoff tool (confirm levels are reserved for job skills)."""
     parent = _skill(
-        skill_id="one-assistant",
+        skill_id="demo-assistant",
         delegation=DelegationConfig(
             enabled=True,
             allow=[
-                {"skill": "one-ppa-expert", "floor": "auto"},
+                {"skill": "demo-ppa-expert", "floor": "auto"},
                 {"skill": "web-researcher", "floor": "auto"},
-                {"skill": "one-doc-compare", "floor": "auto"},
+                {"skill": "demo-doc-compare", "floor": "auto"},
             ],
         ),
     )
     subs = {
-        "one-ppa-expert": _skill(skill_id="one-ppa-expert", display_name="PPA"),
+        "demo-ppa-expert": _skill(skill_id="demo-ppa-expert", display_name="PPA"),
         "web-researcher": _skill(skill_id="web-researcher", display_name="Web"),
-        "one-doc-compare": _skill(skill_id="one-doc-compare", display_name="Compare"),
+        "demo-doc-compare": _skill(skill_id="demo-doc-compare", display_name="Compare"),
     }
     with patch("adk.agent.get_skill", side_effect=lambda sid: subs.get(sid)):
         agent = create_agent(parent, _user(), access_context=_ctx())
@@ -172,7 +172,7 @@ def test_delegate_resolved_by_slug_when_docid_is_uuid():
     misses get_skill; the slug fallback (find_by_slug within the parent's owner)
     must still resolve it — else the deployed handoff silently finds zero
     delegates. Regression for the 2026-07-14 deployed-seed miss."""
-    parent = _skill(skill_id="door", delegation=_deleg(["one-ppa-expert"], mode="auto"))
+    parent = _skill(skill_id="door", delegation=_deleg(["demo-ppa-expert"], mode="auto"))
     child = _skill(skill_id="2c031269-uuid-not-the-slug", display_name="PPA")
     # get_skill(slug) misses (doc-id is the UUID); find_by_slug resolves it.
     with (

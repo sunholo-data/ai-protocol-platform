@@ -6,14 +6,21 @@ Implements the contract pinned by tests/unit/test_firestore_inmemory.py:
   Client       : .collection()
   Collection   : .document(), .where(filter=FieldFilter), .order_by(field,
                  direction=...), .limit(n), .stream(), .start_after(snap)
-  DocumentRef  : .get(), .set(data, merge=...), .update(data), .delete()
+  DocumentRef  : .get(), .set(data, merge=...), .update(data), .delete(),
+                 .collection(name)  (subcollections)
   Snapshot     : .exists, .to_dict(), .id
   Sentinels    : Increment, ArrayUnion, ArrayRemove, SERVER_TIMESTAMP
   Constants    : Query.DESCENDING, Query.ASCENDING
 
-Storage is a nested dict ``{collection: {doc_id: data}}`` under a single
+Storage is a nested dict ``{collection_path: {doc_id: data}}`` under a single
 ``threading.RLock``. The lock is conservative (one lock for all collections)
 because workshop fixtures are tiny — correctness wins over contention.
+
+Subcollections are keyed by their full slash path, exactly as Firestore names
+them: ``users/{uid}/folders`` is just another collection key. As in real
+Firestore, a subcollection is independent of its parent document — it can
+hold documents while the parent doesn't exist, and deleting the parent leaves
+it in place.
 
 The behaviour diverges from real Firestore in a few well-bounded ways:
 - No transactions. v6 doesn't use them.
@@ -219,6 +226,19 @@ class _DocumentRef:
             col = self._client._store.get(self._collection)
             if col is not None:
                 col.pop(self.id, None)
+
+    def collection(self, name: str) -> _CollectionRef:
+        """A subcollection of this document (``users/{uid}/folders``).
+
+        Missing until 2026-10-19, so every ``users/{uid}/...`` read — the
+        document folders first among them — 500'd in LOCAL_MODE with
+        ``'_DocumentRef' object has no attribute 'collection'``.
+        """
+        return _CollectionRef(self._client, f"{self._collection}/{self.id}/{name}")
+
+    @property
+    def path(self) -> str:
+        return f"{self._collection}/{self.id}"
 
 
 def _resolve_writes_for_set(data: dict[str, Any]) -> dict[str, Any]:

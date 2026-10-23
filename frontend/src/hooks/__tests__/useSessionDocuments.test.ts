@@ -191,3 +191,20 @@ describe("useSessionDocuments — route hydration into doc tabs", () => {
     await waitFor(() => expect(result.current.tabs).toBeNull());
   });
 });
+
+describe("useSessionDocuments — the session's project (projects §6.3)", () => {
+  it("reports the row's project_id, and null when it has none", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ session: { document_ids: [], project_id: "p1" } }),
+    } as Response);
+    const { result, rerender } = renderHook(({ id }) => useSessionDocuments(id), { initialProps: { id: "s1" as string | null } });
+    expect(result.current.projectId).toBeUndefined();
+    await waitFor(() => expect(result.current.projectId).toBe("p1"));
+
+    mockSession([]);
+    rerender({ id: "s2" });
+    await waitFor(() => expect(result.current.projectId).toBeNull());
+  });
+});

@@ -64,7 +64,7 @@ def nonadmin_client() -> TestClient:
 
 def test_list_clients_admin_returns_200(admin_client: TestClient) -> None:
     docs = [
-        {"__id": "acmeenergy.com", "documents_bucket": "one-docs", "display_name": "Acme Energy"},
+        {"__id": "energy.example", "documents_bucket": "one-docs", "display_name": "Acme Energy"},
         {"__id": "acme.com", "documents_bucket": None, "display_name": ""},
     ]
     with patch("admin.clients.query_documents", return_value=docs):
@@ -72,7 +72,7 @@ def test_list_clients_admin_returns_200(admin_client: TestClient) -> None:
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
-    assert data[0]["domain"] == "acmeenergy.com"
+    assert data[0]["domain"] == "energy.example"
     assert data[0]["documents_bucket"] == "one-docs"
     assert data[1]["domain"] == "acme.com"
 
@@ -91,10 +91,10 @@ def test_list_clients_non_admin_returns_403(nonadmin_client: TestClient) -> None
 def test_get_client_known_domain_returns_200(admin_client: TestClient) -> None:
     doc = {"documents_bucket": "one-docs", "display_name": "Acme Energy"}
     with patch("admin.clients.get_document", return_value=doc):
-        resp = admin_client.get("/api/admin/clients/acmeenergy.com")
+        resp = admin_client.get("/api/admin/clients/energy.example")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["domain"] == "acmeenergy.com"
+    assert body["domain"] == "energy.example"
     assert body["documents_bucket"] == "one-docs"
 
 
@@ -118,32 +118,32 @@ def test_get_client_non_admin_returns_403(nonadmin_client: TestClient) -> None:
 def test_put_client_upserts_and_returns_config(admin_client: TestClient) -> None:
     payload = {"documents_bucket": "one-docs", "display_name": "Acme Energy"}
     with patch("admin.clients.set_document") as mock_set:
-        resp = admin_client.put("/api/admin/clients/acmeenergy.com", json=payload)
+        resp = admin_client.put("/api/admin/clients/energy.example", json=payload)
     assert resp.status_code == 200
     mock_set.assert_called_once()
     body = resp.json()
-    assert body["domain"] == "acmeenergy.com"
+    assert body["domain"] == "energy.example"
     assert body["documents_bucket"] == "one-docs"
     assert body["display_name"] == "Acme Energy"
 
 
 def test_put_client_persists_derived_group_tags(admin_client: TestClient) -> None:
-    """acmeenergy.com → ['ONE'] is the demo seed: grant ONE tag to whole domain."""
-    payload = {"derived_group_tags": ["ONE"]}
+    """energy.example → ['example-team'] is the demo seed: grant example-team tag to whole domain."""
+    payload = {"derived_group_tags": ["example-team"]}
     with patch("admin.clients.set_document") as mock_set:
-        resp = admin_client.put("/api/admin/clients/acmeenergy.com", json=payload)
+        resp = admin_client.put("/api/admin/clients/energy.example", json=payload)
     assert resp.status_code == 200
     mock_set.assert_called_once()
     written = mock_set.call_args[0][2]
-    assert written["derived_group_tags"] == ["ONE"]
-    assert resp.json()["derived_group_tags"] == ["ONE"]
+    assert written["derived_group_tags"] == ["example-team"]
+    assert resp.json()["derived_group_tags"] == ["example-team"]
 
 
 def test_put_client_empty_derived_group_tags_collapses_to_null(admin_client: TestClient) -> None:
     """[] is not a useful tenant state — collapse to None so the field clears."""
     payload = {"derived_group_tags": []}
     with patch("admin.clients.set_document") as mock_set:
-        resp = admin_client.put("/api/admin/clients/acmeenergy.com", json=payload)
+        resp = admin_client.put("/api/admin/clients/energy.example", json=payload)
     assert resp.status_code == 200
     written = mock_set.call_args[0][2]
     assert written["derived_group_tags"] is None
@@ -153,12 +153,12 @@ def test_put_client_partial_update_only_writes_sent_fields(admin_client: TestCli
     """v6.5.0 AUTH-LANDING: a partial PUT (only default_skill) must NOT write
     None for unsent fields — otherwise merge=True would clobber an existing
     enabled_skills / derived_group_tags / documents_bucket."""
-    payload = {"default_skill": "one-ppa-expert"}
+    payload = {"default_skill": "demo-ppa-expert"}
     with patch("admin.clients.set_document") as mock_set:
-        resp = admin_client.put("/api/admin/clients/acmeenergy.com", json=payload)
+        resp = admin_client.put("/api/admin/clients/energy.example", json=payload)
     assert resp.status_code == 200
     written = mock_set.call_args[0][2]
-    assert written["default_skill"] == "one-ppa-expert"
+    assert written["default_skill"] == "demo-ppa-expert"
     assert "enabled_skills" not in written
     assert "derived_group_tags" not in written
     assert "documents_bucket" not in written
@@ -166,11 +166,11 @@ def test_put_client_partial_update_only_writes_sent_fields(admin_client: TestCli
 
 
 def test_put_client_default_skill_round_trips(admin_client: TestClient) -> None:
-    payload = {"default_skill": "one-ppa-expert"}
+    payload = {"default_skill": "demo-ppa-expert"}
     with patch("admin.clients.set_document"):
-        resp = admin_client.put("/api/admin/clients/acmeenergy.com", json=payload)
+        resp = admin_client.put("/api/admin/clients/energy.example", json=payload)
     assert resp.status_code == 200
-    assert resp.json()["default_skill"] == "one-ppa-expert"
+    assert resp.json()["default_skill"] == "demo-ppa-expert"
 
 
 def test_put_client_non_admin_returns_403(nonadmin_client: TestClient) -> None:
@@ -187,9 +187,9 @@ def test_put_client_non_admin_returns_403(nonadmin_client: TestClient) -> None:
 def test_delete_client_removes_record(admin_client: TestClient) -> None:
     existing = {"documents_bucket": "one-docs", "display_name": "Acme Energy"}
     with patch("admin.clients.get_document", return_value=existing), patch("admin.clients.delete_document") as mock_del:
-        resp = admin_client.delete("/api/admin/clients/acmeenergy.com")
+        resp = admin_client.delete("/api/admin/clients/energy.example")
     assert resp.status_code == 200
-    mock_del.assert_called_once_with("clients", "acmeenergy.com")
+    mock_del.assert_called_once_with("clients", "energy.example")
 
 
 def test_delete_client_not_found_returns_404(admin_client: TestClient) -> None:
@@ -219,14 +219,14 @@ def _skill_stub(slug: str):
 
 def test_put_client_rejects_unknown_skill_ref(admin_client: TestClient) -> None:
     """An enabled_skills slug that resolves to no known skill -> 422, no write."""
-    known = [_skill_stub("one-assistant")]
+    known = [_skill_stub("demo-assistant")]
     with (
         patch("admin.tenants.skill_config.list_skills", return_value=known),
         patch("admin.clients.set_document") as mock_set,
     ):
         resp = admin_client.put(
             "/api/admin/clients/acme.com",
-            json={"enabled_skills": ["one-assistant", "ghost-skill"]},
+            json={"enabled_skills": ["demo-assistant", "ghost-skill"]},
         )
     assert resp.status_code == 422
     assert "ghost-skill" in str(resp.json())
@@ -234,14 +234,14 @@ def test_put_client_rejects_unknown_skill_ref(admin_client: TestClient) -> None:
 
 
 def test_put_client_accepts_known_skill_ref(admin_client: TestClient) -> None:
-    known = [_skill_stub("one-assistant"), _skill_stub("one-ppa-expert")]
+    known = [_skill_stub("demo-assistant"), _skill_stub("demo-ppa-expert")]
     with (
         patch("admin.tenants.skill_config.list_skills", return_value=known),
         patch("admin.clients.set_document") as mock_set,
     ):
         resp = admin_client.put(
             "/api/admin/clients/acme.com",
-            json={"enabled_skills": ["one-assistant", "one-ppa-expert"]},
+            json={"enabled_skills": ["demo-assistant", "demo-ppa-expert"]},
         )
     assert resp.status_code == 200
     mock_set.assert_called_once()
@@ -253,12 +253,12 @@ def test_put_client_records_audit(admin_client: TestClient) -> None:
         patch("admin.clients.set_document"),
         patch("admin.clients.record_admin_action") as mock_audit,
     ):
-        resp = admin_client.put("/api/admin/clients/acmeenergy.com", json={"display_name": "ONE"})
+        resp = admin_client.put("/api/admin/clients/energy.example", json={"display_name": "example-team"})
     assert resp.status_code == 200
     mock_audit.assert_called_once()
     kwargs = mock_audit.call_args.kwargs
     assert kwargs["action"] == "upsert_client"
-    assert kwargs["target"] == "acmeenergy.com"
+    assert kwargs["target"] == "energy.example"
 
 
 def test_delete_client_records_audit(admin_client: TestClient) -> None:
@@ -268,7 +268,7 @@ def test_delete_client_records_audit(admin_client: TestClient) -> None:
         patch("admin.clients.delete_document"),
         patch("admin.clients.record_admin_action") as mock_audit,
     ):
-        resp = admin_client.delete("/api/admin/clients/acmeenergy.com")
+        resp = admin_client.delete("/api/admin/clients/energy.example")
     assert resp.status_code == 200
     mock_audit.assert_called_once()
     assert mock_audit.call_args.kwargs["action"] == "delete_client"
@@ -290,9 +290,9 @@ class TestUpsertReturnsMergedState:
         stored = {
             "documents_bucket": "one-bucket",
             "display_name": "Acme Energy",
-            "enabled_skills": ["one-assistant"],
-            "derived_group_tags": ["ONE"],
-            "default_skill": "one-assistant",
+            "enabled_skills": ["demo-assistant"],
+            "derived_group_tags": ["example-team"],
+            "default_skill": "demo-assistant",
         }
 
         def fake_get(_collection, _domain):
@@ -308,17 +308,17 @@ class TestUpsertReturnsMergedState:
         monkeypatch.setattr(mod, "record_admin_action", lambda **k: None)
 
         resp = admin_client.put(
-            "/api/admin/clients/acmeenergy.com",
-            json={"enabled_skills": ["one-assistant", "skill-authoring-assistant"]},
+            "/api/admin/clients/energy.example",
+            json={"enabled_skills": ["demo-assistant", "skill-authoring-assistant"]},
         )
 
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["enabled_skills"] == ["one-assistant", "skill-authoring-assistant"]
+        assert body["enabled_skills"] == ["demo-assistant", "skill-authoring-assistant"]
         # The untouched fields must come back as they are STORED, not as nulls.
-        assert body["derived_group_tags"] == ["ONE"], (
+        assert body["derived_group_tags"] == ["example-team"], (
             "a partial update that reports null for untouched fields reads as a wipe"
         )
         assert body["documents_bucket"] == "one-bucket"
         assert body["display_name"] == "Acme Energy"
-        assert body["default_skill"] == "one-assistant"
+        assert body["default_skill"] == "demo-assistant"

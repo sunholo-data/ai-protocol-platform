@@ -18,7 +18,7 @@ export interface SkillMetadata {
   subSkills: string[];
   delegation?: DelegationConfig;
   /** v6.11.0 — skill-dropdown grouping hint (presentation only, never gates
-   * access). ONE taxonomy: "assistant" | "specialist" | "tool"; null → "Other
+   * access). example taxonomy: "assistant" | "specialist" | "tool"; null → "Other
    * skills". Mirrors backend SkillMetadata.category. */
   category?: string | null;
   /** v6.12.0 — give the agent the request_confirmation tool (author its own
@@ -45,7 +45,7 @@ export interface DelegationConfig {
   discoverJobs?: boolean;
 }
 
-// === v6.6.0 ONE-FORK-CONVERGENCE: per-skill persona (avatar + style + voice) ===
+// === v6.6.0 TENANT-FORK-CONVERGENCE: per-skill persona (avatar + style + voice) ===
 // Mirrors backend/db/models/__init__.py SkillVoiceConfig / SkillPersona.
 
 export type InteractionStyle = "concise" | "rigorous" | "warm" | "socratic";
@@ -104,6 +104,8 @@ export interface Skill {
   avatar: string;
   ownerEmail: string;
   ownerId: string;
+  /** Per-viewer: may the caller change this skill? Absent when unknown (anonymous). */
+  canEdit?: boolean | null;
   accessControl: AccessControl;
   protocols: Protocols;
   initialMessage: string;
@@ -122,7 +124,7 @@ export interface Skill {
   // nullable; null/missing → chat-primary (ChatShell). See
   // docs/design/v6.4.0/skill-driven-shell-modes.md.
   shell?: SkillShell | null;
-  // v6.6.0 ONE-FORK-CONVERGENCE — per-skill persona (avatar + style + voice).
+  // v6.6.0 TENANT-FORK-CONVERGENCE — per-skill persona (avatar + style + voice).
   // Optional / nullable / additive. See docs/design/v6.6.0/…
   persona?: SkillPersona | null;
 }

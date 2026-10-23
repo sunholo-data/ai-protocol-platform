@@ -12,6 +12,7 @@
 "use client";
 
 import { BrandAvatar } from "@/components/chat/BrandAvatar";
+import { useToolLabels } from "@/hooks/useToolLabels";
 
 interface TypingIndicatorProps {
   /**
@@ -20,41 +21,46 @@ interface TypingIndicatorProps {
    * stays canonical. Null when no STAGE_PROGRESS has fired this run.
    */
   stageLabel?: string | null;
+  /** Raw name of the running tool — shown as its friendly label (CLAUDE.md #9). */
   activeToolName?: string | null;
 }
 
 export function TypingIndicator({ stageLabel, activeToolName }: TypingIndicatorProps) {
   const labelText = stageLabel ?? null;
-  const toolText = !labelText && activeToolName ? activeToolName : null;
+  const labelFor = useToolLabels();
+  const toolText = !labelText && activeToolName ? labelFor(activeToolName) : null;
 
   return (
-    <div className="flex items-start gap-3 py-1">
-      <BrandAvatar />
-      <div className="flex items-center gap-2 rounded-[2px_8px_8px_8px] border border-border bg-[hsl(0,0%,98%)] px-3 py-2.5">
+    // Unboxed, like the assistant message it stands in for; avatar on desktop only.
+    <div className="flex items-start gap-3" role="status" aria-live="polite">
+      <div className="hidden shrink-0 md:block">
+        <BrandAvatar />
+      </div>
+      <div className="flex min-h-7 items-center gap-2">
         {labelText ? (
           <>
-            <span className="text-xs text-muted-foreground">{labelText}</span>
-            <span className="h-1.5 w-1.5 rounded-full bg-orange-400 animate-pulse" />
+            <span className="text-sm text-muted-foreground">{labelText}</span>
+            <span className="h-1.5 w-1.5 rounded-full bg-primary motion-safe:animate-pulse" />
           </>
         ) : toolText ? (
           <>
-            <span className="text-xs text-muted-foreground">
-              Using <span className="font-medium text-orange-600">{toolText}</span>…
+            <span className="text-sm text-muted-foreground">
+              Using <span className="font-medium text-foreground">{toolText}</span>…
             </span>
-            <span className="h-1.5 w-1.5 rounded-full bg-orange-400 animate-pulse" />
+            <span className="h-1.5 w-1.5 rounded-full bg-primary motion-safe:animate-pulse" />
           </>
         ) : (
           <>
             <span
-              className="h-1.5 w-1.5 rounded-full bg-orange-400 animate-bounce"
+              className="h-1.5 w-1.5 rounded-full bg-primary motion-safe:animate-bounce"
               style={{ animationDelay: "0ms" }}
             />
             <span
-              className="h-1.5 w-1.5 rounded-full bg-orange-400 animate-bounce"
+              className="h-1.5 w-1.5 rounded-full bg-primary motion-safe:animate-bounce"
               style={{ animationDelay: "150ms" }}
             />
             <span
-              className="h-1.5 w-1.5 rounded-full bg-orange-400 animate-bounce"
+              className="h-1.5 w-1.5 rounded-full bg-primary motion-safe:animate-bounce"
               style={{ animationDelay: "300ms" }}
             />
           </>

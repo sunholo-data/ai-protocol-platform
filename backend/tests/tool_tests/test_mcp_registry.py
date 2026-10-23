@@ -105,9 +105,11 @@ class TestResolveMcpTools:
             "tools.mcp.registry.get_mcp_tools_with_status",
             return_value=([fake_a, fake_b], []),
         ) as mock:
-            result = resolve_mcp_tools({"mcp": {"servers": ["srv-1", "srv-2"]}})
+            result = resolve_mcp_tools({"mcp": {"servers": ["srv-1", "srv-2"]}}, "alice@example.com", "example.com")
 
-        mock.assert_called_once_with(["srv-1", "srv-2"])
+        # The identity rides along: a per-user MCP server gates on email and
+        # domain, and ADK's user_id is the Firebase UID, which matches nothing.
+        mock.assert_called_once_with(["srv-1", "srv-2"], "alice@example.com", "example.com")
         assert result == [fake_a, fake_b]
 
     def test_g42_raises_when_some_declared_servers_dont_resolve(self):
@@ -354,7 +356,7 @@ class TestToolboxSidecarWiring:
         assert toolset._connection_params.url == TOOLBOX_URL
 
     def test_ppa_skill_declares_the_toolbox_server(self):
-        # The one-ppa-expert SKILL.md must name toolbox under
+        # The demo-ppa-expert SKILL.md must name toolbox under
         # toolConfigs.mcp.servers — the loud-fail (G42) contract depends on it.
         # toolConfigs is nested under `metadata:` in this skill, so find it
         # structurally rather than assuming a fixed depth.
@@ -362,12 +364,12 @@ class TestToolboxSidecarWiring:
 
         import yaml
 
-        skill_md = Path(__file__).resolve().parents[2] / "skills" / "templates" / "one-ppa-expert" / "SKILL.md"
+        skill_md = Path(__file__).resolve().parents[2] / "skills" / "templates" / "demo-ppa-expert" / "SKILL.md"
         if not skill_md.is_file():
             # Customer skill templates are excluded from the public template.
             # Self-skip rather than FileNotFoundError (the pattern every
             # customer-touching test here follows).
-            pytest.skip("one-ppa-expert template absent (template fork)")
+            pytest.skip("demo-ppa-expert template absent (template fork)")
         # Frontmatter is the block between the first two `---` fences.
         front = skill_md.read_text().split("---", 2)[1]
         doc = yaml.safe_load(front)
@@ -384,7 +386,7 @@ class TestToolboxSidecarWiring:
 
         tool_configs = _find_tool_configs(doc) or {}
         servers = ((tool_configs.get("mcp") or {}).get("servers")) or []
-        assert "toolbox" in servers, "one-ppa-expert must declare the toolbox MCP server"
+        assert "toolbox" in servers, "demo-ppa-expert must declare the toolbox MCP server"
 
     def test_resolve_mcp_tools_builds_the_ppa_skill_toolbox_server(self):
         # End-to-end through the real resolver: the skill's mcp block resolves to

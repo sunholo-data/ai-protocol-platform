@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults>
+    <w:rPrDefault>
+      <w:rPr>
+        <w:rFonts w:ascii="Courier New" w:hAnsi="Courier New" w:cs="Courier New"/>
+        <w:color w:val="4B0082"/>
+        <w:sz w:val="24"/>
+        <w:szCs w:val="24"/>
+      </w:rPr>
+    </w:rPrDefault>
+    <w:pPrDefault>
+      <w:pPr><w:spacing w:after="160" w:line="300" w:lineRule="auto"/></w:pPr>
+    </w:pPrDefault>
+  </w:docDefaults>
+
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+    <w:name w:val="Normal"/>
+    <w:qFormat/>
+    <w:rPr>
+      <w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>
+      <w:color w:val="4B0082"/>
+      <w:sz w:val="24"/>
+    </w:rPr>
+  </w:style>
+
+  <w:style w:type="paragraph" w:styleId="Title">
+    <w:name w:val="Title"/>
+    <w:basedOn w:val="Normal"/>
+    <w:qFormat/>
+    <w:pPr>
+      <w:shd w:val="clear" w:color="auto" w:fill="FF00AA"/>
+      <w:spacing w:before="240" w:after="240"/>
+      <w:jc w:val="center"/>
+    </w:pPr>
+    <w:rPr>
+      <w:rFonts w:ascii="Arial Black" w:hAnsi="Arial Black"/>
+      <w:b/><w:caps/>
+      <w:color w:val="FFFFFF"/>
+      <w:sz w:val="72"/>
+      <w:spacing w:val="60"/>
+    </w:rPr>
+  </w:style>
+
+  <w:style w:type="paragraph" w:styleId="Heading1">
+    <w:name w:val="heading 1"/>
+    <w:basedOn w:val="Normal"/>
+    <w:qFormat/>
+    <w:pPr>
+      <w:outlineLvl w:val="0"/>
+      <w:shd w:val="clear" w:color="auto" w:fill="FF00AA"/>
+      <w:spacing w:before="360" w:after="180"/>
+    </w:pPr>
+    <w:rPr>
+      <w:rFonts w:ascii="Arial Black" w:hAnsi="Arial Black"/>
+      <w:b/><w:caps/>
+      <w:color w:val="FFFFFF"/>
+      <w:sz w:val="56"/>
+      <w:spacing w:val="40"/>
+    </w:rPr>
+  </w:style>
+
+  <w:style w:type="paragraph" w:styleId="Heading2">
+    <w:name w:val="heading 2"/>
+    <w:basedOn w:val="Normal"/>
+    <w:qFormat/>
+    <w:pPr>
+      <w:outlineLvl w:val="1"/>
+      <w:pBdr><w:bottom w:val="single" w:sz="36" w:space="2" w:color="FF6600"/></w:pBdr>
+      <w:spacing w:before="280" w:after="140"/>
+    </w:pPr>
+    <w:rPr>
+      <w:rFonts w:ascii="Arial Black" w:hAnsi="Arial Black"/>
+      <w:b/>
+      <w:color w:val="FF6600"/>
+      <w:sz w:val="36"/>
+    </w:rPr>
+  </w:style>
+
+  <w:style w:type="paragraph" w:styleId="Heading3">
+    <w:name w:val="heading 3"/>
+    <w:basedOn w:val="Normal"/>
+    <w:qFormat/>
+    <w:pPr><w:outlineLvl w:val="2"/><w:spacing w:before="220" w:after="110"/></w:pPr>
+    <w:rPr>
+      <w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>
+      <w:b/><w:u w:val="double" w:color="00A0A0"/>
+      <w:color w:val="008080"/>
+      <w:sz w:val="30"/>
+    </w:rPr>
+  </w:style>
+
+  <w:style w:type="paragraph" w:styleId="Header">
+    <w:name w:val="header"/>
+    <w:basedOn w:val="Normal"/>
+    <w:pPr><w:jc w:val="center"/><w:shd w:val="clear" w:color="auto" w:fill="FFDD00"/></w:pPr>
+    <w:rPr><w:rFonts w:ascii="Arial Black" w:hAnsi="Arial Black"/><w:b/><w:caps/><w:color w:val="D40000"/><w:sz w:val="32"/></w:rPr>
+  </w:style>
+
+  <w:style w:type="paragraph" w:styleId="Footer">
+    <w:name w:val="footer"/>
+    <w:basedOn w:val="Normal"/>
+    <w:pPr><w:jc w:val="center"/><w:shd w:val="clear" w:color="auto" w:fill="FFDD00"/></w:pPr>
+    <w:rPr><w:rFonts w:ascii="Arial Black" w:hAnsi="Arial Black"/><w:b/><w:color w:val="D40000"/><w:sz w:val="24"/></w:rPr>
+  </w:style>
+
+  <w:style w:type="table" w:default="1" w:styleId="Table">
+    <w:name w:val="Table"/>
+    <w:tblPr>
+      <w:tblBorders>
+        <w:top w:val="single" w:sz="24" w:space="0" w:color="FF00AA"/>
+        <w:left w:val="single" w:sz="24" w:space="0" w:color="FF00AA"/>
+        <w:bottom w:val="single" w:sz="24" w:space="0" w:color="FF00AA"/>
+        <w:right w:val="single" w:sz="24" w:space="0" w:color="FF00AA"/>
+        <w:insideH w:val="single" w:sz="12" w:space="0" w:color="FF6600"/>
+        <w:insideV w:val="single" w:sz="12" w:space="0" w:color="FF6600"/>
+      </w:tblBorders>
+    </w:tblPr>
+  </w:style>
+
+  <w:style w:type="table" w:styleId="LoudGrid">
+    <w:name w:val="Loud Grid"/>
+    <w:qFormat/>
+    <w:tblPr>
+      <w:tblBorders>
+        <w:top w:val="double" w:sz="36" w:space="0" w:color="00A0A0"/>
+        <w:left w:val="double" w:sz="36" w:space="0" w:color="00A0A0"/>
+        <w:bottom w:val="double" w:sz="36" w:space="0" w:color="00A0A0"/>
+        <w:right w:val="double" w:sz="36" w:space="0" w:color="00A0A0"/>
+        <w:insideH w:val="single" w:sz="18" w:space="0" w:color="FF00AA"/>
+        <w:insideV w:val="single" w:sz="18" w:space="0" w:color="FF00AA"/>
+      </w:tblBorders>
+      <w:shd w:val="clear" w:color="auto" w:fill="FFF2CC"/>
+    </w:tblPr>
+  </w:style>
+</w:styles>

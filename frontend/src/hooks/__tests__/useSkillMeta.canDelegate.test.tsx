@@ -32,7 +32,7 @@ beforeEach(() => {
 });
 
 describe("useSkillMeta — canDelegate", () => {
-  it("true for a curated front door (one-assistant shape)", async () => {
+  it("true for a curated front door (demo-assistant shape)", async () => {
     expect(
       await canDelegateFor({
         skillMetadata: {
@@ -40,23 +40,23 @@ describe("useSkillMeta — canDelegate", () => {
             enabled: true,
             maxDepth: 2,
             discoverJobs: true,
-            allow: [{ skill: "one-ppa-expert", floor: "auto" }],
+            allow: [{ skill: "demo-ppa-expert", floor: "auto" }],
           },
         },
       }),
     ).toBe(true);
   });
 
-  it("true for a specialist that CAN hand off (one-ppa-expert shape)", async () => {
+  it("true for a specialist that CAN hand off (demo-ppa-expert shape)", async () => {
     // The rule follows the reason, not the skill name: this one delegates to
-    // one-obligation-analysis, so its tiles lead somewhere.
+    // demo-obligation-analysis, so its tiles lead somewhere.
     expect(
       await canDelegateFor({
         skillMetadata: {
           delegation: {
             enabled: true,
             maxDepth: 1,
-            allow: [{ skill: "one-obligation-analysis", floor: "confirm" }],
+            allow: [{ skill: "demo-obligation-analysis", floor: "confirm" }],
           },
         },
       }),
@@ -83,10 +83,10 @@ describe("useSkillMeta — canDelegate", () => {
   });
 
   it("true for the DEPRECATED subSkills form, which still delegates", async () => {
-    expect(await canDelegateFor({ skillMetadata: { subSkills: ["one-ppa-expert"] } })).toBe(true);
+    expect(await canDelegateFor({ skillMetadata: { subSkills: ["demo-ppa-expert"] } })).toBe(true);
   });
 
-  it("false for a job skill with no delegation at all (one-bigquery shape)", async () => {
+  it("false for a job skill with no delegation at all (demo-bigquery shape)", async () => {
     expect(await canDelegateFor({ skillMetadata: { tools: ["bq_query"] } })).toBe(false);
   });
 

@@ -1,12 +1,12 @@
 // PPA-COMPARE-LAUNCHER M2 — launcher gating tests.
 // v6.23.0 WORKSPACE-HOME-PERSISTENCE: the artifact/workspace-surface gates were
 // deleted, so the "hides once results exist" cases became their inverse — they
-// are now the regression guards for Dana's most-repeated UAT complaint.
+// are now the regression guards for a tester's most-repeated UAT complaint.
 
 import { describe, expect, it } from "vitest";
 import { shouldShowCompareLauncher } from "@/lib/compareLauncher";
 
-/** A launcher-capable skill (one-doc-compare shape). */
+/** A launcher-capable skill (demo-doc-compare shape). */
 const compareSkill = {
   optedIn: true,
   allowCompare: true,
@@ -33,7 +33,7 @@ describe("shouldShowCompareLauncher", () => {
   });
 
   it("hides for an opted-in skill with NO launcher-capable tool (elicitation-only front door)", () => {
-    // 2026-07-21 regression: 44c426c granted the ONE front door
+    // 2026-07-21 regression: 44c426c granted the tenant front door
     // allow_action_triggered_runs purely for elicitation-form submits (gate 8).
     // The door owns neither compare_ppa_contracts nor map_ppa_obligations, so
     // the launcher must NOT hijack its Workspace Home — the first-look prompt
@@ -48,7 +48,7 @@ describe("shouldShowCompareLauncher", () => {
   });
 
   it("STILL shows once result artifacts exist — the v6.23.0 regression guard", () => {
-    // Dana, 2026-08-06 UAT (raised 4×): "In the same chat, if you want to keep
+    // a tester, 2026-08-06 UAT (raised 4×): "In the same chat, if you want to keep
     // the same conversation but use a new skill, you cannot do that in the
     // Workspace anymore." Results no longer evict the launcher; they open their
     // own Result tab beside a permanent Home. Visibility must therefore be a

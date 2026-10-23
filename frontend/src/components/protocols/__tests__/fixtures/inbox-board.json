@@ -1,0 +1,499 @@
+[
+  {
+    "version": "v0.9",
+    "createSurface": {
+      "surfaceId": "inbox_board",
+      "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json"
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateComponents": {
+      "surfaceId": "inbox_board",
+      "components": [
+        {
+          "id": "t-1",
+          "component": "Text",
+          "text": "AILANG messages",
+          "variant": "h2"
+        },
+        {
+          "id": "t-2",
+          "component": "Text",
+          "text": "Mailbox read/unread is separate from work progress. Open a message for its report and related chat."
+        },
+        {
+          "id": "ib-h-3",
+          "component": "Text",
+          "text": "worker \u2014 1 shown",
+          "variant": "h3"
+        },
+        {
+          "id": "t-4",
+          "component": "Text",
+          "text": "Showing unread messages \u00b7 worker"
+        },
+        {
+          "id": "ib-hint-5",
+          "component": "Text",
+          "text": "Select messages for bulk actions. Open shows the full message without marking it read."
+        },
+        {
+          "id": "ib-search-6",
+          "component": "TextField",
+          "value": {
+            "path": "/query"
+          },
+          "label": "Search loaded messages"
+        },
+        {
+          "id": "cp-7",
+          "component": "ChoicePicker",
+          "value": {
+            "path": "/inboxFilter"
+          },
+          "options": [
+            {
+              "label": "All inboxes",
+              "value": "all"
+            },
+            {
+              "label": "worker",
+              "value": "worker"
+            }
+          ],
+          "variant": "mutuallyExclusive",
+          "label": "Inbox"
+        },
+        {
+          "id": "cp-8",
+          "component": "ChoicePicker",
+          "value": {
+            "path": "/statusFilter"
+          },
+          "options": [
+            {
+              "label": "All states",
+              "value": "all"
+            },
+            {
+              "label": "Unread",
+              "value": "unread"
+            },
+            {
+              "label": "Read",
+              "value": "read"
+            }
+          ],
+          "variant": "mutuallyExclusive",
+          "label": "Mailbox state"
+        },
+        {
+          "id": "btn-label-9",
+          "component": "Text",
+          "text": "Apply filters"
+        },
+        {
+          "id": "btn-10",
+          "component": "Button",
+          "child": "btn-label-9",
+          "action": {
+            "event": {
+              "name": "direct:filter",
+              "context": {
+                "query": {
+                  "path": "/query"
+                },
+                "inbox": {
+                  "path": "/inboxFilter"
+                },
+                "status": {
+                  "path": "/statusFilter"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "ib-filters-11",
+          "component": "Row",
+          "children": [
+            "ib-search-6",
+            "cp-7",
+            "cp-8",
+            "btn-10"
+          ]
+        },
+        {
+          "id": "ib-visible",
+          "component": "Text",
+          "text": "1 loaded messages"
+        },
+        {
+          "id": "btn-label-13",
+          "component": "Text",
+          "text": "Select visible"
+        },
+        {
+          "id": "btn-14",
+          "component": "Button",
+          "child": "btn-label-13",
+          "action": {
+            "event": {
+              "name": "direct:select_visible"
+            }
+          }
+        },
+        {
+          "id": "btn-label-15",
+          "component": "Text",
+          "text": "Clear selection"
+        },
+        {
+          "id": "btn-16",
+          "component": "Button",
+          "child": "btn-label-15",
+          "action": {
+            "event": {
+              "name": "direct:clear_selection"
+            }
+          }
+        },
+        {
+          "id": "ib-read-label-17",
+          "component": "Text",
+          "text": "Mark read"
+        },
+        {
+          "id": "ib-read-18",
+          "component": "Button",
+          "child": "ib-read-label-17",
+          "action": {
+            "event": {
+              "name": "direct:mark_read",
+              "context": {
+                "selected": {
+                  "path": "/selected"
+                }
+              }
+            }
+          },
+          "variant": "primary"
+        },
+        {
+          "id": "ib-unread-label-19",
+          "component": "Text",
+          "text": "Mark unread"
+        },
+        {
+          "id": "ib-unread-20",
+          "component": "Button",
+          "child": "ib-unread-label-19",
+          "action": {
+            "event": {
+              "name": "direct:mark_unread",
+              "context": {
+                "selected": {
+                  "path": "/selected"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "ib-tools-21",
+          "component": "Row",
+          "children": [
+            "btn-14",
+            "btn-16",
+            "ib-read-18",
+            "ib-unread-20"
+          ]
+        },
+        {
+          "id": "ib-ask-label-22",
+          "component": "Text",
+          "text": "Summarise these"
+        },
+        {
+          "id": "ib-ask-23",
+          "component": "Button",
+          "child": "ib-ask-label-22",
+          "action": {
+            "event": {
+              "name": "chat:send",
+              "context": {
+                "prompt": "Summarise the messages I've ticked on the Inbox board.",
+                "requireSelection": true,
+                "selected": {
+                  "path": "/selected"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "ib-ask-label-24",
+          "component": "Text",
+          "text": "Draft replies"
+        },
+        {
+          "id": "ib-ask-25",
+          "component": "Button",
+          "child": "ib-ask-label-24",
+          "action": {
+            "event": {
+              "name": "chat:send",
+              "context": {
+                "prompt": "Draft replies to the messages I've ticked on the Inbox board.",
+                "requireSelection": true,
+                "selected": {
+                  "path": "/selected"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "ib-ask-label-26",
+          "component": "Text",
+          "text": "Send to\u2026"
+        },
+        {
+          "id": "ib-ask-27",
+          "component": "Button",
+          "child": "ib-ask-label-26",
+          "action": {
+            "event": {
+              "name": "chat:send",
+              "context": {
+                "prompt": "Help me pass the messages I've ticked on the Inbox board on to another inbox.",
+                "requireSelection": true,
+                "selected": {
+                  "path": "/selected"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "ib-asks-28",
+          "component": "Row",
+          "children": [
+            "ib-ask-23",
+            "ib-ask-25",
+            "ib-ask-27"
+          ]
+        },
+        {
+          "id": "ib-g-0",
+          "component": "Text",
+          "text": "Messages to worker (1)"
+        },
+        {
+          "id": "ib-body-m1",
+          "component": "Text",
+          "text": "Loading message\u2026",
+          "variant": "body"
+        },
+        {
+          "id": "t-31",
+          "component": "Text",
+          "text": "#1  Review plan",
+          "variant": "h2"
+        },
+        {
+          "id": "t-32",
+          "component": "Text",
+          "text": "From ai-platform \u00b7 To worker"
+        },
+        {
+          "id": "t-33",
+          "component": "Text",
+          "text": "Message type: notification \u00b7 Work status: not reported"
+        },
+        {
+          "id": "btn-label-34",
+          "component": "Text",
+          "text": "Open related thread"
+        },
+        {
+          "id": "btn-35",
+          "component": "Button",
+          "child": "btn-label-34",
+          "action": {
+            "functionCall": {
+              "call": "openUrl",
+              "args": {
+                "url": "/chat/web-researcher?session=thread-worker-abcdef"
+              }
+            }
+          }
+        },
+        {
+          "id": "btn-label-36",
+          "component": "Text",
+          "text": "Open skill in a new chat"
+        },
+        {
+          "id": "btn-37",
+          "component": "Button",
+          "child": "btn-label-36",
+          "action": {
+            "functionCall": {
+              "call": "openUrl",
+              "args": {
+                "url": "/chat/web-researcher"
+              }
+            }
+          }
+        },
+        {
+          "id": "row-38",
+          "component": "Row",
+          "children": [
+            "btn-35",
+            "btn-37"
+          ]
+        },
+        {
+          "id": "col-39",
+          "component": "Column",
+          "children": [
+            "t-31",
+            "t-32",
+            "t-33",
+            "ib-body-m1",
+            "row-38"
+          ]
+        },
+        {
+          "id": "ib-open-label-40",
+          "component": "Text",
+          "text": "Open"
+        },
+        {
+          "id": "ib-open-41",
+          "component": "Button",
+          "child": "ib-open-label-40",
+          "action": {
+            "event": {
+              "name": "direct:open",
+              "context": {
+                "ref": "#1"
+              }
+            }
+          }
+        },
+        {
+          "id": "ib-modal-m1",
+          "component": "Modal",
+          "trigger": "ib-open-41",
+          "content": "col-39"
+        },
+        {
+          "id": "ib-cb-42",
+          "component": "CheckBox",
+          "label": "#1  Review plan",
+          "value": {
+            "path": "/selected/m1"
+          }
+        },
+        {
+          "id": "ib-st-m1",
+          "component": "Text",
+          "text": "Mailbox: unread"
+        },
+        {
+          "id": "ib-top-44",
+          "component": "Row",
+          "children": [
+            "ib-cb-42",
+            "ib-st-m1",
+            "ib-modal-m1"
+          ],
+          "justify": "spaceBetween"
+        },
+        {
+          "id": "ib-meta-m1",
+          "component": "Text",
+          "text": "ai-platform \u00b7 Plan ready for review."
+        },
+        {
+          "id": "ib-col-46",
+          "component": "Column",
+          "children": [
+            "ib-top-44",
+            "ib-meta-m1"
+          ]
+        },
+        {
+          "id": "ib-card-m1",
+          "component": "Card",
+          "child": "ib-col-46"
+        },
+        {
+          "id": "ib-list-0",
+          "component": "Column",
+          "children": [
+            "ib-card-m1"
+          ]
+        },
+        {
+          "id": "root",
+          "component": "Column",
+          "children": [
+            "t-1",
+            "t-2",
+            "ib-h-3",
+            "t-4",
+            "ib-hint-5",
+            "ib-filters-11",
+            "ib-visible",
+            "ib-tools-21",
+            "ib-asks-28",
+            "ib-g-0",
+            "ib-list-0"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateDataModel": {
+      "surfaceId": "inbox_board",
+      "value": {
+        "kind": "inbox_board",
+        "heading": "worker \u2014 1 shown",
+        "items": [
+          {
+            "key": "m1",
+            "ref": "#1",
+            "title": "Review plan",
+            "inbox": "worker",
+            "from": "ai-platform",
+            "age": "",
+            "status": "unread",
+            "group": 0,
+            "row": "ib-card-m1",
+            "excerpt": "**Plan** ready for review."
+          }
+        ],
+        "selected": {
+          "m1": false
+        },
+        "visible": [
+          "m1"
+        ],
+        "query": "",
+        "inboxFilter": [
+          "all"
+        ],
+        "statusFilter": [
+          "all"
+        ]
+      }
+    }
+  }
+]

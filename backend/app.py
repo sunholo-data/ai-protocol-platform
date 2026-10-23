@@ -85,7 +85,7 @@ app = App(
     # computed for a 1M-token Gemini window, whatever model it actually ran. A
     # Claude skill on a ~200K window got the 1M settings. `get_compaction_config`
     # was correct and had never once been applied — the bug was here, at its one
-    # call site. (2026-08-06 ONE UAT; see
+    # call site. (2026-08-06 acceptance testing; see
     # docs/design/v6.23.0/conversation-context-fidelity.md.)
     #
     # `default_model()` is deliberately NOT `gemini_api_name_for(...)`: the

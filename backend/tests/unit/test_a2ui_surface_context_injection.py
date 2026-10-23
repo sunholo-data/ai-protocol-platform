@@ -310,7 +310,7 @@ def test_long_strings_are_truncated_in_the_prompt_block():
     out = render_instruction_with_a2ui_surface_context(BASE, state)
     assert snippet not in out
     assert "... (truncated)" in out
-    assert len(out) < len(BASE) + 2000
+    assert len(out) < len(BASE) + 2500  # the fixed block text + one 400-char capped value
 
 
 def test_truncation_preserves_structure_and_short_values():
@@ -321,3 +321,34 @@ def test_truncation_preserves_structure_and_short_values():
     assert out["a"] == "short"
     assert out["b"][0].endswith("... (truncated)")
     assert out["b"][1] == {"c": 7, "d": None}
+
+
+def test_selection_is_named_by_ref_and_title_never_by_key():
+    state = {
+        "a2ui_surface_state": {
+            "inbox_board": {
+                "dataModel": {
+                    "items": [
+                        {"key": "m1", "ref": "#1", "title": "Done"},
+                        {"key": "m3", "ref": "#3", "title": "Lane down"},
+                    ],
+                    "selected": {"m1": False, "m3": True, "m9": True},
+                }
+            }
+        }
+    }
+    out = render_instruction_with_a2ui_surface_context("BASE", state)
+    assert "Selected now (2): #3 “Lane down”; 1 more not on the current list" in out
+    assert "mean exactly that" in out
+
+
+def test_empty_selection_says_so_and_surfaces_without_one_get_no_line():
+    state = {
+        "a2ui_surface_state": {
+            "b": {"dataModel": {"items": [], "selected": {"m1": False}}},
+            "c": {"dataModel": {"x": 1}},
+        }
+    }
+    out = render_instruction_with_a2ui_surface_context("BASE", state)
+    assert "## b\nSelected now: nothing ticked." in out
+    assert "## c\n{" in out

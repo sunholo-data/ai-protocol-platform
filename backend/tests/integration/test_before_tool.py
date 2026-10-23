@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from adk.callbacks import make_permission_enforcer
-from auth.permissions import COLLECTION, ToolPermissionDenied, clear_cache
+from auth.permissions import COLLECTION, clear_cache
 
 
 @pytest.fixture(autouse=True)
@@ -56,21 +56,29 @@ def test_enforcer_allows_permitted_tool():
 
 @pytest.mark.integration
 def test_enforcer_blocks_denied_tool():
-    """User's wildcard grants everything except admin_tool → raises."""
+    """User's wildcard grants everything except admin_tool → denial as a RESULT.
+
+    Not an exception: a raise becomes a RUN_ERROR that ends the turn with no
+    reason shown (seen live on prod 2026-09-10). The short-circuit dict is
+    what the model relays.
+    """
     docs = {"*": {"type": "wildcard", "tools": ["*"], "denied": ["admin_tool"]}}
     enforcer = make_permission_enforcer("owner@yourcompany.com", "yourcompany.com")
     with _mock_docs(docs):
-        with pytest.raises(ToolPermissionDenied, match="admin_tool"):
-            enforcer(_mock_tool("admin_tool"), {}, _mock_tool_context())
+        result = enforcer(_mock_tool("admin_tool"), {}, _mock_tool_context())
+    assert result is not None and result["permitted"] is False
+    assert "admin_tool" in result["error"]
+    assert "administrator" in result["hint"]
 
 
 @pytest.mark.integration
 def test_enforcer_blocks_when_no_permission():
-    """No permission docs at all → raises."""
+    """No permission docs at all → denial as a result naming the caller."""
     enforcer = make_permission_enforcer("stranger@example.com", "example.com")
     with _mock_docs({}):
-        with pytest.raises(ToolPermissionDenied, match=r"stranger@example\.com"):
-            enforcer(_mock_tool("any_tool"), {}, _mock_tool_context())
+        result = enforcer(_mock_tool("any_tool"), {}, _mock_tool_context())
+    assert result is not None and result["permitted"] is False
+    assert "stranger@example.com" in result["error"]
 
 
 @pytest.mark.integration

@@ -101,13 +101,13 @@ def test_delegation_drops_inaccessible_delegate():
 
 def test_delegation_tagged_delegate_requires_matching_tag():
     parent = _skill(skill_id="parent", delegation=_deleg(["child"]))
-    child = _skill(skill_id="child", access=AccessControl(type="tagged", tags=["ONE"]))
-    # user without the ONE tag -> dropped
+    child = _skill(skill_id="child", access=AccessControl(type="tagged", tags=["example-team"]))
+    # user without the example-team tag -> dropped
     with patch("adk.agent.get_skill", return_value=child):
         assert create_agent(parent, _user(), access_context=_ctx()).sub_agents == []
-    # user WITH the ONE tag -> wired
+    # user WITH the example-team tag -> wired
     with patch("adk.agent.get_skill", return_value=child):
-        agent = create_agent(parent, _user(), access_context=_ctx(tags=["ONE"]))
+        agent = create_agent(parent, _user(), access_context=_ctx(tags=["example-team"]))
     assert len(agent.sub_agents) == 1
 
 

@@ -34,7 +34,7 @@ export interface DocCompareShellProps {
  * panels were retired. This shell makes the workbench fill the viewport and
  * demotes chat to a right-edge drawer, instead of the chat-primary column +
  * sidebar of ChatShell. (Production standardised on ChatShell for
- * one-doc-compare; this shell is retained for the doc-compare shell mode.)
+ * demo-doc-compare; this shell is retained for the doc-compare shell mode.)
  *
  * Auth is gated upstream in the chat route (SignInRequired) before this shell
  * ever renders, so `user` is always present here.

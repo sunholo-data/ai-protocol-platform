@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p>
+    <w:pPr><w:pStyle w:val="Footer"/></w:pPr>
+    <w:r><w:t xml:space="preserve">LOUD TEMPLATE FOOTER - if you cannot see this banner, the template did not carry</w:t></w:r>
+  </w:p>
+</w:ftr>

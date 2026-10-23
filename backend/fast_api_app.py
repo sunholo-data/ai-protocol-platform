@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from google.adk.cli.fast_api import get_fast_api_app
 
 from adk.session import get_artifact_service, get_artifact_service_uri, get_memory_service_uri, get_session_service_uri
+from auth.tailnet_auth import MACHINE_AUTH_MODE, assert_safe_tailnet_mode
 from config.gcp import check_startup_project, resolve_gcp_credentials
 from config.local_mode import (
     assert_safe_local_mode,
@@ -30,6 +31,7 @@ from observability.telemetry import setup_telemetry
 # If LOCAL_MODE=1 is paired with K_SERVICE / GAE_ENV / KUBERNETES_SERVICE_HOST
 # the auth-bypass stub would be active in a deployed context — refuse to start.
 assert_safe_local_mode()
+assert_safe_tailnet_mode()
 warn_on_session_artifact_pairing()
 
 if is_local_mode():
@@ -234,7 +236,7 @@ app.router.routes.insert(
 # `/api/proxy/apps/aitana_platform/users/{uid}/sessions` → 200.
 #
 # What that exposed: a session's full event list (every message, tool call and
-# extracted clause — i.e. ONE's contract content, exactly what CLAUDE.md's
+# extracted clause — i.e. the tenant's contract content, exactly what CLAUDE.md's
 # security rule governs), its artifacts (parsed documents), DELETE on a
 # session, PATCH on user memory, and /run + /run_sse, which EXECUTE the agent
 # and bill for it. A Firebase uid is not a secret — it appears in URLs, logs
@@ -254,8 +256,8 @@ app.router.routes.insert(
 # Guarded by tests/api_tests/test_adk_native_route_guard.py, which walks the
 # LIVE route table so an ADK-added route that escapes the prefixes fails CI
 # rather than shipping open.
-_ADK_NATIVE_PREFIXES = ("/apps/", "/debug/", "/builder/", "/dev-ui", "/dev/")
-_ADK_NATIVE_EXACT = frozenset({"/list-apps", "/run", "/run_sse", "/run_live"})
+_ADK_NATIVE_PREFIXES = ("/apps/", "/debug/", "/builder/", "/dev-ui", "/dev/", "/agent-identity/")
+_ADK_NATIVE_EXACT = frozenset({"/list-apps", "/run", "/run_sse", "/run_live", "/config/telemetry"})
 
 
 def _is_adk_native_path(path: str) -> bool:
@@ -325,6 +327,7 @@ async def local_mode_status():
 
 # --- Custom endpoints (beyond ADK's built-in agent routes) ---
 
+import asyncio  # noqa: E402
 import json  # noqa: E402
 from contextlib import AsyncExitStack, asynccontextmanager  # noqa: E402
 
@@ -333,6 +336,7 @@ from fastapi.responses import StreamingResponse  # noqa: E402
 from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
 from adk.stream_invariants import redact_privileged_results, session_is_lower_trust  # noqa: E402
+from adk.tools import McpServerResolutionError  # noqa: E402
 from admin.access_routes import router as admin_access_router  # noqa: E402
 from admin.analytics_routes import router as admin_analytics_router  # noqa: E402
 from admin.audit_routes import router as admin_audit_router  # noqa: E402
@@ -344,6 +348,7 @@ from admin.group_tags_routes import members_router as admin_group_members_router
 from admin.group_tags_routes import router as admin_group_tags_router  # noqa: E402
 from admin.platform_config_routes import router as admin_platform_config_router  # noqa: E402
 from admin.prewarm_routes import router as admin_prewarm_router  # noqa: E402
+from admin.residents_routes import router as admin_residents_router  # noqa: E402
 from admin.routes import router as admin_router  # noqa: E402
 from admin.tenants import router as admin_tenants_router  # noqa: E402
 from admin.tool_permissions_routes import router as admin_tool_permissions_router  # noqa: E402
@@ -353,14 +358,20 @@ from auth.group_routes import router as group_auth_router  # noqa: E402
 from auth.routes import router as auth_router  # noqa: E402
 from buckets.routes import router as buckets_router  # noqa: E402
 from internal_tasks.recompact_routes import router as internal_tasks_recompact_router  # noqa: E402
+from internal_tasks.resident_routes import router as internal_tasks_resident_router  # noqa: E402
+from notifications.routes import router as push_router  # noqa: E402
+from observability.client_logs import router as client_logs_router  # noqa: E402
+from projects.routes import router as projects_router  # noqa: E402
 from protocols.a2a import router as a2a_router  # noqa: E402
 from protocols.a2ui_surface_action_routes import router as a2ui_surface_action_router  # noqa: E402
 from protocols.a2ui_surface_action_run_routes import router as a2ui_surface_action_run_router  # noqa: E402
 from protocols.a2ui_surface_data_routes import router as a2ui_surface_data_router  # noqa: E402
+from protocols.a2ui_surface_direct_routes import router as a2ui_surface_direct_router  # noqa: E402
 from protocols.iframe_context_routes import router as iframe_context_router  # noqa: E402
 from protocols.mcp_proxy import router as mcp_proxy_router  # noqa: E402
-from protocols.mcp_server import get_mcp_asgi_app  # noqa: E402
+from protocols.mcp_server import McpExactPath, get_mcp_asgi_app  # noqa: E402
 from protocols.mcp_server import mcp as mcp_server  # noqa: E402
+from protocols.mcp_token_routes import router as mcp_token_router  # noqa: E402
 from protocols.models_route import router as models_router  # noqa: E402
 from protocols.session_bootstrap_routes import router as session_bootstrap_router  # noqa: E402
 from protocols.sessions_route import router as sessions_router  # noqa: E402
@@ -368,16 +379,26 @@ from protocols.tools_route import router as tools_router  # noqa: E402
 from protocols.voice_routes import router as voice_router  # noqa: E402
 from skills.routes import router as skills_router  # noqa: E402
 from skills.skill_processor import SkillNotFoundError, process_skill_request  # noqa: E402
+from tools.browser_artefact_routes import router as browser_artefact_router  # noqa: E402
+from tools.documents.generate import router as documents_generate_router  # noqa: E402
 from tools.documents.import_by_reference import router as documents_import_router  # noqa: E402
 from tools.documents.rag_routes import router as rag_corpus_router  # noqa: E402
 from tools.documents.routes import router as doc_folders_router  # noqa: E402
 from tools.documents.upload import router as documents_router  # noqa: E402
 from tools.media_utils import router as media_router  # noqa: E402
+from tools.visual_evidence import router as visual_evidence_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(group_auth_router)
 app.include_router(skills_router)
 app.include_router(buckets_router)
+# Browser screenshots/PDFs: the ONLY path by which those bytes leave. Never a
+# signed or public URL — see tools/browser_artefact_routes.py.
+app.include_router(browser_artefact_router)
+app.include_router(visual_evidence_router)
+# Browser telemetry ingest (FRONTEND-OBS M2): the client tier's only route into
+# Cloud Logging. Authenticated, capped, allowlisted — see observability/client_logs.py.
+app.include_router(client_logs_router)
 app.include_router(admin_router)
 app.include_router(admin_prewarm_router)
 app.include_router(admin_clients_router)
@@ -385,6 +406,7 @@ app.include_router(admin_tenants_router)
 app.include_router(admin_analytics_router)
 app.include_router(admin_audit_router)  # v6.16.0 P4 audit reader
 app.include_router(admin_users_router)
+app.include_router(admin_residents_router)
 app.include_router(admin_group_tags_router)  # v6.9.0 9.3 group-tag registry
 app.include_router(admin_group_members_router)  # v6.9.0 9.3 tag-holders reverse lookup
 app.include_router(admin_access_router)  # v6.9.0 9.3 effective-access dry-run
@@ -393,10 +415,13 @@ app.include_router(admin_platform_config_router)  # v6.14.0 platform preamble ad
 app.include_router(admin_compaction_replay_router)  # compaction replay — read-only tuning tool
 app.include_router(admin_compaction_second_pass_router)  # second-pass recompact — MUTATES; admin/CLI path (1e)
 app.include_router(internal_tasks_recompact_router)  # Cloud Tasks OIDC-gated target (1e)
+app.include_router(internal_tasks_resident_router)  # resident push webhook, per-task-token gated (M5a.2)
 app.include_router(clients_me_router)
 app.include_router(documents_router)
+app.include_router(documents_generate_router)
 app.include_router(documents_import_router)
 app.include_router(doc_folders_router)
+app.include_router(projects_router)  # projects.md §7 + /api/me/instructions
 app.include_router(rag_corpus_router)
 app.include_router(media_router)
 app.include_router(a2a_router)
@@ -405,11 +430,20 @@ app.include_router(tools_router)
 app.include_router(sessions_router)
 app.include_router(session_bootstrap_router)
 app.include_router(mcp_proxy_router)
+app.include_router(mcp_token_router)
 app.include_router(iframe_context_router)
 app.include_router(a2ui_surface_action_router)
 app.include_router(a2ui_surface_action_run_router)
 app.include_router(a2ui_surface_data_router)
+app.include_router(a2ui_surface_direct_router)
 app.include_router(voice_router)
+app.include_router(push_router)
+
+# Private-tier extensions (backend/private/*/routes.py) — absent from the public
+# template, so this is a no-op there. See backend/extensions.py.
+from extensions import include_private_routers  # noqa: E402
+
+include_private_routers(app)
 
 # ----------------------------------------------------------------------------
 # Channel framework (v6.1.0 sprint 1.6 M1)
@@ -477,16 +511,46 @@ ChannelRegistry.mount_webhooks(app)
 _parent_lifespan = app.router.lifespan_context
 
 
+def _warm_lazy_imports() -> None:
+    """Import, before serving, what the first chat turn would otherwise import ON the event loop.
+
+    ADK's Vertex session/memory services reach ``api_client.agent_engines``, which
+    lazily imports ``vertexai._genai.agent_engines`` (and the aiplatform tree)
+    inside the first session call: synchronously, on the event loop. Warm that
+    costs ~2 s; cold (first file reads after a restart, measured 110 s on the Mac
+    Studio 2026-09-30) it stalls EVERY in-flight and queued request. Queued
+    requests have not reached ``stream_skill`` yet, so their ttft log hides it.
+    """
+    if not os.environ.get("AGENT_ENGINE_ID"):
+        return
+    import time as _time
+
+    t0 = _time.monotonic()
+    try:
+        import vertexai._genai.agent_engines  # noqa: F401
+    except Exception as exc:  # a warm-up must never block startup
+        _log.warning("startup warm-up: vertexai agent_engines import failed: %s", exc)
+        return
+    _log.info("startup warm-up: vertexai agent_engines imported in %.1fs", _time.monotonic() - t0)
+
+
 @asynccontextmanager
 async def _lifespan_with_mcp(app_: FastAPI):
     async with AsyncExitStack() as stack:
         await stack.enter_async_context(_parent_lifespan(app_))
         await stack.enter_async_context(mcp_server.session_manager.run())
+        # Before `yield`: uvicorn accepts no request until this finishes, so the
+        # cold import cost moves from "stall every live turn" to "startup".
+        await asyncio.to_thread(_warm_lazy_imports)
         yield
 
 
 app.router.lifespan_context = _lifespan_with_mcp
-app.mount("/mcp", get_mcp_asgi_app())
+# One gated MCP app, reached at /mcp/... (the mount) AND at bare /mcp, which
+# the mount alone 307s to an unreachable absolute URL (see McpExactPath).
+_mcp_app = get_mcp_asgi_app()
+app.add_route("/mcp", McpExactPath(_mcp_app), methods=["GET", "POST", "DELETE"], include_in_schema=False)
+app.mount("/mcp", _mcp_app)
 
 # ----------------------------------------------------------------------------
 # A2A invocation surface (G45 / Sprint A2A-INVOKE)
@@ -617,6 +681,19 @@ def _extract_a2ui_surface_state(body: "_StreamSkillRequest") -> dict | None:
     return None
 
 
+def _extract_project_id(body: "_StreamSkillRequest") -> str | None:
+    """``forwardedProps.project_id`` — the project the chat runs in (projects.md
+    §6.3). Read from forwardedProps ONLY: ``state`` round-trips the previous
+    turn's value (the document_ids lesson above), so a chat moved out of a project
+    would be pulled straight back in. None when absent; the processor then falls
+    back to the chat's own row, and checks either is the caller's.
+    """
+    raw = (body.forwardedProps or {}).get("project_id")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return None
+
+
 def _extract_resumed_flag(body: "_StreamSkillRequest") -> bool:
     """True when the frontend signalled this chat was entered by clicking a
     conversation thread from the per-document Conversations panel.
@@ -679,24 +756,62 @@ async def stream_skill(
     is_read_only = False
     found_existing_session = False
     session_id = body.effective_session_id
+    # Who the turn runs as. Normally the caller; in a shared thread (the caller
+    # is a collaborator, e.g. a machine's supervisor) it is the thread's OWNER,
+    # so the reply uses the owner's skills and tools and nothing can land in the
+    # thread that the owner isn't allowed to see. `turn_author` labels it.
+    run_user, run_access = user, access
+    turn_author: str | None = None
+    author: dict[str, str] | None = None  # the authenticated collaborator, recorded per turn
+    shared_thread = None
 
-    # Only query Firestore when the caller explicitly requested resumption via
-    # sessionId (the custom format field). threadId from HttpAgent is always
-    # present — treating it as a resumption intent would emit session_meta on
-    # every fresh chat, which breaks the AG-UI Zod discriminated union.
-    if body.sessionId:
+    # Ownership is checked for BOTH resumption shapes: the explicit `sessionId`
+    # and the HttpAgent `threadId` (which the chat page sends when it reopens a
+    # thread). Checking only `sessionId` let a non-owner's message run against
+    # someone else's thread id as themselves. `session_meta` is still emitted
+    # only for an explicit `sessionId` — HttpAgent always sends threadId, and
+    # session_meta on a fresh chat breaks the AG-UI Zod discriminated union.
+    lookup_id = body.sessionId or session_id
+    if lookup_id:
         from db.chat_sessions import get_session_index
 
-        existing = get_session_index(body.sessionId)
+        existing = get_session_index(lookup_id)
         if existing is not None:
-            found_existing_session = True
-            if not access.can_access(existing):
-                raise HTTPException(status_code=403, detail="Access denied to session")
-            is_read_only = not access.is_owner(existing)
+            found_existing_session = bool(body.sessionId)
+            if not access.is_owner(existing):
+                if access.is_collaborator(existing):
+                    from auth.access_context import build_access_context
+                    from auth.firebase_auth import resolve_user_by_uid
+
+                    owner = await asyncio.to_thread(resolve_user_by_uid, existing.owner_uid)
+                    if owner is None:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="This shared conversation's owner is no longer configured, so it can't continue.",
+                        )
+                    run_user, run_access = owner, build_access_context(owner)
+                    turn_author = user.display_name or user.email or user.uid
+                    author = {
+                        "uid": user.uid,
+                        "email": user.email or "",
+                        "name": turn_author,
+                        "authMode": user.auth_mode or "",
+                    }
+                    shared_thread = existing
+                elif not access.can_access(existing):
+                    raise HTTPException(status_code=403, detail="Access denied to session")
+                elif body.sessionId:
+                    is_read_only = True
+                else:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="This conversation belongs to someone else and is read-only. Start a new chat to continue.",
+                    )
 
     extracted_doc_ids = _extract_document_ids(body) if not is_read_only else None
     extracted_resumed = _extract_resumed_flag(body) if not is_read_only else False
     extracted_surface_state = _extract_a2ui_surface_state(body) if not is_read_only else None
+    extracted_project_id = _extract_project_id(body) if not is_read_only else None
     _log.info(
         "stream_skill: skill=%s session=%s read_only=%s document_ids=%s resumed=%s "
         "wire_locations=(top:%s, state:%s, fwd:%s)",
@@ -717,14 +832,17 @@ async def stream_skill(
     # back from its first event, before agent code starts touching the model.
     event_iter = process_skill_request(
         skill_id=skill_id,
-        user=user,
-        access=access,
+        user=run_user,
+        access=run_access,
         session_id=session_id,
         message=body.effective_message if not is_read_only else "",
         attachments=body.attachments if not is_read_only else None,
         document_ids=extracted_doc_ids,
         resumed_session=extracted_resumed,
         a2ui_surface_state=extracted_surface_state,
+        turn_author=turn_author,
+        author=author,
+        project_id=extracted_project_id,
     )
     try:
         # Surface SkillNotFoundError *before* returning the StreamingResponse so
@@ -746,6 +864,44 @@ async def stream_skill(
                 f"access, ask an admin to check the skill's access tags."
             ),
         ) from exc
+    except McpServerResolutionError as exc:
+        # A declared MCP server has no row in this env's `mcp_servers/`.
+        # G42 raises here ON PURPOSE — an agent built without its declared
+        # tools misbehaves silently, which is worse. But the exception escaped
+        # to the ASGI handler as a bare 500, so the operator got a stack trace
+        # in the logs and the USER got "an agent error" with nothing to act on.
+        #
+        # That is a #8 violation on the most confusing possible failure: the
+        # skill is listed, it opens, and then the turn dies. Prod hit exactly
+        # this on 2026-09-05 with `browser` missing from its registry.
+        #
+        # So: a proper terminal AG-UI event. The user is told the capability is
+        # unavailable HERE (not that they did something wrong); the actionable
+        # detail stays in the log for whoever runs the seed.
+        reset_current_tracker(_tracker_token)
+        _log.error("skill=%s MCP server resolution failed: %s", skill_id, exc)
+
+        async def _unavailable():
+            run_id = body.run_id or f"run-{skill_id}"
+            yield f"data: {json.dumps({'type': 'RUN_STARTED', 'threadId': body.effective_session_id or '', 'runId': run_id})}\n\n"
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "type": "RUN_ERROR",
+                        "message": (
+                            "This skill needs a tool that isn't configured in this "
+                            "environment, so it can't run here. An administrator needs "
+                            "to register it. Nothing was lost — the same skill may work "
+                            "in another environment."
+                        ),
+                        "code": "MCP_SERVER_UNAVAILABLE",
+                    }
+                )
+                + "\n\n"
+            )
+
+        return StreamingResponse(_unavailable(), media_type="text/event-stream")
     except StopAsyncIteration:
         first_event = None
 
@@ -759,7 +915,7 @@ async def stream_skill(
     # scraping logs. Free of charge for normal callers.
     probe_mode = request.query_params.get("probe") == "1"
 
-    # v6.19.0 (AIPLA #39): the agent events are re-joined into ONE generator
+    # v6.19.0 (AIPLA #39): the agent events are re-joined into the tenant generator
     # before any stream-boundary filter sees them. `first_event` was pulled out
     # above only so a SkillNotFoundError could become a 404 before the stream
     # opens — that is a routing concern, not a reason for two event paths. A
@@ -774,37 +930,197 @@ async def stream_skill(
 
     guarded_events = redact_privileged_results(
         _agent_events(),
-        lower_trust=session_is_lower_trust(user.auth_mode, user.group_id),
+        lower_trust=session_is_lower_trust(run_user.auth_mode, run_user.group_id),
         thread_id=session_id or "<none>",
     )
 
+    # Push notifications (docs/design/v6.40.0/web-push-notifications.md):
+    # what the run ended with, which thread it was, and whether the client was
+    # still listening — read after the run to decide who to tell.
+    run_state: dict = {"terminal": None, "thread_id": session_id, "client_gone": False}
+
+    def _observe(event: dict) -> None:
+        etype = event.get("type")
+        if etype == "RUN_STARTED" and event.get("threadId"):
+            run_state["thread_id"] = event["threadId"]
+        elif etype in ("RUN_FINISHED", "RUN_ERROR") and run_state["terminal"] is None:
+            run_state["terminal"] = etype
+
+    def _after_run() -> None:
+        """Tell people what they'd otherwise miss. Never raises, never blocks."""
+        try:
+            from notifications.hooks import notify_reply_ready, notify_thread_collaborators
+
+            terminal, thread_id = run_state["terminal"], run_state["thread_id"] or ""
+            if terminal is None or is_read_only:
+                return
+            # The caller left mid-run (iOS suspends a backgrounded app) and the
+            # run finished anyway (AGUI_DETACH_ON_DISCONNECT): their reply is in
+            # the thread and nobody is looking.
+            if run_state["client_gone"] and user.auth_mode != MACHINE_AUTH_MODE:
+                notify_reply_ready(user.uid, skill_id, thread_id, failed=terminal == "RUN_ERROR")
+            # A machine (e.g. Daneel) posted in its own thread: tell everyone it
+            # is shared with. A collaborator's reply (turn_author set) already
+            # pings the machine's inbox, so that direction isn't repeated here.
+            if user.auth_mode == MACHINE_AUTH_MODE and turn_author is None and terminal == "RUN_FINISHED":
+                poster = user.display_name or user.email or "An agent"
+                notify_thread_collaborators(poster, skill_id, thread_id)
+        except Exception:
+            _log.exception("push notification hook failed (the turn itself is unaffected)")
+
+    def _session_meta_frame() -> str | None:
+        # Only emit session_meta when resuming an existing Firestore session.
+        # HttpAgent always sends threadId (even for fresh chats) — we must not
+        # treat that as a resumption signal or session_meta leaks into fresh
+        # streams and breaks the client's Zod discriminated union.
+        if found_existing_session:
+            return f"data: {json.dumps({'type': 'session_meta', 'isReadOnly': is_read_only})}\n\n"
+        return None
+
+    def _probe_frame() -> str | None:
+        if probe_mode:
+            report = tracker.build_latency_report_event()
+            if report is not None:
+                return f"data: {json.dumps(report.model_dump(by_alias=True, exclude_none=True))}\n\n"
+        return None
+
+    def _finish() -> None:
+        tracker.emit_log()
+        reset_current_tracker(_tracker_token)
+        if shared_thread is not None:
+            _ping_shared_thread_owner(shared_thread, run_user, turn_author or "", body.effective_message, skill_id)
+
     async def _sse():
         first_byte_marked = False
+        completed = False
         try:
-            # Only emit session_meta when resuming an existing Firestore session.
-            # HttpAgent always sends threadId (even for fresh chats) — we must not
-            # treat that as a resumption signal or session_meta leaks into fresh
-            # streams and breaks the client's Zod discriminated union.
-            if found_existing_session:
-                session_meta = json.dumps({"type": "session_meta", "isReadOnly": is_read_only})
-                if not first_byte_marked:
-                    tracker.mark(STAGE_FIRST_SSE_BYTE)
-                    first_byte_marked = True
-                yield f"data: {session_meta}\n\n"
+            meta = _session_meta_frame()
+            if meta is not None:
+                tracker.mark(STAGE_FIRST_SSE_BYTE)
+                first_byte_marked = True
+                yield meta
             async for event in guarded_events:
+                _observe(event)
                 if not first_byte_marked:
                     tracker.mark(STAGE_FIRST_SSE_BYTE)
                     first_byte_marked = True
                 yield f"data: {json.dumps(event)}\n\n"
-            if probe_mode:
-                report = tracker.build_latency_report_event()
-                if report is not None:
-                    yield f"data: {json.dumps(report.model_dump(by_alias=True, exclude_none=True))}\n\n"
+            completed = True
+            probe = _probe_frame()
+            if probe is not None:
+                yield probe
         finally:
-            tracker.emit_log()
-            reset_current_tracker(_tracker_token)
+            _finish()
+            if completed:
+                _after_run()
 
+    async def _sse_detached():
+        """AGUI_DETACH_ON_DISCONNECT: the agent runs in its own task and the
+        response only drains it. If the client goes away (iOS suspends a
+        backgrounded Home Screen app within seconds), the run keeps going to its
+        terminal event — ADK persists the session as usual, so the answer is in
+        the thread when the user comes back — and a push tells them.
+
+        Opt-in: on Cloud Run the CPU is throttled once the response closes
+        unless CPU is always allocated, so a detached run would crawl there.
+        """
+        queue: asyncio.Queue = asyncio.Queue()
+        done = object()
+
+        async def _pump() -> None:
+            try:
+                async for event in guarded_events:
+                    _observe(event)
+                    await queue.put(event)
+            except Exception as exc:  # surfaced to the consumer if still there
+                _log.exception("detached run failed: skill=%s", skill_id)
+                await queue.put(exc)
+            finally:
+                await queue.put(done)
+                _after_run()
+
+        pump = asyncio.create_task(_pump())
+        _detached_runs.add(pump)
+        pump.add_done_callback(_detached_runs.discard)
+
+        first_byte_marked = False
+        finished = False
+        try:
+            meta = _session_meta_frame()
+            if meta is not None:
+                tracker.mark(STAGE_FIRST_SSE_BYTE)
+                first_byte_marked = True
+                yield meta
+            while True:
+                item = await queue.get()
+                if item is done:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                if not first_byte_marked:
+                    tracker.mark(STAGE_FIRST_SSE_BYTE)
+                    first_byte_marked = True
+                yield f"data: {json.dumps(item)}\n\n"
+            finished = True
+            probe = _probe_frame()
+            if probe is not None:
+                yield probe
+        finally:
+            if not finished:
+                # Client disconnected: leave the pump running; its finally
+                # sends the notification when the run ends.
+                run_state["client_gone"] = True
+            _finish()
+
+    if _detach_on_disconnect() and not is_read_only:
+        return StreamingResponse(_sse_detached(), media_type="text/event-stream")
     return StreamingResponse(_sse(), media_type="text/event-stream")
+
+
+from db.models.chat_session import ChatSessionIndex  # noqa: E402
+
+# Detached runs (AGUI_DETACH_ON_DISCONNECT) are kept referenced here so they
+# finish after their client is gone (asyncio holds only weak task references).
+_detached_runs: set[asyncio.Task] = set()
+
+
+def _detach_on_disconnect() -> bool:
+    """Keep a chat turn running after the client disconnects (see _sse_detached)."""
+    return os.environ.get("AGUI_DETACH_ON_DISCONNECT", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# Fire-and-forget pings keep a reference here so they aren't garbage-collected
+# mid-flight (asyncio holds only weak references to tasks).
+_background_pings: set[asyncio.Task] = set()
+
+
+def _ping_shared_thread_owner(thread: ChatSessionIndex, owner: User, author: str, message: str, skill_id: str) -> None:
+    """Tell a machine owner that a collaborator replied in its thread.
+
+    Sent to the owner's ``notify_inbox`` (operator config) through AILANG
+    messages. Never blocks or fails the turn: the reply is already in the
+    thread, which the owner can read via GET /api/sessions/{id}/messages.
+    """
+    inbox = getattr(owner, "notify_inbox", "") or ""
+    if not inbox:
+        return
+    from tools.ailang_messages import notify
+
+    sid = thread.session_id
+    title = thread.title or "a shared thread"
+    excerpt = (message or "").strip()
+    if len(excerpt) > 1500:
+        excerpt = excerpt[:1500] + " …"
+    content = (
+        f'{author} replied in your thread "{title}" on the AI platform.\n\n'
+        f"> {excerpt}\n\n"
+        f"Session: {sid}\n"
+        f"Read it: GET /api/sessions/{sid}/messages\n"
+        f"Continue it: POST /api/skill/{skill_id}/stream with threadId {sid}\n"
+    )
+    task = asyncio.create_task(notify(inbox, f"{author} replied: {title}"[:120], content))
+    _background_pings.add(task)
+    task.add_done_callback(_background_pings.discard)
 
 
 @app.get("/api/debug/slow-stream")

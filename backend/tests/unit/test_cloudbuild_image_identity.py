@@ -65,6 +65,25 @@ def _load(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
+# A pipeline step may now DELEGATE its body to a repo script — v6.44.0 moved the
+# ~170-line service spec out of cloudbuild.yaml into scripts/deploy-run-service.sh
+# so cloudbuild.promote.yaml could call the same one instead of duplicating it.
+# Every guard in this file scans pipeline text, so the text has to follow the
+# code: without this, extracting a step silently emptied the thing being
+# guarded and the assertions passed by finding nothing. Resolve any referenced
+# in-repo script and fold its contents in.
+_SCRIPT_REF = re.compile(r"(?:^|[\s'\"])((?:scripts|build_scripts)/[\w./-]+\.sh)")
+
+
+def _inlined_scripts(text: str) -> str:
+    bodies: list[str] = []
+    for rel in dict.fromkeys(_SCRIPT_REF.findall(text)):
+        path = REPO_ROOT / rel
+        if path.is_file():
+            bodies.append(path.read_text(encoding="utf-8"))
+    return "\n".join(bodies)
+
+
 def _step_text(step: dict) -> str:
     """Flatten a step to searchable text (args may be a list or a script blob)."""
     parts: list[str] = []
@@ -80,11 +99,39 @@ def _step_text(step: dict) -> str:
     script = step.get("script")
     if isinstance(script, str):
         parts.append(script)
-    return "\n".join(parts)
+    text = "\n".join(parts)
+    return text + "\n" + _inlined_scripts(text)
 
 
 def _pipeline_text(pipeline: dict) -> str:
     return "\n".join(_step_text(s) for s in pipeline["steps"])
+
+
+def _without_build_arg_values(text: str) -> str:
+    """Drop `--build-arg` VALUES, keeping everything else.
+
+    Both mutable-substitution guards below exist for the tenant failure: an empty
+    substitution inside an IMAGE REFERENCE yields `repo:` and the build dies
+    with "invalid reference format", an error that never names the cause. Their
+    docstrings say so — "in an image reference", "in an image tag".
+
+    A `--build-arg` is not an image reference. An empty one bakes an empty
+    string into the image and the consumer decides what that means; v6.44.0's
+    `RELEASE_TAG=${TAG_NAME}` does exactly that, deliberately, and the backend
+    falls back to COMMIT_SHA when it is empty. Forbidding it was the guard
+    being over-broad, not the pipeline being wrong.
+
+    So the exemption is narrow: the ARGUMENT TO `--build-arg` only. A `-t`
+    carrying the same substitution is still caught — asserted below.
+    """
+    lines = text.splitlines()
+    keep: list[str] = []
+    for i, line in enumerate(lines):
+        prev = lines[i - 1].strip() if i else ""
+        if prev == "--build-arg" and re.match(r"^\s*[A-Za-z_][A-Za-z0-9_]*=", line):
+            continue
+        keep.append(line)
+    return "\n".join(keep)
 
 
 def _image_flags(pipeline: dict) -> list[str]:
@@ -195,6 +242,7 @@ def test_mutable_ref_substitutions_are_guarded(named_pipeline, mutable):
         # Comments explaining WHY these are dangerous must not trip the guard —
         # the same false positive the `builds submit` check hit in M3.
         text = "\n".join(line for line in _step_text(step).splitlines() if not line.strip().startswith("#"))
+        text = _without_build_arg_values(text)
         if mutable not in text:
             continue
         assert re.search(rf'-n\s+"?\$\$?\{{?{mutable}', text), (
@@ -214,7 +262,7 @@ def test_build_steps_tag_only_with_the_always_present_substitution(named_pipelin
         step_id = step.get("id") or ""
         if not step_id.startswith("build-"):
             continue
-        text = _step_text(step)
+        text = _without_build_arg_values(_step_text(step))
         for mutable in ("BRANCH_NAME", "TAG_NAME"):
             assert f"{mutable}" not in text, (
                 f"{name}: build step '{step_id}' references {mutable} in an image tag. "
@@ -304,3 +352,33 @@ class TestEveryDeployingPipelineGuardsItsServiceName:
             "pipelines default _SERVICE_NAME to a placeholder with no guard — a "
             f"missing substitution would create a duplicate service: {offenders}"
         )
+
+
+class TestTheBuildArgExemptionIsNarrow:
+    """The 2026-09-05 narrowing must not have disarmed the guard.
+
+    `_without_build_arg_values` exempts a `--build-arg` value so v6.44.0's
+    `RELEASE_TAG=${TAG_NAME}` can pass. These assert the exemption is exactly
+    that wide and no wider — an image tag carrying the same substitution is
+    still fatal, which is the bug the guard was written for (the first v6.20.0
+    tag build, `…/backend:` on `-t`).
+    """
+
+    def test_a_build_arg_value_is_exempt(self):
+        step = {"id": "build-x", "args": ["build", "--build-arg", "RELEASE_TAG=${TAG_NAME}", "-t", "repo:${SHORT_SHA}"]}
+        assert "TAG_NAME" not in _without_build_arg_values(_step_text(step))
+
+    @pytest.mark.parametrize("mutable", ["TAG_NAME", "BRANCH_NAME"])
+    def test_an_image_tag_is_still_caught(self, mutable):
+        step = {"id": "build-x", "args": ["build", "-t", f"repo:${{{mutable}}}"]}
+        assert mutable in _without_build_arg_values(_step_text(step))
+
+    def test_a_bare_substitution_after_build_arg_is_still_caught(self):
+        """Only `NAME=value` is a build-arg assignment. A loose token is not,
+        and exempting it would let `--build-arg` become a laundering prefix."""
+        step = {"id": "build-x", "args": ["build", "--build-arg", "${TAG_NAME}"]}
+        assert "TAG_NAME" in _without_build_arg_values(_step_text(step))
+
+    def test_only_the_line_directly_after_build_arg_is_exempt(self):
+        step = {"id": "build-x", "args": ["build", "--build-arg", "A=1", "-t", "repo:${TAG_NAME}"]}
+        assert "TAG_NAME" in _without_build_arg_values(_step_text(step))

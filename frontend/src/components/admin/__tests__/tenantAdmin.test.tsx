@@ -30,8 +30,8 @@ import { TenantEditor } from "../TenantEditor";
 import { TenantOnboardWizard } from "../TenantOnboardWizard";
 
 const SKILLS: SkillOption[] = [
-  { slug: "one-assistant", displayName: "ONE Assistant" },
-  { slug: "one-ppa-expert", displayName: "PPA Expert" },
+  { slug: "demo-assistant", displayName: "Example Assistant" },
+  { slug: "demo-ppa-expert", displayName: "PPA Expert" },
 ];
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -193,13 +193,13 @@ describe("TenantEditor", () => {
     domain: "acme.com",
     display_name: "Acme",
     documents_bucket: "acme-docs",
-    enabled_skills: ["one-assistant"],
-    default_skill: "one-assistant",
+    enabled_skills: ["demo-assistant"],
+    default_skill: "demo-assistant",
   };
 
   it("renders bad refs when save returns 422", async () => {
     fetchWithAuthMock.mockResolvedValueOnce(
-      jsonResponse(422, { detail: { unknown: ["one-assistant"] } }),
+      jsonResponse(422, { detail: { unknown: ["demo-assistant"] } }),
     );
     render(
       <TenantEditor
@@ -212,7 +212,7 @@ describe("TenantEditor", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     await waitFor(() =>
-      expect(screen.getByText(/unknown skill slug\(s\): one-assistant/i)).toBeInTheDocument(),
+      expect(screen.getByText(/unknown skill slug\(s\): demo-assistant/i)).toBeInTheDocument(),
     );
   });
 
@@ -290,5 +290,34 @@ describe("TenantEditor", () => {
     const urls = fetchWithAuthMock.mock.calls.map((c) => String(c[0]));
     expect(urls.some((u) => u.includes("/api/admin/clients/acme.com"))).toBe(true);
     expect(urls.some((u) => u.includes("/acme.com/validate"))).toBe(true);
+  });
+
+  it("Validate checks the UNSAVED form values (POST dry run), not just the stored config", async () => {
+    fetchWithAuthMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        domain: "acme.com",
+        ok: true,
+        checks: [{ field: "documents_bucket", level: "ok", message: "reachable and writable by the service account" }],
+      }),
+    );
+    render(
+      <TenantEditor
+        tenant={{ ...tenant, documents_bucket: null as unknown as string }}
+        availableSkills={SKILLS}
+        onSaved={() => {}}
+        onDeleted={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    // Type a bucket WITHOUT saving, then Validate.
+    // The bucket is the only empty text field (null stored bucket).
+    const field = Array.from(document.querySelectorAll("input")).find((i) => i.value === "") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "typed-bucket" } });
+    fireEvent.click(screen.getByRole("button", { name: /validate/i }));
+    await waitFor(() => expect(screen.getByText(/writable/i)).toBeInTheDocument());
+    const [url, init] = fetchWithAuthMock.mock.calls[0];
+    expect(String(url)).toContain("/api/admin/tenants/acme.com/validate");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body).documents_bucket).toBe("typed-bucket");
   });
 });

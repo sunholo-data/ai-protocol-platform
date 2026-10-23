@@ -1,7 +1,11 @@
 """HTTP client for the platform backend.
 
 Authentication precedence:
-    1. $AIPLATFORM_ID_TOKEN env var (preferred for CI/tests)
+    0. $AIPLATFORM_AUTH=tailnet — send NO token. For a deployment served over
+       Tailscale (AUTH_MODE=tailnet): point AIPLATFORM_API_URL at its tailnet
+       address + /api/proxy, and `tailscale serve` attaches your tailnet login.
+    1. $AIPLATFORM_ID_TOKEN env var (preferred for CI/tests; also a machine
+       principal's token on a tailnet deployment)
     2. `gcloud auth print-identity-token` (local dev)
 
 Failure to obtain a token surfaces a CLEAR error message, not a silent 401.
@@ -14,12 +18,12 @@ from __future__ import annotations
 
 import os
 import subprocess
-from pathlib import Path
 from typing import Any
 
 import click
 import httpx
-import yaml
+
+from aiplatform.config import load_config
 
 # Load default URLs from cli/config.yaml. Forks edit that file rather than
 # this module — keeps Aitana-specific URLs out of the template source.
@@ -29,16 +33,7 @@ import yaml
 # `make materialize-config` and gitignored, because a tracked file holding real
 # URLs here and placeholders upstream is the same path with different bytes on
 # each side — a merge conflict on every sync (TEMPLATE-INVERT M4b).
-_CONFIG_DIR = Path(__file__).resolve().parent
-_CONFIG_PATH = next(
-    (p for p in (_CONFIG_DIR / "config.yaml", _CONFIG_DIR / "config.example.yaml") if p.exists()),
-    _CONFIG_DIR / "config.example.yaml",
-)
-try:
-    _cli_config = yaml.safe_load(_CONFIG_PATH.read_text())
-    _DEFAULT_URLS: dict[str, str] = _cli_config.get("environments", {})
-except Exception:
-    _DEFAULT_URLS = {"local": "http://localhost:1956"}
+_DEFAULT_URLS: dict[str, str] = load_config().get("environments", {}) or {"local": "http://localhost:1956"}
 
 
 class AuthError(click.ClickException):
@@ -119,6 +114,8 @@ class AIPlatformClient:
     # --- auth ---
 
     def _auth_headers(self) -> dict[str, str]:
+        if not self._token and os.environ.get("AIPLATFORM_AUTH", "").strip().lower() == "tailnet":
+            return {}
         token = self._token or get_bearer_token()
         return {"Authorization": f"Bearer {token}"}
 
@@ -173,6 +170,9 @@ class AIPlatformClient:
 
     def put(self, path: str, **kwargs: Any) -> Any:
         return self.request("PUT", path, **kwargs)
+
+    def patch(self, path: str, **kwargs: Any) -> Any:
+        return self.request("PATCH", path, **kwargs)
 
     def delete(self, path: str, **kwargs: Any) -> Any:
         return self.request("DELETE", path, **kwargs)

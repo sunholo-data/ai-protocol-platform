@@ -43,6 +43,16 @@ describe("UserMenu", () => {
     expect(auth.signOut).toHaveBeenCalledOnce();
   });
 
+  it("runs a phone-only header action and closes the menu", () => {
+    auth.user = { displayName: "Mark", email: "owner@yourcompany.com", photoURL: null };
+    const onSelect = vi.fn();
+    render(<UserMenu phoneItems={[{ label: "Create a new skill", icon: null, onSelect }]} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+    fireEvent.click(screen.getByText("Create a new skill"));
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(screen.queryByText("Sign out")).toBeNull();
+  });
+
   it("falls back to an initial chip when there is no photoURL", () => {
     auth.user = { displayName: "Zara", email: "z@x.com", photoURL: null };
     render(<UserMenu />);
@@ -68,11 +78,11 @@ describe("UserMenu", () => {
   it("reveals an Admin link for a TENANT admin (the v6.16.0 fix)", async () => {
     // The whole point of the whoami probe: this user used to see nothing,
     // because the old probe hit a platform-only endpoint and got a 403.
-    auth.user = { displayName: "Ops", email: "ops@acmeenergy.com", photoURL: null };
+    auth.user = { displayName: "Ops", email: "ops@energy.example", photoURL: null };
     vi.mocked(fetchWithAuth).mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ scope: "tenant", domains: ["acmeenergy.com"] }),
+      json: async () => ({ scope: "tenant", domains: ["energy.example"] }),
     } as unknown as Response);
     render(<UserMenu />);
     fireEvent.click(screen.getByLabelText("Account menu"));

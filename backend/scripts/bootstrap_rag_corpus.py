@@ -2,10 +2,10 @@
 """Bootstrap Vertex AI RAG corpora for existing users.
 
 For each user in the `user_profiles` Firestore collection that does not yet have
-a `ragCorpusName` field, this script creates a per-user RAG corpus and writes the
+a `ragParsedTextCorpusName` field, this script creates a per-user text corpus and writes the
 resource name back to Firestore.
 
-Idempotent: users who already have `ragCorpusName` set are skipped.
+Idempotent: users who already have `ragParsedTextCorpusName` set are skipped.
 
 Usage:
     export GOOGLE_CLOUD_PROJECT=your-project-id
@@ -23,8 +23,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
-def _log(msg: str) -> None:
-    print(msg, file=sys.stderr)
+def _log(msg: str, *, end: str = "\n") -> None:
+    print(msg, file=sys.stderr, end=end)
 
 
 async def _run(dry_run: bool, limit: int | None) -> None:
@@ -32,7 +32,7 @@ async def _run(dry_run: bool, limit: int | None) -> None:
 
     from config.gcp import resolve_gcp_project
     from db import firestore as fs
-    from rag.corpus import _DISPLAY_NAME_PREFIX, _ensure_vertexai
+    from rag.corpus import _CORPUS_NAME_FIELD, _DISPLAY_NAME_PREFIX, _ensure_vertexai
 
     project = resolve_gcp_project()
     location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
@@ -41,7 +41,7 @@ async def _run(dry_run: bool, limit: int | None) -> None:
     _log(f"Project: {project}, Location: {location}")
     _log(f"Dry-run: {dry_run}")
 
-    profiles_ref = fs._db().collection("user_profiles")
+    profiles_ref = fs.get_client().collection("user_profiles")
     docs = list(profiles_ref.stream())
 
     if limit:
@@ -56,7 +56,7 @@ async def _run(dry_run: bool, limit: int | None) -> None:
     for doc in docs:
         data = doc.to_dict() or {}
         user_id = doc.id
-        existing = data.get("ragCorpusName")
+        existing = data.get(_CORPUS_NAME_FIELD)
 
         if existing:
             _log(f"  SKIP  {user_id[:8]}… — corpus already set: {existing}")
@@ -77,7 +77,7 @@ async def _run(dry_run: bool, limit: int | None) -> None:
                 display_name=display_name,
             )
             corpus_name = corpus.name
-            profiles_ref.document(user_id).update({"ragCorpusName": corpus_name})
+            profiles_ref.document(user_id).update({_CORPUS_NAME_FIELD: corpus_name})
             _log(f" → {corpus_name}")
             created += 1
         except Exception as exc:

@@ -45,6 +45,10 @@
 #   * What actually moves an env forward in THIS topology is the deploy step
 #     pinning the tested digest onto the target service.
 substitutions:
+  _VERTEX_AI_SEARCH_DATASTORE_ID: ''
+  _VERTEX_AI_SEARCH_PROJECT: ''
+  _VERTEX_AI_SEARCH_LOCATION: 'eu'
+  _A2A_AGENT_DOCUMENTS_BUCKET: ''
   _SOURCE_PROJECT: terraform_managed          # e.g. your-project-id-test (promote FROM)
   _TARGET_PROJECT: terraform_managed          # e.g. your-project-id-prod (this build's project)
   _SOURCE_ARTIFACT_REGISTRY_REPO_URL: terraform_managed  # source env's AR repo prefix (== target's, here)
@@ -60,7 +64,60 @@ substitutions:
   # source's.
   _MCP_SANDBOX_URL: ''
   _ENABLE_SKILL_STUDIO: 'true'
+  # Experimental browser diagnostics and visual evidence require explicit opt-in.
+  _WEBMCP_ENABLED: 'false'
+  _VISUAL_EVIDENCE_ENABLED: 'false'
+  _VISUAL_EVIDENCE_ALLOWED_UIDS: ''
+  _VISUAL_EVIDENCE_SYNTHETIC_SOURCE_DIGESTS: ''
+  _VISUAL_EVIDENCE_SYNTHETIC_CAPTURE_PAIRS: ''
+  _VISUAL_EVIDENCE_MODEL: ''
+  _VISUAL_EVIDENCE_APPROVED_MODEL_REGIONS: ''
   _LOG_BUCKET: 'gs://${_TARGET_PROJECT}-cloudbuild-logs'
+
+  # --- Service spec (v6.44.0) ------------------------------------------------
+  # Promotion now carries the SERVICE SPEC, not just the images, via the shared
+  # scripts/deploy-run-service.sh. These are that script's inputs.
+  #
+  # WHERE THE VALUES COME FROM. Per-env values are terraform-managed and already
+  # live on the target env's BRANCH trigger (deployment-infrastructure
+  # `global_substitutions` + deployment-config `run_client.tfvars`). Rather than
+  # hand-copy 26 values onto a second trigger — traps.md #23, the exact drift
+  # that put prod five env vars and a whole container behind — name that trigger
+  # in _SPEC_SOURCE_TRIGGER and the resolve-spec-config step below inherits them.
+  #
+  # Leave _SPEC_SOURCE_TRIGGER EMPTY to disable inheritance and use the defaults
+  # below / this trigger's own substitutions. That is the intended end state once
+  # the branch triggers are retired (env-promotion-audit.md § Roadmap): terraform
+  # sets the values on the promote trigger directly and clears this key. Nothing
+  # here breaks when that happens — the inheritance is opt-in, by name.
+  _SPEC_SOURCE_TRIGGER: ''
+  _RESOURCE_PREFIX: terraform_managed
+  _ADMIN_SEED_ALLOWED_SAS: ''
+  _PLATFORM_OWNER_EMAIL: ''
+  _AUTH_OPERATOR_DOMAINS: ''
+  _ENTSOE_PROJECT: ''
+  _MODEL_RESIDENCY_POLICY: 'unrestricted'
+  _SLOW_STREAM_PROBE_ENABLED: 'false'
+  _COMPACTION_SECOND_PASS: ''
+  _COMPACTION_TASKS_TARGET_URL: ''
+  _MEMORY_AUTOSAVE: '1'
+  _BROWSER_SERVICE_ENABLED: 'false'
+  _BROWSER_SERVICE_URL: ''
+  _RESIDENT_AGENT_URL: ''
+  _RESIDENT_START_ENDPOINT: ''
+  _RESIDENT_AGENT_PER_USER: 'false'
+  _RESIDENT_SESSION_STORY_ENABLED: 'false'
+  _RESIDENT_PUSH_BASE_URL: ''
+  _PUBLIC_BASE_URL: ''
+  _INCLUDE_DEMO_SKILLS: 'true'
+  _ENABLE_ANTHROPIC: 'true'
+  _ENABLE_OPENAI: 'true'
+  _ENABLE_TELEGRAM: 'false'
+  _ENABLE_WHATSAPP: 'false'
+  _ENABLE_EMAIL: 'false'
+  # A promotion NEVER creates a service. Both guards in deploy-run-service.sh
+  # stay armed; this one is the one that matters here.
+  _ALLOW_NEW_SERVICE: 'false'
 
 tags: ['${_TARGET_PROJECT}', '${_SERVICE_NAME}', 'promote']
 
@@ -108,6 +165,124 @@ steps:
   # the deploy step below pins by digest, never by tag), then re-read at the
   # destination and compared — a copy that silently retagged something else
   # would otherwise deploy unverified bytes to the target env.
+  # --- Firestore rules + indexes for the TARGET env (v6.44.0) ----------------
+  #
+  # Same step cloudbuild.yaml runs, for the same reason promotion now carries the
+  # service spec: rules and indexes are part of the environment state a release
+  # was verified against, and until now they reached prod only from a branch
+  # push. Runs BEFORE the deploy so the new code never meets the old rules.
+  #
+  # `--force` is what makes indexes converge, and it can PRUNE a composite index
+  # that is not in firestore.indexes.json. That is intended — a promoted version
+  # brings the index set it was tested with — but it is also how a v5-era index
+  # sharing this Firestore would disappear. Verified identical (30/30) across
+  # repo, test and prod on 2026-09-04 before this step was added.
+  - name: '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/sunholo-llmops/firebase:${_FIREBASE_TAG}'
+    id: 'deploy-firebase-rules'
+    waitFor: ['guard-version']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        firebase &&
+        firebase -P ${_TARGET_PROJECT} --json deploy --only firestore:rules,firestore:indexes --force
+
+  # --- Resolve the service-spec config for the TARGET env --------------------
+  #
+  # See the _SPEC_SOURCE_TRIGGER note in substitutions. When it names a trigger,
+  # every _-substitution that trigger carries is inherited here, so terraform
+  # stays the one author of per-env config and this pipeline copies nothing.
+  # When it is empty, this step just writes THIS trigger's own values and the
+  # deploy behaves exactly as if the values had been set here directly.
+  #
+  # Written as `export K=V` with shell quoting done by python, because several
+  # values legitimately contain commas (_AUTH_OPERATOR_DOMAINS,
+  # _ADMIN_SEED_ALLOWED_SAS) and one wrong quote here silently deploys an env
+  # with a truncated allowlist.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'resolve-spec-config'
+    waitFor: ['guard-version']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        cat > /workspace/spec_defaults.json <<'JSON'
+        {
+          "_PROJECT_ID": "${_TARGET_PROJECT}",
+          "_REGION": "${_REGION}",
+          "_SERVICE_NAME": "${_SERVICE_NAME}",
+          "_RESOURCE_PREFIX": "${_RESOURCE_PREFIX}",
+          "_ADMIN_SEED_ALLOWED_SAS": "${_ADMIN_SEED_ALLOWED_SAS}",
+          "_PLATFORM_OWNER_EMAIL": "${_PLATFORM_OWNER_EMAIL}",
+          "_AUTH_OPERATOR_DOMAINS": "${_AUTH_OPERATOR_DOMAINS}",
+          "_ENTSOE_PROJECT": "${_ENTSOE_PROJECT}",
+          "_VERTEX_AI_SEARCH_DATASTORE_ID": "${_VERTEX_AI_SEARCH_DATASTORE_ID}",
+          "_VERTEX_AI_SEARCH_PROJECT": "${_VERTEX_AI_SEARCH_PROJECT}",
+          "_VERTEX_AI_SEARCH_LOCATION": "${_VERTEX_AI_SEARCH_LOCATION}",
+          "_A2A_AGENT_DOCUMENTS_BUCKET": "${_A2A_AGENT_DOCUMENTS_BUCKET}",
+          "_MODEL_RESIDENCY_POLICY": "${_MODEL_RESIDENCY_POLICY}",
+          "_SLOW_STREAM_PROBE_ENABLED": "${_SLOW_STREAM_PROBE_ENABLED}",
+          "_COMPACTION_SECOND_PASS": "${_COMPACTION_SECOND_PASS}",
+          "_COMPACTION_TASKS_TARGET_URL": "${_COMPACTION_TASKS_TARGET_URL}",
+          "_MEMORY_AUTOSAVE": "${_MEMORY_AUTOSAVE}",
+          "_BROWSER_SERVICE_ENABLED": "${_BROWSER_SERVICE_ENABLED}",
+          "_BROWSER_SERVICE_URL": "${_BROWSER_SERVICE_URL}",
+          "_VISUAL_EVIDENCE_ENABLED": "${_VISUAL_EVIDENCE_ENABLED}",
+          "_VISUAL_EVIDENCE_ALLOWED_UIDS": "${_VISUAL_EVIDENCE_ALLOWED_UIDS}",
+          "_VISUAL_EVIDENCE_SYNTHETIC_SOURCE_DIGESTS": "${_VISUAL_EVIDENCE_SYNTHETIC_SOURCE_DIGESTS}",
+          "_VISUAL_EVIDENCE_SYNTHETIC_CAPTURE_PAIRS": "${_VISUAL_EVIDENCE_SYNTHETIC_CAPTURE_PAIRS}",
+          "_VISUAL_EVIDENCE_MODEL": "${_VISUAL_EVIDENCE_MODEL}",
+          "_VISUAL_EVIDENCE_APPROVED_MODEL_REGIONS": "${_VISUAL_EVIDENCE_APPROVED_MODEL_REGIONS}",
+          "_RESIDENT_AGENT_URL": "${_RESIDENT_AGENT_URL}",
+          "_RESIDENT_START_ENDPOINT": "${_RESIDENT_START_ENDPOINT}",
+          "_RESIDENT_AGENT_PER_USER": "${_RESIDENT_AGENT_PER_USER}",
+          "_RESIDENT_SESSION_STORY_ENABLED": "${_RESIDENT_SESSION_STORY_ENABLED}",
+          "_RESIDENT_PUSH_BASE_URL": "${_RESIDENT_PUSH_BASE_URL}",
+          "_PUBLIC_BASE_URL": "${_PUBLIC_BASE_URL}",
+          "_INCLUDE_DEMO_SKILLS": "${_INCLUDE_DEMO_SKILLS}",
+          "_ENABLE_ANTHROPIC": "${_ENABLE_ANTHROPIC}",
+          "_ENABLE_OPENAI": "${_ENABLE_OPENAI}",
+          "_ENABLE_TELEGRAM": "${_ENABLE_TELEGRAM}",
+          "_ENABLE_WHATSAPP": "${_ENABLE_WHATSAPP}",
+          "_ENABLE_EMAIL": "${_ENABLE_EMAIL}",
+          "_ALLOW_NEW_SERVICE": "${_ALLOW_NEW_SERVICE}"
+        }
+        JSON
+        echo '{}' > /workspace/spec_inherited.json
+        if [ -n "${_SPEC_SOURCE_TRIGGER}" ]; then
+          echo "Inheriting spec config from trigger ${_SPEC_SOURCE_TRIGGER}"
+          # --format=json on the WHOLE resource, then pick out substitutions in
+          # python. NOT --format='value[json](substitutions)': that projection
+          # emits semicolon-separated K=V pairs, not JSON (verified against the
+          # real SDK 2026-09-04 — it is why this pipeline's sibling test insists
+          # every gcloud invocation be checked rather than remembered). Reading
+          # it as JSON would have failed the promotion at this step, on prod.
+          gcloud builds triggers describe "${_SPEC_SOURCE_TRIGGER}" \
+            --project="$PROJECT_ID" --region="${_REGION}" \
+            --format=json > /workspace/spec_trigger.json
+          python3 -c "import json,sys; json.dump(json.load(open('/workspace/spec_trigger.json')).get('substitutions',{}), open('/workspace/spec_inherited.json','w'))"
+        else
+          echo "No _SPEC_SOURCE_TRIGGER — using this trigger's own substitutions."
+        fi
+        python3 - <<'PYEOF'
+        import json, shlex
+        defaults = json.load(open('/workspace/spec_defaults.json'))
+        inherited = json.load(open('/workspace/spec_inherited.json')) or {}
+        # The inherited trigger owns per-env config; these four describe THIS
+        # promotion's target and must never be taken from another trigger.
+        for pinned in ('_PROJECT_ID', '_REGION', '_SERVICE_NAME', '_ALLOW_NEW_SERVICE'):
+            inherited.pop(pinned, None)
+        merged = {**defaults, **{k: v for k, v in inherited.items() if k in defaults}}
+        with open('/workspace/spec_env', 'w') as fh:
+            for k in sorted(merged):
+                fh.write('export %s=%s\n' % (k, shlex.quote(merged[k])))
+        src = {k for k in inherited if k in defaults}
+        print('spec config: %d keys, %d inherited' % (len(merged), len(src)))
+        for k in sorted(merged):
+            print('  %-30s = %s%s' % (k, merged[k], '   <- inherited' if k in src else ''))
+        PYEOF
+
   - name: 'gcr.io/go-containerregistry/crane:debug'
     id: 'copy-backend'
     waitFor: ['guard-version']
@@ -176,9 +351,18 @@ steps:
     env:
       - '_PROJECT_ID=${_TARGET_PROJECT}'
 
+  # The UI is rebuilt from the tag, so its /help pages must be bundled here too
+  # (the backend image is copied and already carries its bundle). See the
+  # bundle-user-guide step in cloudbuild.yaml.
+  - name: 'node:20-slim'
+    id: 'bundle-user-guide'
+    waitFor: ['-']
+    entrypoint: 'node'
+    args: ['scripts/user-guide/bundle.mjs']
+
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-frontend'
-    waitFor: ['get-firebase-config']
+    waitFor: ['get-firebase-config', 'resolve-spec-config', 'bundle-user-guide']
     entrypoint: 'bash'
     args:
       - '-c'
@@ -188,10 +372,16 @@ steps:
           [[ -z "$$key" || "$${key:0:1}" == "#" ]] && continue
           export "$$key=$$val"
         done < .env.local
+        # Use the same resolved target feature gate as the backend sidecar,
+        # including opt-in config inherited from the target spec trigger.
+        . /workspace/spec_env
         ARGS=$$(cat /workspace/docker_args)
         docker build $$ARGS \
           --build-arg NEXT_PUBLIC_MCP_SANDBOX_URL=${_MCP_SANDBOX_URL} \
           --build-arg NEXT_PUBLIC_ENABLE_SKILL_STUDIO=${_ENABLE_SKILL_STUDIO} \
+          --build-arg NEXT_PUBLIC_WORKSPACE_DEFAULT_RATIOS \
+          --build-arg NEXT_PUBLIC_WEBMCP_ENABLED=${_WEBMCP_ENABLED} \
+          --build-arg NEXT_PUBLIC_VISUAL_EVIDENCE_ENABLED="$${_VISUAL_EVIDENCE_ENABLED}" \
           -t ${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/ui:${_VERSION} \
           -f frontend/Dockerfile \
           frontend/
@@ -221,23 +411,139 @@ steps:
   # and invite drift. `services update --container X --image Y` changes ONLY
   # the named container's image and leaves everything else — set at env-cut
   # and owned by Terraform — untouched. All three images are pinned by digest.
+  # --- Deploy: the FULL service spec, not just the images (v6.44.0) ---------
+  #
+  # This used to be `services update --image` and nothing else, on the reasoning
+  # that restating ~30 env vars and the secret set here would drift from
+  # cloudbuild.yaml. Correct about duplication; the consequence was that prod's
+  # SPEC had no deploy route once prod stopped shipping from its branch, and it
+  # sat on v6.34.1's — missing the toolbox container entirely and five env vars
+  # the running code reads. There is now ONE definition, in
+  # scripts/deploy-run-service.sh, and both pipelines call it, so there is
+  # nothing left to drift.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'deploy'
-    waitFor: ['copy-backend', 'copy-toolbox', 'push-frontend']
+    waitFor: ['copy-backend', 'copy-toolbox', 'push-frontend', 'resolve-spec-config']
     entrypoint: bash
     args:
       - '-c'
       - |
         set -euo pipefail
-        BACKEND_IMAGE=$$(cat /workspace/image_backend)
-        TOOLBOX_IMAGE=$$(cat /workspace/image_toolbox)
-        UI_IMAGE=$$(cat /workspace/image_ui)
-        echo "Deploying ui=$${UI_IMAGE} backend=$${BACKEND_IMAGE} toolbox=$${TOOLBOX_IMAGE}"
-        gcloud run services update ${_SERVICE_NAME} \
-          --project=${_TARGET_PROJECT} --region=${_REGION} \
-          --container=main --image=$${UI_IMAGE} \
-          --container=sidecar --image=$${BACKEND_IMAGE} \
-          --container=toolbox --image=$${TOOLBOX_IMAGE}
+        . /workspace/spec_env
+        export IMAGE_DIR=/workspace
+        exec bash scripts/deploy-run-service.sh
+
+  # --- Side-car services: copy the tested image, then deploy it ------------
+  #
+  # WHY THIS EXISTS. Until 2026-09-03 this pipeline promoted ui + backend +
+  # toolbox and nothing else, while `platform-browser`, `mcp-sandbox` and
+  # `mcp-ext-apps-map` deployed only from a branch push. So `make promote …
+  # VERSION=vX.Y.Z` moved three containers and silently left three services on
+  # whatever was last pushed — a version tag did not describe the deployed
+  # state, which is the one thing build-once promotion is for.
+  #
+  # BOTH GUARDS ARE LOAD-BEARING. A promotion must not fail because a service
+  # is not in this env yet, nor because the release predates the service:
+  #
+  #   1. no image at :${_VERSION}  -> the release was cut before this service
+  #                                   existed (e.g. v6.34.1 predates the
+  #                                   browser). Skip; nothing to promote.
+  #   2. no target Cloud Run service -> not cut in this env yet. Skip. Terraform
+  #                                   creates the service; promotion only ever
+  #                                   swaps an image onto one that exists,
+  #                                   exactly as the main deploy step does.
+  #
+  # Anything else is a real failure and stops the promotion.
+  - name: 'gcr.io/go-containerregistry/crane:debug'
+    id: 'copy-sidecars'
+    waitFor: ['guard-version']
+    entrypoint: sh
+    args:
+      - '-c'
+      - |
+        set -eu
+        # service:image — the repo is laid out <service>/<image>, so these must
+        # match each service's own cloudbuild.yaml.
+        # mcp-ext-apps-map is DELIBERATELY ABSENT. Its pipeline was broken from
+        # 2026-06-05 to 2026-09-03 (a placeholder logsBucket, see its
+        # cloudbuild.yaml), so prod's service was created by Terraform and never
+        # filled in — it still runs `cloudrun/container/hello`. The map MCP has
+        # never been used here.
+        #
+        # Adding it to this list would mean the next routine promotion silently
+        # turned a dormant placeholder into a live, publicly-invokable service on
+        # prod, as a side effect of shipping something unrelated. Fixing the
+        # pipeline and activating the service on prod are separate decisions, and
+        # only the first one has been made.
+        #
+        # To activate it: append `mcp-ext-apps-map:server` here. Dev and test
+        # already build and run it properly, so it is one word away.
+        # platform-v6-backend is the STANDALexample-team, IAM-protected backend (A2A +
+        # channels) — not a side-car, but it belongs in this loop for the same
+        # reason the others do: the root release tag does not build it. It was
+        # missed precisely because root cloudbuild.yaml builds a container CALLED
+        # backend (the FRONTEND's sidecar), so the standalone service looked
+        # covered while having no promotion path at all. Found on 2026-09-04
+        # still running v6.34.0, ten versions behind, immediately after the
+        # v6.44.0 promotion had reported success.
+        for PAIR in platform-browser:browser mcp-sandbox:sandbox platform-v6-backend:backend; do
+          SVC=$${PAIR%%:*}
+          IMG=$${PAIR##*:}
+          SRC="${_SOURCE_ARTIFACT_REGISTRY_REPO_URL}/$${SVC}/$${IMG}:${_VERSION}"
+          DST_REPO="${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/$${SVC}/$${IMG}"
+
+          # One call does existence AND digest: it exits non-zero when the tag
+          # is absent, so there is no need for a separate probe. Only `digest`
+          # and `copy` are in the verified allowlist that
+          # test_cloudbuild_promote.py enforces — that test exists because a
+          # neighbouring pipeline once shipped an invented subcommand, and it
+          # scans comments as well as commands, so do not name an unverified
+          # one even in prose.
+          if ! DIGEST=$(crane digest "$$SRC" 2>/dev/null); then
+            echo "SKIP $${SVC}: no image at :${_VERSION} — release predates this service"
+            continue
+          fi
+
+          echo "Copying tested $${SVC} $$SRC ($$DIGEST)"
+          crane copy "$$SRC" "$${DST_REPO}:${_VERSION}"
+          DST_DIGEST=$(crane digest "$${DST_REPO}:${_VERSION}")
+          if [ "$$DIGEST" != "$$DST_DIGEST" ]; then
+            echo "FATAL: $${SVC} digest changed in transit ($$DIGEST -> $$DST_DIGEST)" >&2
+            exit 1
+          fi
+          # Canonical repo@digest, same form as copy-backend writes.
+          echo "$${DST_REPO}@$${DIGEST}" > "/workspace/image_$${SVC}"
+          echo "$${SVC} -> $$DIGEST"
+        done
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-sidecars'
+    waitFor: ['copy-sidecars']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        # Keep in step with the copy list above — mcp-ext-apps-map omitted there.
+        for SVC in platform-browser mcp-sandbox platform-v6-backend; do
+          REF="/workspace/image_$${SVC}"
+          if [ ! -f "$${REF}" ]; then
+            echo "SKIP $${SVC}: nothing was copied for it"
+            continue
+          fi
+          if ! gcloud run services describe "$${SVC}" \
+                 --project=${_TARGET_PROJECT} --region=${_REGION} >/dev/null 2>&1; then
+            echo "SKIP $${SVC}: no such service in ${_TARGET_PROJECT} — not cut in this env yet"
+            continue
+          fi
+          IMAGE=$$(cat "$${REF}")
+          echo "Deploying $${SVC} = $${IMAGE}"
+          # Image only. Env vars, SA, ingress and IAM belong to Terraform and to
+          # the service's own pipeline; a promotion must not restate them.
+          gcloud run services update "$${SVC}" \
+            --project=${_TARGET_PROJECT} --region=${_REGION} \
+            --image="$${IMAGE}"
+        done
 
   # --- Smoke: fail the promotion if the target isn't healthy ---
   # Same probe set as cloudbuild.yaml's post-deploy smoke / scripts/smoke-deployed.sh.
@@ -258,3 +564,58 @@ steps:
           if [ "$${code}" = "200" ]; then echo "OK   $${path} -> 200"; else echo "FAIL $${path} -> $${code}"; fail=1; fi
         done
         exit $${fail}
+
+  # --- Platform-skill seed. Idempotent; fails the promotion on error. --------
+  #
+  # cloudbuild.yaml seeds after every release, so test gains new platform skills
+  # the moment they ship. Promotion did not, so prod silently lagged: on
+  # 2026-09-04 prod was missing `document-writer` purely because the only step
+  # that seeds had never run against it. A promoted version must bring its
+  # skills with it, or the marketplace describes a different release from the
+  # one that is running.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'seed-platform-skills'
+    waitFor: ['smoke']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        URL=$$(gcloud run services describe ${_SERVICE_NAME} \
+          --project=${_TARGET_PROJECT} --region=${_REGION} \
+          --format='value(status.url)')
+        TOKEN=$$(curl -sf \
+          "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$${URL}&format=full&include_email=true" \
+          -H "Metadata-Flavor: Google")
+        code=$$(curl -sS -o /tmp/seed -w '%{http_code}' --max-time 60 \
+          -X POST -H "Authorization: Bearer $${TOKEN}" \
+          "$${URL}/api/proxy/api/admin/seed-platform-skills") || code=000
+        body=$$(head -c 300 /tmp/seed)
+        echo "seed-platform-skills -> $${code} body=$${body}"
+        if [ "$${code}" != "200" ]; then
+          echo "ERROR: seed step returned $${code} — marketplace will lag the promoted version" >&2
+          exit 1
+        fi
+        # MCP REGISTRY GATE. The seed already runs `verify_mcp_registry` and
+        # returns `mcp_missing` — every entry is a skill that will hard-500 at
+        # agent build (G42) the moment a user opens it. Until 2026-09-05 that
+        # was only LOGGED, so a deploy reported success and the first person to
+        # open the skill got an opaque error instead.
+        #
+        # That is exactly how prod shipped without `mcp_servers/browser`: the
+        # row was hand-written on dev and test and never seeded, the check
+        # noticed, wrote an ERROR line nobody reads, and the build went green.
+        # Parse failure must FAIL, not pass quietly. `|| echo ""` here would turn
+        # a broken python3 or a malformed body into a green gate — an assertion
+        # that cannot run reporting success is worse than no assertion, which is
+        # the whole reason this gate exists (see the log-only check it replaced).
+        if ! missing=$(python3 -c "import json;d=json.load(open('/tmp/seed'));print(','.join(d.get('mcp_missing') or []))"); then
+          echo "ERROR: could not read mcp_missing from the seed response — the registry gate did NOT run" >&2
+          exit 1
+        fi
+        if [ -n "$${missing}" ]; then
+          echo "ERROR: mcp_servers registry cannot satisfy declared servers: $${missing}" >&2
+          echo "  Those skills WILL hard-500 at agent build. Seed the row for this env:" >&2
+          echo "    uv run python backend/scripts/seed_mcp_servers.py --env <env> [--browser-url ...]" >&2
+          exit 1
+        fi

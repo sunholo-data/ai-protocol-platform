@@ -233,9 +233,13 @@ def test_create_agent_wires_tools_from_skill_metadata():
     # ai_search/google_search are model-aware and handled by agent.py directly, so not here.
     agent = create_agent(_skill(tools=["list_documents", "get_document_content"]), _user())
     # Defaults from agent.py: load_artifacts_tool + retrieve_artifact +
-    # load_memory_tool + preload_memory_tool. Plus 2 registry tools,
-    # SendA2uiToClientToolset, and request_confirmation (default-on) = 8 total.
-    assert len(agent.tools) == 8
+    # load_memory_tool + preload_memory_tool + remember + forget, the 5 project
+    # tools. Plus 2 registry tools, SendA2uiToClientToolset, and
+    # request_confirmation (default-on) = 15 total, plus any private-tier
+    # toolsets (project document search, projects.md D4) — none in the template.
+    from extensions import private_toolsets
+
+    assert len(agent.tools) == 15 + len(private_toolsets())
     tool_names = _tool_ids(agent)
     assert "load_artifacts" in tool_names
     assert "load_memory" in tool_names
@@ -394,9 +398,27 @@ def test_create_agent_defaults_memory_false_removes_memory_tools():
     ids = _tool_ids(agent)
     assert "load_memory" not in ids
     assert "preload_memory" not in ids
+    # A skill without recall writes and deletes no memories either.
+    assert "remember" not in ids
+    assert "forget" not in ids
     # Artifact tools still present
     assert "load_artifacts" in ids
     assert "retrieve_artifact" in ids
+
+
+def test_create_agent_defaults_projects_false_removes_project_tools():
+    """toolConfigs.defaults.projects: false → the project tools are absent (projects.md §6.7)."""
+    agent = create_agent(_skill(tool_configs={"defaults": {"projects": False}}), _user())
+    ids = _tool_ids(agent)
+    for name in ("list_projects", "create_project", "add_to_project", "remove_from_project"):
+        assert name not in ids
+    assert "load_memory" in ids
+
+
+def test_create_agent_wires_project_and_memory_tools_by_default():
+    ids = _tool_ids(create_agent(_skill(), _user()))
+    for name in ("list_projects", "create_project", "add_to_project", "remove_from_project", "remember", "forget"):
+        assert name in ids
 
 
 def test_create_agent_defaults_all_false_removes_all_default_tools():
@@ -423,3 +445,17 @@ def test_create_agent_no_tool_configs_includes_all_defaults():
     assert "retrieve_artifact" in ids
     assert "load_memory" in ids
     assert "preload_memory" in ids
+
+
+def test_private_toolsets_ride_the_projects_default_and_its_opt_out():
+    """Project document search (a private toolset) is attached like the project
+    tools: on by default, off with ``tool_configs.defaults.projects: false``."""
+    from extensions import private_toolsets
+
+    expected = {type(t).__name__ for t in private_toolsets()}
+    on = {type(t).__name__ for t in create_agent(_skill(), _user()).tools}
+    assert expected <= on
+    skill = _skill()
+    skill.skill_metadata.tool_configs = {"defaults": {"projects": False}}
+    off = {type(t).__name__ for t in create_agent(skill, _user()).tools}
+    assert not (expected & off)

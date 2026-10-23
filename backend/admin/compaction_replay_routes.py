@@ -81,9 +81,8 @@ class ReplayResult(BaseModel):
 @router.post("/replay", response_model=ReplayResult)
 async def replay_compaction(body: ReplayRequest, scope: PlatformScope) -> ReplayResult:
     """Replay a compaction over a recorded session. Never mutates it."""
-    from google.adk.apps.compaction import _events_to_compact_for_token_threshold
-
     from adk.agui import APP_NAME
+    from adk.compaction_compat import events_to_compact_for_token_threshold
     from adk.session import get_compaction_config, get_session_service
 
     notes: list[str] = []
@@ -104,7 +103,7 @@ async def replay_compaction(body: ReplayRequest, scope: PlatformScope) -> Replay
         retention = 0
         notes.append("no event_retention_size configured; replaying with 0")
 
-    selected = _events_to_compact_for_token_threshold(events=events, event_retention_size=retention)
+    selected = events_to_compact_for_token_threshold(events=events, event_retention_size=retention)
     input_chars = sum(len(p.text or "") for e in selected if e.content and e.content.parts for p in e.content.parts)
 
     if not selected:

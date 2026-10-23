@@ -123,16 +123,19 @@ export function Workbench({
   return (
     <div
       className={cn(
-        "flex shrink-0 flex-col overflow-hidden border-l border-border bg-background",
+        // No left rule on phones: there the workbench is a full-width tab, and
+        // the rule reads as a stray line down the edge of the screen.
+        "flex shrink-0 flex-col overflow-hidden border-border bg-background md:border-l",
         // Width scale: explicit className wins; otherwise apply 4-breakpoint default.
         className ?? DEFAULT_WIDTH_SCALE,
       )}
     >
-      <header className="flex items-stretch border-b border-border bg-muted/10">
-        <div className="flex items-center gap-3 border-r border-border px-4">
-          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-            Workbench
-          </span>
+      <header className="flex items-stretch border-b border-border bg-background">
+        {/* Phones already name this pane in the Chat | Workbench switch above
+            it, so the label only earns its width from `md` up. Sentence case,
+            not letterspaced mono caps (brand: no all-caps headings). */}
+        <div className="hidden items-center border-r border-border px-4 md:flex">
+          <span className="text-sm font-semibold text-foreground">Workbench</span>
         </div>
         {/* Tab strip scrolls horizontally when it overflows, but the native
             scrollbar is hidden (`no-scrollbar`) — it was big + ugly with many
@@ -166,20 +169,18 @@ export function Workbench({
                   aria-controls={`workbench-panel-${tab.id}`}
                   tabIndex={isActive ? 0 : -1}
                   disabled={tab.disabled}
-                  title={tab.tooltip}
+                  // The eyebrow ("Home", "Result"…) used to render as a mono
+                  // caps prefix on every tab; it now rides in the tooltip so
+                  // the strip reads as plain labels.
+                  title={[tab.eyebrow, tab.tooltip ?? tab.label].filter(Boolean).join(" · ")}
                   onClick={() => onActiveTabChange(tab.id)}
                   className={cn(
-                    "flex max-w-[13rem] shrink-0 items-baseline gap-2 py-3 pl-4 text-left",
+                    "flex min-h-[44px] max-w-[13rem] shrink-0 items-center gap-2 pl-4 text-left",
                     closable ? "pr-1" : "pr-4",
                     tab.disabled && "cursor-not-allowed",
                   )}
                 >
-                  {tab.eyebrow && (
-                    <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/70">
-                      {tab.eyebrow}
-                    </span>
-                  )}
-                  <span className="truncate text-sm font-semibold tracking-tight">{tab.label}</span>
+                  <span className="truncate text-sm font-medium">{tab.label}</span>
                   {tab.badged && !isActive && (
                     <span
                       aria-label="new content"
@@ -206,13 +207,15 @@ export function Workbench({
                       tab.onClose?.();
                     }}
                     className={cn(
-                      "mr-2 flex shrink-0 items-center self-center rounded p-1 transition-opacity",
+                      "flex h-11 w-11 shrink-0 items-center justify-center self-center rounded-[var(--radius)] transition-opacity md:mr-2 md:h-6 md:w-6",
                       "hover:bg-muted hover:text-foreground",
                       "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                      // Stays out of the way until the tab is hovered/focused
-                      // or active — a row of always-on `×`s reads as clutter.
-                      "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
-                      isActive && "opacity-60 hover:opacity-100",
+                      // On a mouse it stays out of the way until the tab is
+                      // hovered/focused or active — a row of always-on `×`s
+                      // reads as clutter. Touch has no hover, so there it is
+                      // always visible (quietly).
+                      "opacity-60 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100",
+                      isActive && "md:opacity-60 md:hover:opacity-100",
                     )}
                   >
                     <X className="h-3 w-3" aria-hidden="true" />
@@ -221,7 +224,7 @@ export function Workbench({
                 {isActive && (
                   <span
                     aria-hidden
-                    className="absolute inset-x-2 -bottom-px h-0.5 origin-center animate-in fade-in zoom-in-x-50 rounded-t-sm bg-primary duration-200"
+                    className="absolute inset-x-0 -bottom-px h-0.5 bg-primary"
                   />
                 )}
               </div>

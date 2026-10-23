@@ -1,5 +1,8 @@
 "use client";
 
+import { useRef } from "react";
+import { PassageInstruction } from "./PassageInstruction";
+import type { DocumentActivitySink } from "@/lib/documentActivity";
 import { useDocument, type DocumentDetail } from "@/hooks/useDocument";
 import type { ParseStatus } from "@/hooks/useDocBrowser";
 import { DocumentHeader } from "./DocumentHeader";
@@ -7,6 +10,11 @@ import { DocumentFooter } from "./DocumentFooter";
 import { DocumentViewer } from "./DocumentViewer";
 
 interface DocumentPanelProps {
+  /** DOC-WORKBENCH P4b — send a passage instruction down the ordinary chat
+   * rail. Absent (e.g. a preview surface) simply disables the affordance. */
+  onSurfaceChatMessage?: (text: string) => void;
+  /** DOC-WORKBENCH — document actions report into the Activity feed. */
+  activitySink?: DocumentActivitySink;
   docId: string;
 }
 
@@ -55,8 +63,11 @@ function TerminalMessage({
   );
 }
 
-export function DocumentPanel({ docId }: DocumentPanelProps) {
-  const { doc, isLoading, error } = useDocument(docId);
+export function DocumentPanel({ docId, onSurfaceChatMessage, activitySink }: DocumentPanelProps) {
+  const { doc, isLoading, error, retry } = useDocument(docId);
+  // P4b — the body is watched for text selections so a user can point at a
+  // passage and say what to change.
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   if (isLoading || (!doc && !error)) {
     return <Skeleton caption={pickCaption(doc)} />;
@@ -64,8 +75,18 @@ export function DocumentPanel({ docId }: DocumentPanelProps) {
 
   if (error || !doc) {
     return (
-      <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
-        {error ?? "Document preview unavailable."}
+      <div
+        role="alert"
+        className="flex h-full flex-col items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
+      >
+        <p>{error ?? "Document preview unavailable."}</p>
+        <button
+          type="button"
+          onClick={retry}
+          className="rounded border border-border px-2 py-0.5 text-xs text-foreground hover:bg-accent"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -91,8 +112,13 @@ export function DocumentPanel({ docId }: DocumentPanelProps) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-muted/10">
-      <DocumentHeader doc={doc} />
-      <DocumentViewer doc={doc} />
+      <DocumentHeader doc={doc} onChanged={retry} activitySink={activitySink} />
+      <div ref={bodyRef} className="relative min-h-0 flex-1 overflow-auto">
+        <DocumentViewer doc={doc} />
+        {/* Positioned against the scroll container so it opens beside the
+            selection rather than at the bottom of a long document. */}
+        <PassageInstruction docId={doc.id} containerRef={bodyRef} onChanged={retry} activitySink={activitySink} />
+      </div>
       {doc.summary && <DocumentFooter summary={doc.summary} />}
     </div>
   );

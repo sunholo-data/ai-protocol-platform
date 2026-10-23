@@ -139,10 +139,21 @@ What the trigger will do (cloudbuild.promote.yaml):
   3. build ui:${VERSION}       from the tag, with ${TO_ENV}'s config
      (the frontend CANNOT be copied: NEXT_PUBLIC_* is compile-time-inlined,
       so a copied UI would ship ${FROM_ENV}'s Firebase project and API URLs)
-  4. deploy all three onto the existing ${SERVICE_NAME}, images only
-  5. smoke the target; any non-200 fails the promotion
+  4. apply firestore rules + indexes to ${TO_ENV}
+  5. deploy all three onto the existing ${SERVICE_NAME}, WITH the full service
+     spec — env vars, secrets, probes and the toolbox container — from the one
+     definition in scripts/deploy-run-service.sh
+  6. smoke the target; any non-200 fails the promotion
+  7. seed platform skills; a non-200 fails the promotion
 
-Source is the REPO AT TAG ${VERSION}, not your working tree.
+Steps 4, 5's spec and 7 arrived in v6.44.0. Before that a promotion moved
+IMAGES ONLY, which is why prod sat on v6.34.1's spec — no toolbox container and
+five unset env vars — through every promotion since. A promotion of a tag OLDER
+than v6.44.0 still runs that tag's pipeline and so still moves images only.
+
+Source is the REPO AT TAG ${VERSION}, not your working tree. That cuts both
+ways: this description is printed from your working tree, so if the two
+disagree, the tag wins.
 PLAN
 
 # --tag selects the REVISION Cloud Build checks out. It does NOT set the

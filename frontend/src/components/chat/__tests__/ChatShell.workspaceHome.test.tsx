@@ -1,6 +1,6 @@
 // ChatShell — Workspace Home persistence (v6.23.0 B6).
 //
-// Dana, ONE UAT 2026-08-06, raised four times — more than any other single
+// a tester, acceptance testing 2026-08-06, raised four times — more than any other single
 // item in the meeting:
 //
 //   "You click on 'chart DK1 market prices' and now you have Workspace
@@ -88,7 +88,7 @@ vi.mock("@/hooks/useBackendReady", () => ({
   useBackendReady: () => ({ ready: true, lastError: null }),
 }));
 
-// A skill shaped like ONE's front door: ships example prompts (Dana's
+// A skill shaped like the tenant's front door: ships example prompts (a tester's
 // "chart DK1 market prices" tiles) AND can delegate, so the picker persists.
 // `canDelegate` is flipped per-test to cover the specialist case.
 const skillMeta = {
@@ -100,7 +100,7 @@ const skillMeta = {
   welcome: {
     exampleDocuments: [],
     // The real ExamplePrompt shape (src/types/skill.ts) — `label`, not `title`.
-    // "Chart DK1 market prices" is verbatim the tile Dana clicked in the UAT.
+    // "Chart DK1 market prices" is verbatim the tile a tester clicked in the UAT.
     examplePrompts: [
       { label: "Chart DK1 market prices", prompt: "Chart DK1 market prices for last week" },
       { label: "Compare two PPAs", prompt: "Compare these two PPA contracts" },
@@ -262,7 +262,7 @@ describe("ChatShell — Workspace Home persistence (B6)", () => {
   });
 
   it("keeps focus on Home when the SAME result surface is re-emitted (B4, integration half)", async () => {
-    // B4 — "Workspace tab sometimes needs a second click" (Dana; Mark had seen
+    // B4 — "Workspace tab sometimes needs a second click" (a tester; Mark had seen
     // it too). Reproduced live 2026-08-07: with a prices result open and
     // auto-focused, clicking Workspace mid-run showed Home, and by the time the
     // run finished focus was back on the Result tab.

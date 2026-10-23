@@ -142,3 +142,13 @@ describe("ReadAloudButton", () => {
     expect(combined.replace(/\s+/g, " ").trim()).toEqual(text.trim().replace(/\s+/g, " "));
   });
 });
+
+
+it("auto-reads an explicitly completed reply once, across preference changes", async () => {
+  mockFetch.mockResolvedValue(audioResponse());
+  const { rerender } = render(<ReadAloudButton text="New reply" provider="gcp_wavenet" autoSpeakOnMount />);
+  await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+  rerender(<ReadAloudButton text="New reply" provider="gcp_wavenet" autoSpeakOnMount={false} />);
+  rerender(<ReadAloudButton text="New reply" provider="gcp_wavenet" autoSpeakOnMount />);
+  expect(mockFetch).toHaveBeenCalledTimes(1);
+});

@@ -2,7 +2,7 @@
 
 Regression (2026-08-05): `POST /api/skill/skill-authoring-assistant/stream`
 returned 404 `{"detail":"Skill not found"}` on test while the identical UI
-worked for one-assistant. The frontend holds whichever identifier it happened
+worked for demo-assistant. The frontend holds whichever identifier it happened
 to resolve — a UUID for one, the slug for the other — and the route did a raw
 `get_skill(ref)` doc-id lookup, so the slug matched nothing.
 

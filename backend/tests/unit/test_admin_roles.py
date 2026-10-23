@@ -10,7 +10,7 @@ class TestPlatformAdmin:
         assert admin_roles.is_platform_admin(["aitana-admin"]) is True
 
     def test_other_tags_are_not_platform_admin(self):
-        assert admin_roles.is_platform_admin(["one-admin", "ONE"]) is False
+        assert admin_roles.is_platform_admin(["one-admin", "example-team"]) is False
 
     def test_empty_and_none(self):
         assert admin_roles.is_platform_admin(frozenset()) is False
@@ -19,10 +19,10 @@ class TestPlatformAdmin:
 
 class TestTenantAdmin:
     def test_tenant_admin_of_own_domain(self):
-        assert admin_roles.is_tenant_admin(["tenant-admin:acmeenergy.com"], "acmeenergy.com") is True
+        assert admin_roles.is_tenant_admin(["tenant-admin:energy.example"], "energy.example") is True
 
     def test_not_tenant_admin_of_other_domain(self):
-        assert admin_roles.is_tenant_admin(["tenant-admin:acmeenergy.com"], "rockwool.com") is False
+        assert admin_roles.is_tenant_admin(["tenant-admin:energy.example"], "other.example") is False
 
     def test_platform_admin_administers_every_domain(self):
         assert admin_roles.is_tenant_admin(["aitana-admin"], "anything.com") is True
@@ -34,7 +34,7 @@ class TestTenantAdmin:
         assert admin_roles.is_platform_admin(["tenant-admin:a.com"]) is False
 
     def test_domains_parsing_ignores_bare_prefix(self):
-        tags = ["tenant-admin:a.com", "tenant-admin:b.com", "ONE", "tenant-admin:"]
+        tags = ["tenant-admin:a.com", "tenant-admin:b.com", "example-team", "tenant-admin:"]
         assert admin_roles.tenant_admin_domains(tags) == frozenset({"a.com", "b.com"})
 
 
@@ -49,4 +49,4 @@ class TestSkillAdmin:
         assert admin_roles.is_skill_admin(["tenant-admin:a.com"]) is False
 
     def test_plain_user_is_not_skill_admin(self):
-        assert admin_roles.is_skill_admin(["ONE"]) is False
+        assert admin_roles.is_skill_admin(["example-team"]) is False

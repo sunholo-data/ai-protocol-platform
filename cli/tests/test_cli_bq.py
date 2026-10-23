@@ -1,4 +1,4 @@
-"""Unit tests for `aiplatform bq` (v6.23.0 ONE-BQ).
+"""Unit tests for `aiplatform bq` (v6.23.0 TENANT-BQ).
 
 The MCP call is stubbed — these pin the two things that are genuinely this
 CLI's own logic and would otherwise drift silently:

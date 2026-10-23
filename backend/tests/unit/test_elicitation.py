@@ -145,11 +145,11 @@ def test_request_confirmation_with_fields_carries_context():
         kind="confirm_with_fields",
         fields=[{"name": "jurisdiction", "type": "select", "label": "Jurisdiction", "options": ["ES", "AR"]}],
         action="confirm_delegation",
-        context={"target_skill_id": "one-doc-compare"},
+        context={"target_skill_id": "demo-doc-compare"},
     )
     env = result["elicitation"]
     assert env["action"] == "confirm_delegation"
-    assert env["context"] == {"target_skill_id": "one-doc-compare"}
+    assert env["context"] == {"target_skill_id": "demo-doc-compare"}
 
 
 # --- turn-pause (skip_summarization) — the 2026-07-22 confirm-spam fix --------

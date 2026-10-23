@@ -377,9 +377,9 @@ describe("SeriesArtefactTab (6.12 M3 — table + CSV)", () => {
   });
 });
 
-// ── ONE-BQ-SHAPES ────────────────────────────────────────────────────────────
+// ── TENANT-BQ-SHAPES ────────────────────────────────────────────────────────────
 // Bands, the one-axis split, and percent formatting. Each fixture mirrors a
-// query ONE's analyst keeps in BigQuery Studio; see the backend transform's
+// query the tenant's analyst keeps in BigQuery Studio; see the backend transform's
 // tests for the wire shapes these envelopes are built from.
 
 /** The plot's right edge in viewBox units — chart geometry W(720) - M.right(16). */

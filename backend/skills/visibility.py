@@ -13,7 +13,7 @@ combination lived inline in ``skills/routes.py::list_skills``:
 Plane 3 is why an admin's own skill list is *wrong by construction* as a proxy
 for what their users see: the admin is looking at a strictly wider set and has no
 way to tell which entries a normal user would lose. That is the exact confusion
-that motivated the effective-access screen ("my tenant page lists skills ONE's
+that motivated the effective-access screen ("my tenant page lists skills the tenant's
 users don't have").
 
 So the screen must NOT re-derive this logic — a second implementation would
@@ -91,7 +91,7 @@ def evaluate_visibility(
     access: Any,
     enabled_skills: list[str] | None,
 ) -> list[SkillVisibility]:
-    """Evaluate every plane for each skill, for ONE viewer.
+    """Evaluate every plane for each skill, for the tenant viewer.
 
     Args:
         configs: Candidate skill configs (already fetched).

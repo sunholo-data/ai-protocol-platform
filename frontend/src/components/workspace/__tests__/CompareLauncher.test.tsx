@@ -17,7 +17,7 @@ interface SpiedAction {
   name: string;
   context: Record<string, unknown>;
 }
-const triggerActionSpy = vi.fn<[string, SpiedAction], Promise<void>>(async () => {});
+const triggerActionSpy = vi.fn<(sessionId: string, action: SpiedAction) => Promise<void>>(async () => {});
 vi.mock("@/hooks/useActionDrivenAgent", () => ({
   useActionDrivenAgent: (args: { skillId: string; sessionId: string }) => {
     lastHookArgs = args;
@@ -48,7 +48,7 @@ function tab(overrides: Partial<DocTabData> = {}): DocTabData {
 function example(overrides: Partial<ExampleDocument> = {}): ExampleDocument {
   return {
     bucket: "your-project-id-test-test-llmops-bucket",
-    object: "aitana3/PPAs/longform/Example.pdf",
+    object: "example-datastore/PPAs/longform/Example.pdf",
     label: "Example PPA",
     summary: "An example",
     ...overrides,
@@ -152,7 +152,7 @@ describe("CompareLauncher", () => {
   it("fires start_compare through surface-action-run with both identities and NO chat message", async () => {
     const { onCompareViaChat } = renderLauncher({
       docTabs: [tab({ id: "doc-a", filename: "A.pdf" })],
-      exampleDocuments: [example({ object: "aitana3/PPAs/longform/B.pdf", label: "PPA B" })],
+      exampleDocuments: [example({ object: "example-datastore/PPAs/longform/B.pdf", label: "PPA B" })],
     });
     fireEvent.click(screen.getByRole("checkbox", { name: /A\.pdf/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /PPA B/ }));
@@ -164,7 +164,7 @@ describe("CompareLauncher", () => {
     expect(action.name).toBe("start_compare");
     expect(action.context.left).toEqual({ doc_id: "doc-a" });
     expect(action.context.right).toEqual({
-      gs_url: "gs://your-project-id-test-test-llmops-bucket/aitana3/PPAs/longform/B.pdf",
+      gs_url: "gs://your-project-id-test-test-llmops-bucket/example-datastore/PPAs/longform/B.pdf",
     });
     expect(action.context.config).toEqual({});
     // No chat message on the opted-in path.
@@ -220,7 +220,7 @@ describe("CompareLauncher", () => {
   it("never emits a public storage.googleapis.com URL in the action payload", async () => {
     renderLauncher({
       docTabs: [tab({ id: "doc-a", filename: "A.pdf" })],
-      exampleDocuments: [example({ object: "aitana3/PPAs/longform/B.pdf", label: "PPA B" })],
+      exampleDocuments: [example({ object: "example-datastore/PPAs/longform/B.pdf", label: "PPA B" })],
     });
     fireEvent.click(screen.getByRole("checkbox", { name: /A\.pdf/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /PPA B/ }));
@@ -344,7 +344,7 @@ describe("CompareLauncher", () => {
     renderLauncher({
       allowCompare: false,
       allowObligations: true,
-      exampleDocuments: [example({ object: "aitana3/PPAs/longform/Google LEAP.pdf", label: "Google LEAP" })],
+      exampleDocuments: [example({ object: "example-datastore/PPAs/longform/Google LEAP.pdf", label: "Google LEAP" })],
       onOpenDocument,
     });
     fireEvent.click(screen.getByRole("checkbox", { name: /Google LEAP/ }));
@@ -352,7 +352,7 @@ describe("CompareLauncher", () => {
     // The launcher opens the document (its gs_url identity) AND runs the analysis.
     await waitFor(() => expect(onOpenDocument).toHaveBeenCalledTimes(1));
     expect(onOpenDocument).toHaveBeenCalledWith({
-      gs_url: "gs://your-project-id-test-test-llmops-bucket/aitana3/PPAs/longform/Google LEAP.pdf",
+      gs_url: "gs://your-project-id-test-test-llmops-bucket/example-datastore/PPAs/longform/Google LEAP.pdf",
     });
     expect(triggerActionSpy).toHaveBeenCalledTimes(1);
   });
@@ -442,13 +442,13 @@ describe("CompareLauncher", () => {
     renderLauncher({
       allowCompare: false,
       allowObligations: true,
-      exampleDocuments: [example({ object: "aitana3/PPAs/longform/B.pdf", label: "PPA B" })],
+      exampleDocuments: [example({ object: "example-datastore/PPAs/longform/B.pdf", label: "PPA B" })],
     });
     fireEvent.click(screen.getByRole("checkbox", { name: /PPA B/ }));
     fireEvent.click(analyzeButton());
     await waitFor(() => expect(triggerActionSpy).toHaveBeenCalledTimes(1));
     expect(triggerActionSpy.mock.calls[0][1].context.doc).toEqual({
-      gs_url: "gs://your-project-id-test-test-llmops-bucket/aitana3/PPAs/longform/B.pdf",
+      gs_url: "gs://your-project-id-test-test-llmops-bucket/example-datastore/PPAs/longform/B.pdf",
     });
   });
 

@@ -32,20 +32,22 @@ export function AssistantIntroBubble({ content, skillName }: AssistantIntroBubbl
       role="group"
       aria-label="Assistant introduction"
     >
-      <BrandAvatar />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div className="mt-0.5 hidden shrink-0 md:block">
+        <BrandAvatar />
+      </div>
+      <div className="flex min-w-0 max-w-[68ch] flex-1 flex-col gap-1.5">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-semibold text-foreground">
             {skillName ?? "Assistant"}
           </span>
           <span
-            className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/70"
+            className="text-xs text-muted-foreground"
             aria-label="Not stored in session history"
           >
-            Intro · not stored
+            Intro · not saved
           </span>
         </div>
-        <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
+        <div className="rounded-[var(--radius)] bg-muted px-4 py-3 text-[15px] leading-[1.7] text-foreground md:text-base">
           <ChatMarkdown content={content} navigateToBlock={() => {}} />
         </div>
       </div>

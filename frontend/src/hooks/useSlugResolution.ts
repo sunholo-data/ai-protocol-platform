@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { fetchWithAuth } from "@/lib/apiClient";
 import type { SkillShell } from "@/types/skill";
+import { ownerIdFromUrlSegment } from "@/lib/platformOwner";
 
 export interface SlugResolution {
   skillId: string | null;
@@ -73,7 +74,7 @@ export function useSlugResolution(path: string[] | undefined, enabled: boolean =
     //                            which was the bug: slug-less skills were unloadable)
     let resolveUrl: string | null = null;
     if (decoded && decoded.length === 2 && decoded[0].startsWith("@") && decoded[0].length >= 2) {
-      resolveUrl = `/api/proxy/api/skills/by-slug/${encodeURIComponent(decoded[0].slice(1))}/${encodeURIComponent(decoded[1])}`;
+      resolveUrl = `/api/proxy/api/skills/by-slug/${encodeURIComponent(ownerIdFromUrlSegment(decoded[0].slice(1)))}/${encodeURIComponent(decoded[1])}`;
     } else if (decoded && decoded.length === 1 && decoded[0] && !decoded[0].startsWith("@")) {
       resolveUrl = `/api/proxy/api/skills/${encodeURIComponent(decoded[0])}`;
     }

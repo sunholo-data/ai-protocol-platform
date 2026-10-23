@@ -1,4 +1,4 @@
-"""Unit tests for the scoped-BigQuery result→A2UI mapping (v6.23.0 ONE-BQ).
+"""Unit tests for the scoped-BigQuery result→A2UI mapping (v6.23.0 TENANT-BQ).
 
 The fixtures below are the REAL wire shapes, captured from Toolbox 1.7.0 through
 a live MCP `tools/call` on 2026-08-07 — not shapes invented to match the code.
@@ -371,11 +371,11 @@ class TestRegistration:
             assert not is_render_payload_tool(tool)
 
 
-# ── ONE-BQ-SHAPES: the analyst's own query shapes ────────────────────────────
-# Every fixture below mirrors a query ONE's analyst actually keeps in BigQuery
+# ── TENANT-BQ-SHAPES: the analyst's own query shapes ────────────────────────────
+# Every fixture below mirrors a query the tenant's analyst actually keeps in BigQuery
 # Studio (read via the Dataform API on 2026-08-11), with values from a real run
 # against `your-entsoe-project.market_prices`. Each one broke the generic render in a
-# different way before ONE-BQ-SHAPES.
+# different way before TENANT-BQ-SHAPES.
 
 
 def envelope(rows: list[dict]) -> dict:
@@ -534,7 +534,7 @@ class TestRatioCharts:
 
 
 class TestUnconventionalResultsAreUnaffected:
-    """A query using none of ONE's conventions renders exactly as before."""
+    """A query using none of the tenant's conventions renders exactly as before."""
 
     def test_plain_result_declares_empty_shape_fields(self):
         value = model(SUCCESS)

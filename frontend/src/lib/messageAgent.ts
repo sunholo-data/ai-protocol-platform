@@ -1,6 +1,6 @@
 // Per-message agent attribution (6.11) — which agent produced a given bot
 // message, so the transcript can show that agent's avatar/name and the mark
-// changes as the conversation hands off (ONE Assistant → Web Researcher → …).
+// changes as the conversation hands off (Example Assistant → Web Researcher → …).
 //
 // Model: each turn is `user message → (optional auto delegation) → assistant
 // reply`. A delegation anchors at the turn's USER message (`afterMessageId`),

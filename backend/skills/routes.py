@@ -15,12 +15,14 @@ import secrets
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from auth import User, admin_roles, get_current_user
+from auth.tailnet_auth import check_machine_access_control
 from db.chat_sessions import list_sessions_for_skill
 from db.clients import resolve_enabled_skills
 from db.models import SkillConfig
+from extensions import validate_skill as validate_skill_extensions
 from protocols.sessions_route import ListSessionsResponse, _to_summary
 from skills import skill_config
 from skills.platform import PLATFORM_OWNER_UID
@@ -45,6 +47,16 @@ def _is_platform_admin(access: Any) -> bool:
     return admin_roles.is_platform_admin(access.group_tags)
 
 
+def _can_edit(config: SkillConfig, access: Any) -> bool:
+    """May the caller change this skill? The ONE rule behind both the PUT guard
+    and the ``canEdit`` flag the UI reads, so the UI never offers a change the
+    server will refuse: platform-owned skills → platform admins only; any other
+    skill → its owner or a skill-admin tag holder."""
+    if config.owner_id == PLATFORM_OWNER_UID:
+        return _is_platform_admin(access)
+    return access.is_skill_admin(config)
+
+
 # === Request / Response models ===
 
 
@@ -61,7 +73,7 @@ class CreateSkillRequest(BaseModel):
     initial_message: str = Field(default="", alias="initialMessage")
     tags: list[str] = []
     references: dict[str, str] = {}
-    # v6.6.0 ONE-FORK-CONVERGENCE M3: Skill Studio persists persona + welcome as
+    # v6.6.0 TENANT-FORK-CONVERGENCE M3: Skill Studio persists persona + welcome as
     # part of the whole-draft Save. Pass-through dicts validated by SkillConfig.
     persona: dict | None = None
     welcome: dict | None = None
@@ -81,7 +93,7 @@ class UpdateSkillRequest(BaseModel):
     initial_message: str | None = Field(default=None, alias="initialMessage")
     tags: list[str] | None = None
     references: dict[str, str] | None = None
-    # v6.6.0 ONE-FORK-CONVERGENCE M3: Skill Studio persists persona + welcome as
+    # v6.6.0 TENANT-FORK-CONVERGENCE M3: Skill Studio persists persona + welcome as
     # part of the whole-draft Save. Pass-through dicts validated by SkillConfig.
     persona: dict | None = None
     welcome: dict | None = None
@@ -124,12 +136,22 @@ class SkillResponse(BaseModel):
     # skills lacking the shell frontmatter block — frontend ShellRouter falls
     # back to ChatShell. See docs/design/v6.4.0/skill-driven-shell-modes.md.
     shell: dict | None = None
+    # "template" = the seeder re-applies this skill's SKILL.md on every deploy,
+    # so an in-product change to its settings does not last; "firestore" = an
+    # in-product skill the seeder never touches. The UI warns before editing a
+    # template-managed skill rather than making a change that silently reverts.
+    managed_by: str | None = Field(default=None, alias="managedBy")
+    # Per-viewer: may the caller change this skill (see `_can_edit`)? None where
+    # there is no caller (the unauthenticated marketplace).
+    can_edit: bool | None = Field(default=None, alias="canEdit")
 
     model_config = {"populate_by_name": True}
 
     @classmethod
-    def from_config(cls, config: SkillConfig) -> SkillResponse:
+    def from_config(cls, config: SkillConfig, access: Any = None) -> SkillResponse:
         data = config.model_dump(by_alias=True)
+        if access is not None:
+            data["canEdit"] = _can_edit(config, access)
         return cls.model_validate(data)
 
 
@@ -140,11 +162,11 @@ def _fill_welcome_buckets(resp: SkillResponse, user: User) -> SkillResponse:
     A shared SKILL.md leaves ``example_documents`` / ``bucket_browser`` ``bucket``
     EMPTY so each env resolves it per-env (no hardcoded bucket, no customer
     project). Resolution order:
-      1. ``welcome.documentsTenant`` set (e.g. ONE's ``acmeenergy.com``) →
-         that TENANT's per-env `documents_bucket` (the env llmops bucket aitana3
+      1. ``welcome.documentsTenant`` set (e.g. the tenant's ``energy.example``) →
+         that TENANT's per-env `documents_bucket` (the env llmops bucket example-datastore
          indexes). This is the correct source for a shared library: it does NOT
-         depend on who is viewing, so a platform admin sees ONE's PPAs just like a
-         ONE user does. (The earlier per-viewer fill 404'd for non-ONE viewers,
+         depend on who is viewing, so a platform admin sees the tenant's PPAs just like a
+         tenant user does. (The earlier per-viewer fill 404'd for non-ONE viewers,
          who fell back to the deployment-default bucket — 2026-07-23.)
       2. No ``documentsTenant`` → the VIEWER's own ``documents_bucket``
          (back-compat for skills whose library is the caller's own docs).
@@ -186,6 +208,12 @@ def create_skill(req: CreateSkillRequest, user: User = Depends(get_current_user)
     me whatever URL" path; explicit slug edits go through PUT, which surfaces
     409 with a suggestion instead.
     """
+    check_machine_access_control(user, req.access_control)
+    # Private-tier checks (e.g. a bound knowledge base must not be reachable by
+    # more people than its own access allows). No-op in the public template.
+    validate_skill_extensions(
+        {"skillMetadata": req.skill_metadata, "accessControl": req.access_control, "ownerId": user.uid}, user
+    )
     base = req.slug if req.slug else slugify(req.name)
     chosen_slug = unique_slug(user.uid, base)
 
@@ -206,18 +234,34 @@ def create_skill(req: CreateSkillRequest, user: User = Depends(get_current_user)
     if req.welcome:
         kwargs["welcome"] = req.welcome
 
-    config = skill_config.create_skill(
-        name=req.name,
-        description=req.description,
-        instructions=req.instructions,
-        owner_id=user.uid,
-        owner_email=user.email,
-        displayName=req.display_name or req.name,
-        avatar=req.avatar,
-        initialMessage=req.initial_message,
-        tags=req.tags,
-        **kwargs,
-    )
+    try:
+        config = skill_config.create_skill(
+            name=req.name,
+            description=req.description,
+            instructions=req.instructions,
+            owner_id=user.uid,
+            owner_email=user.email,
+            displayName=req.display_name or req.name,
+            avatar=req.avatar,
+            initialMessage=req.initial_message,
+            tags=req.tags,
+            **kwargs,
+        )
+    except ValidationError as exc:
+        # NEVER SILENT (CLAUDE.md #8): a model-level rule the request schema
+        # doesn't carry (description 1-1024 chars, reserved slug, …) is the
+        # caller's error, not ours. It used to surface as a bare 500.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "SKILL_INVALID",
+                "message": "; ".join(
+                    f"{'.'.join(str(p) for p in e['loc']) or 'skill'}: {e['msg'].removeprefix('Value error, ')}"
+                    for e in exc.errors()
+                ),
+                "errors": [{"field": ".".join(str(p) for p in e["loc"]), "message": e["msg"]} for e in exc.errors()],
+            },
+        ) from exc
     return SkillResponse.from_config(config)
 
 
@@ -249,7 +293,7 @@ def list_skills(
     enabled = resolve_enabled_skills(user)
     visible = visible_configs(configs, access, enabled)
 
-    return [SkillResponse.from_config(c) for c in visible]
+    return [SkillResponse.from_config(c, access) for c in visible]
 
 
 @router.get("/marketplace", response_model=list[SkillResponse])
@@ -274,7 +318,7 @@ def get_skill_by_slug(
     config = skill_config.find_by_slug(owner_id, slug)
     if config is None or not request.state.access.can_access_skill(config):
         raise HTTPException(status_code=404, detail="Skill not found")
-    return _fill_welcome_buckets(SkillResponse.from_config(config), user)
+    return _fill_welcome_buckets(SkillResponse.from_config(config, request.state.access), user)
 
 
 @router.get("/{skill_id}", response_model=SkillResponse)
@@ -294,7 +338,7 @@ def get_skill(
     if config is None or not request.state.access.can_access_skill(config):
         # Collapse "not found" and "not visible" into one response — don't leak existence.
         raise HTTPException(status_code=404, detail="Skill not found")
-    return _fill_welcome_buckets(SkillResponse.from_config(config), user)
+    return _fill_welcome_buckets(SkillResponse.from_config(config, request.state.access), user)
 
 
 @router.put("/{skill_id}", response_model=SkillResponse)
@@ -322,16 +366,17 @@ def update_skill(
     # (`aitana-admin`). Everyone else must fork. Note: platform skills are
     # seeded from admin/platform_seed.py, so a direct edit here can be
     # overwritten by a re-seed — the fork path is the durable one for tenants.
-    if config.owner_id == PLATFORM_OWNER_UID:
-        if not _is_platform_admin(request.state.access):
-            raise HTTPException(
-                status_code=403,
-                detail="Platform-owned skills are read-only. Fork to customize.",
-            )
-    elif not request.state.access.is_skill_admin(config):
+    if not _can_edit(config, request.state.access):
         # User can see it, just can't modify it → real 403.
         # Owner or a `one-admin` group-tag holder (Skill Studio admins) may edit.
+        if config.owner_id == PLATFORM_OWNER_UID:
+            raise HTTPException(status_code=403, detail="Platform-owned skills are read-only. Fork to customize.")
         raise HTTPException(status_code=403, detail="Only the skill owner or an admin can update")
+
+    check_machine_access_control(user, updates.get("accessControl"))
+    # Validate the MERGED skill: narrowing a knowledge base is not the only way
+    # to widen its reach — widening the skill's accessControl alone does too.
+    validate_skill_extensions({**config.model_dump(by_alias=True, mode="json"), **updates}, user)
 
     # v6.9.0 9.2: `featured` is a marketplace-ranking lever — platform-admin only.
     # Reject rather than silently drop it (NEVER-SILENT), so a non-admin knows.
@@ -350,7 +395,7 @@ def update_skill(
     updated = skill_config.update_skill(skill_id, updates)
     if updated is None:
         raise HTTPException(status_code=404, detail="Skill not found")
-    return SkillResponse.from_config(updated)
+    return SkillResponse.from_config(updated, request.state.access)
 
 
 @router.delete("/{skill_id}", status_code=204)
@@ -409,7 +454,7 @@ def fork_skill(
         tags=list(source.tags),
         references=dict(source.references),
     )
-    return SkillResponse.from_config(new_skill)
+    return SkillResponse.from_config(new_skill, request.state.access)
 
 
 @router.get("/{skill_id}/sessions", response_model=ListSessionsResponse)

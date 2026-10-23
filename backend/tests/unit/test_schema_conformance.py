@@ -30,24 +30,22 @@ def _declaration_json(func) -> str:
     return decl.model_dump_json(exclude_none=True)
 
 
-class TestTheDefectIsReal:
+class TestUpstreamSchema:
     """Pin the upstream behaviour, so we notice if ADK ever stops emitting it."""
 
-    def test_adk_emits_a_rejected_key_for_dict_any_params(self):
+    def test_adk2_emits_json_schema_dictionary_properties(self):
         raw = _declaration_json(request_confirmation)
 
-        assert "additional_properties" in raw, (
-            "ADK no longer emits additional_properties for dict[str, Any] — "
-            "the sanitizer may be retirable; verify against Gemini Express first."
-        )
+        assert "parameters_json_schema" in raw
+        assert "additionalProperties" in raw
 
     def test_the_offending_params_are_the_reported_ones(self):
         decl = FunctionTool(func=request_confirmation)._get_declaration()
         schema = json.loads(decl.model_dump_json(exclude_none=True))
         offenders = {
             name
-            for name, spec in schema["parameters"]["properties"].items()
-            if "additional_properties" in json.dumps(spec)
+            for name, spec in schema["parameters_json_schema"]["properties"].items()
+            if "additionalProperties" in json.dumps(spec)
         }
 
         assert offenders == {"fields", "context"}
@@ -190,7 +188,7 @@ class TestAgainstTheRealDeclaration:
 
         sanitize_function_declarations(req)
 
-        assert "additional_properties" not in decl.model_dump_json()
+        assert not any(key in decl.model_dump_json() for key in REJECTED_SCHEMA_KEYS)
 
     def test_real_declaration_keeps_its_parameters(self):
         """Over-stripping the real schema would break tool calling outright."""
@@ -199,8 +197,8 @@ class TestAgainstTheRealDeclaration:
         sanitize_function_declarations(req)
         schema = json.loads(decl.model_dump_json(exclude_none=True))
 
-        assert set(schema["parameters"]["properties"]) >= {"message", "kind", "fields", "context"}
-        assert schema["parameters"]["properties"]["message"]["type"] == "STRING"
+        assert set(schema["parameters_json_schema"]["properties"]) >= {"message", "kind", "fields", "context"}
+        assert schema["parameters_json_schema"]["properties"]["message"]["type"] == "string"
 
     def test_sanitizing_is_idempotent(self):
         req, _decl = self._real_request()

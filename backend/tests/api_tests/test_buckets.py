@@ -21,6 +21,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from adk.agui import APP_NAME
 from auth import User, build_access_context, get_current_user
 from buckets.routes import router
 from db.models import BucketConfig
@@ -211,7 +212,7 @@ def test_thumbnail_is_cached_second_call_skips_gcs(app: FastAPI, client: TestCli
 #
 # The file endpoints stream bytes from an arbitrary bucket name under the SA's
 # credentials; `_authorize_bucket_read` gates that. The load-bearing case is the
-# CROSS-TENANT DENY: a non-ONE, non-admin caller must NOT read the ONE llmops
+# CROSS-TENANT DENY: a non-example-team, non-admin caller must NOT read the ONE llmops
 # bucket via any verb, and the SA read must never even be attempted.
 # ---------------------------------------------------------------------------
 
@@ -219,7 +220,7 @@ ONE_LLMOPS_BUCKET = "your-project-id-dev-llmops-bucket"
 
 
 def _one_user() -> User:
-    return _make_user(uid="one-uid", email="analyst@acmeenergy.com", domain="acmeenergy.com")
+    return _make_user(uid="one-uid", email="analyst@energy.example", domain="energy.example")
 
 
 @pytest.mark.parametrize(
@@ -245,7 +246,7 @@ def test_cross_tenant_read_denied_403(app: FastAPI, client: TestClient, verb_pat
 
 
 def test_tenant_user_reads_own_bucket_200(app: FastAPI, client: TestClient) -> None:
-    """A ONE user reads the ONE llmops bucket (their resolved tenant bucket)."""
+    """A tenant user reads the ONE llmops bucket (their resolved tenant bucket)."""
     cleanup = _install_user(app, _one_user())
     factory, _ = _mock_gcs_blob(b"%PDF-1.7 fake", "application/pdf")
     try:
@@ -627,7 +628,7 @@ def test_self_registered_config_does_not_open_the_gate(app: FastAPI, client: Tes
         ownerId="stranger",  # <- owner-wins would return True
         ownerEmail="x@evil.com",
         accessControl={"type": "private"},
-        allowedDomains=["acmeenergy.com"],
+        allowedDomains=["energy.example"],
     )
     factory, _ = _mock_gcs_blob(b"%PDF-1.7 secret", "application/pdf")
     try:
@@ -649,7 +650,7 @@ def test_config_without_allowed_domains_fails_closed(app: FastAPI, client: TestC
     cleanup = _install_user(app, _one_user())
     legacy = _make_bucket(
         gcsBucket=ONE_LLMOPS_BUCKET,
-        accessControl={"type": "domain", "domain": "acmeenergy.com"},
+        accessControl={"type": "domain", "domain": "energy.example"},
         allowedDomains=[],  # predates the field / written straight to Firestore
     )
     factory, _ = _mock_gcs_blob(b"%PDF-1.7 secret", "application/pdf")
@@ -677,11 +678,11 @@ def test_blessed_bucket_readable_by_its_domain(app: FastAPI, client: TestClient)
         gcsBucket="one-extra-library-bucket",
         ownerId="admin-uid",
         ownerEmail="admin@yourcompany.com",
-        accessControl={"type": "tagged", "tags": ["ONE"]},
-        allowedDomains=["acmeenergy.com"],
+        accessControl={"type": "tagged", "tags": ["example-team"]},
+        allowedDomains=["energy.example"],
     )
     one_user_with_tag = _make_user(
-        uid="one-uid", email="analyst@acmeenergy.com", domain="acmeenergy.com", group_tags=frozenset({"ONE"})
+        uid="one-uid", email="analyst@energy.example", domain="energy.example", group_tags=frozenset({"example-team"})
     )
     cleanup()
     cleanup = _install_user(app, one_user_with_tag)
@@ -733,3 +734,198 @@ def test_admin_register_requires_allowed_domains(app: FastAPI, client: TestClien
     assert resp.status_code == 400
     assert resp.json()["detail"]["code"] == "ALLOWED_DOMAINS_REQUIRED"
     create.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-08 — per-PATH authorization inside a shared tenant bucket.
+#
+# Several login domains can share one documents bucket per deployment, and every
+# user's uploads / chat artifacts / each domain's brand assets sit beside the
+# shared library. Access policy is per client, per instance: by default everyone
+# admitted to the bucket is one client and may see all of it except config/.
+# BUCKET_PER_USER_ISOLATION=1 walls off each user and domain, for an instance
+# that maps several clients to one bucket.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def isolation_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BUCKET_PER_USER_ISOLATION", "1")
+
+
+@pytest.fixture
+def isolation_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BUCKET_PER_USER_ISOLATION", raising=False)
+
+
+def _list_client(prefixes: list[str], blob_names: list[str]):
+    from unittest.mock import MagicMock
+
+    blobs = []
+    for n in blob_names:
+        b = MagicMock()
+        b.name, b.size, b.content_type, b.updated = n, 1, "application/pdf", None
+        blobs.append(b)
+    it = MagicMock()
+    it.pages = iter([blobs])
+    it.prefixes = set(prefixes)
+    it.next_page_token = None
+    client = MagicMock()
+    client.list_blobs.return_value = it
+    return MagicMock(return_value=client)
+
+
+@pytest.mark.parametrize(
+    "verb_path",
+    [
+        "/list?prefix=users%2Fsomeone-else%2F",
+        "/preview?object=users%2Fsomeone-else%2Fdocs%2Fx%2Fsecret.pdf",
+        "/thumbnail?object=users%2Fsomeone-else%2Fdocs%2Fx%2Fsecret.pdf",
+        f"/preview?object={APP_NAME}%2Fsomeone-else%2Fuser%2Fx.pdf",
+        "/preview?object=brand%2Fother-tenant.com%2Ftemplates%2Fletterhead.pdf",
+        "/preview?object=example-datastore%2F..%2Fusers%2Fsomeone-else%2Fa.pdf",
+        "/list?prefix=config%2F",
+        "/preview?object=config%2Fllm_config.yaml",
+    ],
+)
+@pytest.mark.usefixtures("isolation_on")
+def test_other_principals_private_paths_denied(app: FastAPI, client: TestClient, verb_path: str) -> None:
+    """With isolation on, a user inside their OWN tenant bucket cannot reach another
+    user's uploads/artifacts or another domain's brand assets — and the SA read never runs."""
+    cleanup = _install_user(app, _one_user())
+    factory, _ = _mock_gcs_blob(_one_page_pdf_bytes(), "application/pdf")
+    try:
+        with (
+            patch("buckets.routes.resolve_documents_bucket", return_value=ONE_LLMOPS_BUCKET),
+            patch("buckets.routes._gcs_storage.Client", factory),
+        ):
+            resp = client.get(f"/api/buckets/{ONE_LLMOPS_BUCKET}{verb_path}")
+    finally:
+        cleanup()
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "BUCKET_PATH_NOT_AUTHORIZED"
+    factory.assert_not_called()
+
+
+@pytest.mark.usefixtures("isolation_on")
+def test_root_listing_hides_private_roots(app: FastAPI, client: TestClient) -> None:
+    """Climbing to the bucket root shows the shared library, never `users/` etc."""
+    cleanup = _install_user(app, _one_user())
+    factory = _list_client(["example-datastore/", "users/", f"{APP_NAME}/", "brand/", "config/"], ["readme.pdf"])
+    try:
+        with (
+            patch("buckets.routes.resolve_documents_bucket", return_value=ONE_LLMOPS_BUCKET),
+            patch("buckets.routes._gcs_storage.Client", factory),
+        ):
+            resp = client.get(f"/api/buckets/{ONE_LLMOPS_BUCKET}/list?prefix=")
+    finally:
+        cleanup()
+    assert resp.status_code == 200
+    names = {e["name"] for e in resp.json()["entries"]}
+    assert names == {"example-datastore/", "readme.pdf"}
+
+
+@pytest.mark.usefixtures("isolation_on")
+def test_shared_library_and_own_paths_still_readable(app: FastAPI, client: TestClient) -> None:
+    """The fix must not break the library itself, the caller's own area or their brand."""
+    user = _one_user()
+    cleanup = _install_user(app, user)
+    factory, _ = _mock_gcs_blob(b"%PDF-1.7 fake", "application/pdf")
+    try:
+        with (
+            patch("buckets.routes.resolve_documents_bucket", return_value=ONE_LLMOPS_BUCKET),
+            patch("buckets.routes._gcs_storage.Client", factory),
+        ):
+            for obj in (
+                "example-datastore%2FPPAs%2Flongform%2Fa.pdf",
+                f"users%2F{user.uid}%2Fdocs%2Fx%2Fmine.pdf",
+                "brand%2Fenergy.example%2Ftemplates%2Fletterhead.pdf",
+            ):
+                resp = client.get(f"/api/buckets/{ONE_LLMOPS_BUCKET}/preview?object={obj}")
+                assert resp.status_code == 200, obj
+    finally:
+        cleanup()
+
+
+def test_platform_admin_keeps_full_path_access(app: FastAPI, client: TestClient) -> None:
+    cleanup = _install_user(app, _admin_user())
+    factory, _ = _mock_gcs_blob(b"%PDF-1.7 fake", "application/pdf")
+    try:
+        with patch("buckets.routes._gcs_storage.Client", factory):
+            resp = client.get(f"/api/buckets/{ONE_LLMOPS_BUCKET}/preview?object=users%2Fanyone%2Fa.pdf")
+    finally:
+        cleanup()
+    assert resp.status_code == 200
+
+
+@pytest.mark.usefixtures("isolation_off")
+@pytest.mark.parametrize(
+    "verb_path",
+    [
+        "/list?prefix=users%2Fa-colleague%2F",
+        "/preview?object=users%2Fa-colleague%2Fdocs%2Fx%2Fshared.pdf",
+        "/preview?object=aitana_platform%2Fa-colleague%2Fuser%2Fx.pdf",
+        "/preview?object=brand%2Fsister-domain.com%2Ftemplates%2Fletterhead.pdf",
+    ],
+)
+def test_colleagues_areas_readable_by_default(app: FastAPI, client: TestClient, verb_path: str) -> None:
+    """Per client, per instance: by default colleagues see each other's uploads,
+    artifacts and brand assets (2026-10-14 — the 10-08 isolation went too far)."""
+    cleanup = _install_user(app, _one_user())
+    factory = (
+        _list_client([], [])
+        if verb_path.startswith("/list")
+        else _mock_gcs_blob(b"%PDF-1.7 fake", "application/pdf")[0]
+    )
+    try:
+        with (
+            patch("buckets.routes.resolve_documents_bucket", return_value=ONE_LLMOPS_BUCKET),
+            patch("buckets.routes._gcs_storage.Client", factory),
+        ):
+            resp = client.get(f"/api/buckets/{ONE_LLMOPS_BUCKET}{verb_path}")
+    finally:
+        cleanup()
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.usefixtures("isolation_off")
+@pytest.mark.parametrize(
+    "verb_path",
+    [
+        "/list?prefix=config%2F",
+        "/preview?object=config%2Fllm_config.yaml",
+        "/preview?object=example-datastore%2F..%2Fconfig%2Fllm_config.yaml",
+    ],
+)
+def test_config_and_traversal_denied_by_default(app: FastAPI, client: TestClient, verb_path: str) -> None:
+    """config/ is operator-only and `..` is refused whatever the isolation setting."""
+    cleanup = _install_user(app, _one_user())
+    factory, _ = _mock_gcs_blob(_one_page_pdf_bytes(), "application/pdf")
+    try:
+        with (
+            patch("buckets.routes.resolve_documents_bucket", return_value=ONE_LLMOPS_BUCKET),
+            patch("buckets.routes._gcs_storage.Client", factory),
+        ):
+            resp = client.get(f"/api/buckets/{ONE_LLMOPS_BUCKET}{verb_path}")
+    finally:
+        cleanup()
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "BUCKET_PATH_NOT_AUTHORIZED"
+    factory.assert_not_called()
+
+
+@pytest.mark.usefixtures("isolation_off")
+def test_root_listing_shows_everything_but_config_by_default(app: FastAPI, client: TestClient) -> None:
+    cleanup = _install_user(app, _one_user())
+    factory = _list_client(["example-datastore/", "users/", "aitana_platform/", "brand/", "config/"], ["readme.pdf"])
+    try:
+        with (
+            patch("buckets.routes.resolve_documents_bucket", return_value=ONE_LLMOPS_BUCKET),
+            patch("buckets.routes._gcs_storage.Client", factory),
+        ):
+            resp = client.get(f"/api/buckets/{ONE_LLMOPS_BUCKET}/list?prefix=")
+    finally:
+        cleanup()
+    assert resp.status_code == 200
+    names = {e["name"] for e in resp.json()["entries"]}
+    assert names == {"example-datastore/", "users/", "aitana_platform/", "brand/", "readme.pdf"}

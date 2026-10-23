@@ -34,6 +34,8 @@ import { A2uiSurface } from "@a2ui/react/v0_9";
 import { fetchWithAuth } from "@/lib/apiClient";
 import { useActionDrivenAgent } from "@/hooks/useActionDrivenAgent";
 import { emitSkillSwitchIntent } from "@/lib/skillSwitch";
+import { SurfaceErrorBoundary } from "./SurfaceErrorBoundary";
+import { logger } from "@/lib/logger";
 import {
   type SurfacePolicy,
   useSurfaceRegistry,
@@ -97,6 +99,23 @@ export function A2UISurfaceMount({
   const registry = useSurfaceRegistry();
   const state = useSurfaceState(surfaceId);
 
+  const [selectionLabel, setSelectionLabel] = useState<string | null>(null);
+  useEffect(() => {
+    if (!state?.surface) { setSelectionLabel(null); return; }
+    const model = state.surface.dataModel;
+    const update = () => {
+      const selected = model.get("/selected");
+      if (!selected || typeof selected !== "object" || Array.isArray(selected)) { setSelectionLabel(null); return; }
+      const keys = Object.keys(selected).filter(key => selected[key] === true);
+      const visible = model.get("/visible");
+      const hidden = Array.isArray(visible) ? keys.filter(key => !visible.includes(key)).length : 0;
+      setSelectionLabel(`${keys.length} selected${hidden ? ` (${hidden} hidden by filters)` : ""}`);
+    };
+    update();
+    const subscription = model.subscribe("/", update);
+    return () => subscription.unsubscribe();
+  }, [state?.surface]);
+
   useLayoutEffect(() => {
     registry.register(surfaceId, ref, policy);
     return () => {
@@ -143,6 +162,13 @@ export function A2UISurfaceMount({
   // otherwise reads as "nothing happened" and gets clicked again (the 2026-07-14
   // obligation-handoff report). Freeze it + show a persistent "Sent" badge.
   const [hasCompleted, setHasCompleted] = useState(false);
+  // Direct-action status (working → result | error), shown in a bar pinned to
+  // the TOP of the surface: a direct action's button can sit above a long list
+  // (the Inbox board), so a notice at the bottom would be off-screen = silent.
+  const [directStatus, setDirectStatus] = useState<{
+    kind: "working" | "ok" | "error";
+    text: string;
+  } | null>(null);
 
   // Subscribe to surface actions and route each one through the
   // configured dispatch path. Re-subscribes whenever the SurfaceModel
@@ -157,7 +183,13 @@ export function A2UISurfaceMount({
       // TEXT reply lands in the chat thread. surface-action-run is wrong for
       // this: its output only re-renders the surface, never chat text.
       if (String(action.name) === "chat:send") {
-        const prompt = (action.context as { prompt?: unknown } | undefined)?.prompt;
+        const context = action.context as { prompt?: unknown; requireSelection?: boolean; selected?: Record<string, unknown> } | undefined;
+        const prompt = context?.prompt;
+        if (context?.requireSelection && !Object.values(context.selected ?? {}).some(value => value === true)) {
+          setDirectStatus({ kind: "error", text: "Select one or more messages first." });
+          return;
+        }
+        setDirectStatus(null);
         if (typeof prompt === "string" && prompt.trim() && onChatMessage) {
           onChatMessage(prompt.trim());
         } else if (process.env.NODE_ENV !== "production") {
@@ -183,6 +215,70 @@ export function A2UISurfaceMount({
         }
         // No target id to switch to — fall through to the run path (legacy
         // surface-action-run handling) rather than silently dropping the click.
+      }
+      // direct:<name> — a deterministic server action, no model turn (two-way
+      // workbench mode C): "Mark read", "Open". The server re-checks the click
+      // against the surface it stashed, runs the handler, and answers with a
+      // message + A2UI patches for this surface. NEVER SILENT: busy overlay on
+      // click, then the message or a visible error.
+      if (String(action.name).startsWith("direct:")) {
+        if (actionInFlightRef.current) return;
+        actionInFlightRef.current = true;
+        setActionError(null);
+        setIsRunning(true);
+        setDirectStatus({ kind: "working", text: "Working…" });
+        try {
+          const res = await fetchWithAuth(
+            `/api/proxy/api/sessions/${encodeURIComponent(sessionId)}/surface-action-direct`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                surfaceId,
+                action: {
+                  name: action.name,
+                  sourceComponentId: action.sourceComponentId,
+                  timestamp: action.timestamp,
+                  context: action.context,
+                },
+              }),
+            },
+          );
+          const body = (await res.json().catch(() => null)) as {
+            status?: string;
+            message?: string;
+            messages?: unknown[];
+            detail?: unknown;
+          } | null;
+          if (!res.ok) {
+            setDirectStatus({
+              kind: "error",
+              text:
+                typeof body?.detail === "string"
+                  ? body.detail
+                  : `That action was refused (HTTP ${res.status}).`,
+            });
+            return;
+          }
+          if (Array.isArray(body?.messages) && body.messages.length > 0) {
+            registry.appendMessages(
+              surfaceId,
+              body.messages as Parameters<typeof registry.appendMessages>[1],
+              `direct:${surfaceId}:${action.timestamp ?? Date.now()}`,
+            );
+          }
+          setDirectStatus(
+            body?.status === "ok"
+              ? { kind: "ok", text: body.message || "Done." }
+              : { kind: "error", text: body?.message || "That didn't work." },
+          );
+        } catch {
+          setDirectStatus({ kind: "error", text: "Couldn't reach the server. Try again." });
+        } finally {
+          actionInFlightRef.current = false;
+          setIsRunning(false);
+        }
+        return;
       }
       // Per-action routing (tool-results-as-a2ui / 7.3 M3): an action whose
       // name uses the `run:` convention drives a full agent turn
@@ -295,12 +391,43 @@ export function A2UISurfaceMount({
       }
     });
     return () => sub.unsubscribe();
-  }, [state?.surface, surfaceId, sessionId, triggerOnAction, triggerAction, skillId, onChatMessage]);
+  }, [state?.surface, surfaceId, sessionId, triggerOnAction, triggerAction, skillId, onChatMessage, registry]);
 
   return (
     <div ref={ref} className={className} data-surface={surfaceId}>
       {state?.surface && (
         <div className="relative">
+          {directStatus && (
+            <div
+              role={directStatus.kind === "error" ? "alert" : "status"}
+              aria-live="polite"
+              data-testid="a2ui-surface-direct-status"
+              data-kind={directStatus.kind}
+              className={
+                "sticky top-0 z-10 mb-2 flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium shadow-sm backdrop-blur-sm " +
+                (directStatus.kind === "error"
+                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                  : directStatus.kind === "ok"
+                    ? "border-emerald-500/30 bg-emerald-50/90 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-400"
+                    : "border-border bg-background/90 text-muted-foreground")
+              }
+            >
+              <span aria-hidden="true">
+                {directStatus.kind === "error" ? "⚠" : directStatus.kind === "ok" ? "✓" : "…"}
+              </span>
+              <span className="flex-1">{directStatus.text}</span>
+              {directStatus.kind !== "working" && (
+                <button
+                  type="button"
+                  aria-label="Dismiss"
+                  className="opacity-60 hover:opacity-100"
+                  onClick={() => setDirectStatus(null)}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          )}
           {/* Dim + disable the surface while an action-triggered run is in
               flight. `pointer-events-none` is belt-and-braces on top of the
               ref guard: it stops a stray click reaching the button DOM at all
@@ -309,12 +436,30 @@ export function A2UISurfaceMount({
           <div
             aria-busy={isRunning}
             className={
-              isRunning || (hasCompleted && triggerOnAction)
+              isRunning || directStatus?.kind === "working" || (hasCompleted && triggerOnAction)
                 ? "pointer-events-none opacity-60 transition-opacity"
                 : "transition-opacity"
             }
           >
-            <A2uiSurface surface={state.surface} />
+            {selectionLabel !== null && <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-2 py-2 text-xs font-medium" aria-live="polite">{selectionLabel}</div>}
+            {/*
+              A malformed A2UI payload throwing here used to unmount the whole
+              subtree silently (#8 NEVER SILENT). The boundary is per-surface on
+              purpose: a bad surface degrades to an in-place notice while its
+              siblings and the chat keep working.
+            */}
+            <SurfaceErrorBoundary
+              surfaceId={surfaceId}
+              onError={(err, info) =>
+                logger.error(err, {
+                  event: "surface_render_failed",
+                  surfaceId,
+                  componentStack: info.componentStack ?? undefined,
+                })
+              }
+            >
+              <A2uiSurface surface={state.surface} />
+            </SurfaceErrorBoundary>
           </div>
           {isRunning && (
             <div

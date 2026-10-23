@@ -1,16 +1,26 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { ChatMessageListWithSurfaces } from "@/components/chat/ChatMessageList";
 import type { DocTabData } from "@/components/doc-browser/DocTab";
 import { DocListView } from "@/components/doc-browser/DocListView";
 import { DocTabsBar } from "@/components/doc-browser/DocTabsBar";
+import { useVoiceConfig } from "@/hooks/useVoiceConfig";
+import { cancelVoicePlayback } from "@/hooks/useAutoReadAloud";
+import { VoiceComposerControls } from "@/components/chat/VoiceComposerControls";
+import { AutoReadToggle } from "@/components/chat/AutoReadToggle";
 import { UploadDropZone } from "@/components/doc-browser/UploadDropZone";
+import { AccountPanel } from "@/components/navigation/AccountPanel";
+import { SkillWelcome } from "@/components/chat/SkillWelcome";
+import { SkillArt } from "@/components/chat/SkillArt";
+import { useReplyReadyNotification } from "@/hooks/useReplyReadyNotification";
+import { StreamErrorBanner } from "@/components/chat/StreamErrorBanner";
+import { useRegisterSidebarToggle } from "@/components/shells/ShellActionsContext";
 import type { ParsedDocument } from "@/hooks/useDocBrowser";
 import type { User } from "@/lib/firebase";
 import {
   useSkillAgent,
-  type StreamError,
   type ToolCallState,
   type DelegationMarkerItem,
   type CompactionNoticeItem,
@@ -40,13 +50,15 @@ import { useBackendReady } from "@/hooks/useBackendReady";
 import { computeIncludedDocIds } from "@/lib/docContext";
 import { notifySessionsChanged, subscribeSessionsChangedDetailed } from "@/lib/sessionEvents";
 import { useSkillSessions } from "@/hooks/useSkillSessions";
+import { RecentConversations } from "@/components/chat/RecentConversations";
+import { useRecentDocuments, type RecentDocument } from "@/hooks/useRecentDocuments";
 import { SkillSessionPanel } from "@/components/chat/SkillSessionPanel";
+import { SharedSessionsSection } from "@/components/chat/SharedSessionsSection";
 import DocumentHistoryPanel from "@/components/chat/DocumentHistoryPanel";
 import { SidebarSection } from "@/components/chat/SidebarSection";
 import { InContextBadge } from "@/components/chat/InContextBadge";
 import { Workbench, type WorkbenchTab } from "@/components/chat/Workbench";
 import { WorkbenchHome } from "@/components/chat/WorkbenchHome";
-import { AssistantIntroBubble } from "@/components/chat/AssistantIntroBubble";
 import { SkillExamplesPicker } from "@/components/chat/SkillExamplesPicker";
 import { GCSFileBrowser } from "@/components/doc-browser/GCSFileBrowser";
 import type { ExampleDocument, ExamplePrompt } from "@/types/skill";
@@ -60,18 +72,39 @@ import {
   useSurfaceRegistry,
   useSurfaceState,
 } from "@/providers/SurfaceRegistry";
+import { WorkspaceAgentTools } from "./WorkspaceAgentTools";
 import { useAGUIAgent } from "@/providers/AGUIProvider";
 import { A2UISurfaceMount } from "@/components/protocols/A2UISurfaceMount";
 import { CompareLauncher, type CompareDocIdentity } from "@/components/workspace/CompareLauncher";
 import type { ActionRunActivitySink } from "@/hooks/useActionDrivenAgent";
 import { ObligationArtefactTab } from "@/components/workspace/ObligationArtefactTab";
 import { SourcesArtefactTab } from "@/components/workspace/SourcesArtefactTab";
+import { HelpArtefactTab } from "@/components/workspace/HelpArtefactTab";
+import { setHelpOpener } from "@/lib/helpViewer";
 import { ClausesArtefactTab } from "@/components/workspace/ClausesArtefactTab";
 import { SeriesArtefactTab } from "@/components/workspace/SeriesArtefactTab";
 import { shouldShowCompareLauncher } from "@/lib/compareLauncher";
+import {
+  artifactsExcludingOpenableDocuments,
+  newlyCreatedDocuments,
+  type CreatedDocumentRef,
+} from "@/lib/createdDocument";
 import { forgetFocusedResult, nextFocusedResult } from "@/lib/workbenchFocus";
 import { DocumentPanel } from "@/components/document/DocumentPanel";
 import { LatencyHUD } from "@/components/dev/LatencyHUD";
+import { ProjectsSection } from "@/components/projects/ProjectsSection";
+import { ProjectChatsList } from "@/components/projects/ProjectChatsList";
+import {
+  SessionProjectMenu,
+  SessionProjectNotice,
+  type SessionProjectFeedback,
+} from "@/components/projects/SessionProjectMenu";
+import { YourInstructionsCard } from "@/components/projects/YourInstructionsCard";
+import { useMyInstructions } from "@/hooks/useMyInstructions";
+import { useProject, useProjectDocuments, useProjectSessions, type ProjectDocument, type ProjectSummary } from "@/hooks/useProjects";
+import { projectChatHref, useProjectChatHref } from "@/hooks/useProjectChatHref";
+import { setActiveProject } from "@/lib/activeProject";
+import { ContextBanner, type ActiveProjectContext } from "@/components/chat/ContextBanner";
 
 /**
  * v6.23.0 WORKSPACE-HOME-PERSISTENCE — workbench tab ids for the two jobs the
@@ -88,6 +121,8 @@ import { LatencyHUD } from "@/components/dev/LatencyHUD";
  * TAB it lives in is addressed separately, so the ids can't collide.
  */
 const HOME_TAB_ID = "workspace";
+/** localStorage key for the sidebar's open/closed preference. */
+const SIDEBAR_OPEN_KEY = "aitana.sidebar.open";
 const WORKSPACE_RESULT_TAB_ID = "workspace-result";
 
 /**
@@ -195,6 +230,22 @@ function ArtifactPresenceReporter({ onPresent }: { onPresent: (present: boolean)
   return null;
 }
 
+/**
+ * While the chat has a Help result tab, help links in chat answers open there
+ * (lib/helpViewer): expand the workbench and focus the tab. Inside the provider
+ * for `useArtifacts`; renders nothing.
+ */
+function HelpOpenerBridge({ onOpen }: { onOpen: (surfaceId: string) => void }) {
+  const helpSurfaceId =
+    useArtifacts().find((a) => a.kind === "help" && a.placement !== "chat")?.surfaceId ?? null;
+  useEffect(() => {
+    if (!helpSurfaceId) return;
+    setHelpOpener(() => onOpen(helpSurfaceId));
+    return () => setHelpOpener(null);
+  }, [helpSurfaceId, onOpen]);
+  return null;
+}
+
 function WorkspaceA2uiEventRouter() {
   const agent = useAGUIAgent();
   const registry = useSurfaceRegistry();
@@ -279,7 +330,25 @@ function RehydrateSurfaces({
  * Lives INSIDE SurfaceRegistryProvider scope so `useSurfaceState` works.
  * Renders 2 tabs (Workspace + Document) with EmptyTab fallbacks.
  */
+/** A project document in the shape the recent-documents picker reads. */
+function projectDocAsRecent(d: ProjectDocument): RecentDocument {
+  return {
+    id: d.id,
+    originalFilename: d.originalFilename,
+    sourceFormat: d.sourceFormat,
+    parseStatus: d.parseStatus ?? "parsed",
+    folderId: d.folderId ?? null,
+    createdAt: d.createdAt ?? null,
+    updatedAt: d.updatedAt ?? null,
+    lastUsedAt: d.lastUsedAt ?? d.updatedAt ?? d.createdAt ?? "",
+    lastSessionId: d.lastSessionId ?? null,
+    lastSessionTitle: d.lastSessionTitle ?? null,
+    projectIds: d.projectIds,
+  };
+}
+
 function WorkbenchPane({
+  onOpenCreatedDocument,
   activeTabId,
   sessionId,
   skillId,
@@ -295,6 +364,9 @@ function WorkbenchPane({
   onPickExample,
   onPickPrompt,
   onOpenLauncherDoc,
+  onOpenRecentDocument,
+  projectId = null,
+  projectName = null,
   onOpenSource,
   onSurfaceChatMessage,
   compareOptedIn,
@@ -315,6 +387,10 @@ function WorkbenchPane({
   actionStageLabel,
   actionError,
 }: {
+  /** DOC-WORKBENCH P1 — mount a newly generated document in the Document tab
+   * instead of leaving the user to find it in the sidebar. See
+   * lib/createdDocument.ts for the two rules (one tab; failures keep a card). */
+  onOpenCreatedDocument?: (doc: CreatedDocumentRef) => void;
   activeTabId: string | null;
   sessionId: string | null;
   skillId: string;
@@ -367,6 +443,13 @@ function WorkbenchPane({
   /** Open the launcher-picked document in the Document tab (import-by-reference
    * for a bucket `gs_url`, focus for an already-open `doc_id`). */
   onOpenLauncherDoc?: (identity: CompareDocIdentity) => void;
+  /** Open one of the user's own recent documents in the Document tab. When
+   * set, the picker and the Compare launcher offer the user's recent documents
+   * in place of the skill's shared demo examples. */
+  onOpenRecentDocument?: (doc: RecentDocument) => void;
+  /** The project the chat is in: the picker shows ITS documents, not all recent ones. */
+  projectId?: string | null;
+  projectName?: string | null;
   /** 6.15: open an enterprise-search (gs://) source in the Document tab (parse +
    * add to selected). Throws on failure so the Sources tab can show an error. */
   onOpenSource?: (bucket: string, objectName: string) => Promise<void>;
@@ -409,12 +492,18 @@ function WorkbenchPane({
   // Chat-placement artifacts (the obligation elicitation form, 7.8 M1) render
   // inline in the chat thread (ChatPlacementForms), NOT as workbench tabs —
   // exclude them from every workbench-facing derivation below.
-  const workbenchArtifacts = artifacts.filter((a) => a.placement !== "chat");
+  // DOC-WORKBENCH P1 — an openable created document becomes a DOCUMENT tab, so
+  // it must not also appear as a "Result" tab (one tab per document). A FAILED
+  // generation has no docId, is therefore not openable, and deliberately keeps
+  // its card so the error is visible (NEVER-SILENT #8).
+  const workbenchArtifacts = artifactsExcludingOpenableDocuments(
+    artifacts.filter((a) => a.placement !== "chat"),
+  );
   const hasArtifacts = workbenchArtifacts.length > 0;
   const workspaceHasContent = Boolean(workspaceSurface?.surface);
   // v6.4.0 4.5 SKILL-ONBOARDING M2 → v6.23.0 WORKSPACE-HOME-PERSISTENCE.
   // The picker used to be an onboarding affordance that a first message
-  // (isFreshChat) or any agent surface switched off. Dana's UAT point was
+  // (isFreshChat) or any agent surface switched off. a tester's UAT point was
   // exactly that it should NOT be: "it would be nice to also have the list of
   // skills this assistant can do for OTHER ITERATIONS, instead of creating a
   // new chat."
@@ -425,7 +514,30 @@ function WorkbenchPane({
   // its tiles up mid-conversation would advertise work it can't route (CLAUDE.md
   // #8: never a dead end). Specialists therefore keep the ORIGINAL first-turn
   // onboarding behaviour; only skills with a delegation allow-list persist.
-  const hasPickerContent = welcomeExamples.length > 0 || welcomePrompts.length > 0;
+  // The user's own documents, most recently worked with first. They replace
+  // the skill's shared demo examples in the picker and the launcher — a
+  // returning user picks up their own work (customer feedback 2026-10-20:
+  // "the documents under 'Pick a document' are not documents I have worked on").
+  const allRecentDocs = useRecentDocuments();
+  // In a project, "Pick up where you left off" is the project's documents —
+  // the chat sees exactly these, so the picker should too.
+  const projectDocs = useProjectDocuments(projectId);
+  const recentDocs = useMemo(
+    () =>
+      projectId
+        ? {
+            documents: projectDocs.documents.map(projectDocAsRecent),
+            status: projectDocs.status === "idle" ? ("ready" as const) : projectDocs.status,
+            refetch: projectDocs.retry,
+          }
+        : allRecentDocs,
+    [projectId, projectDocs.documents, projectDocs.status, projectDocs.retry, allRecentDocs],
+  );
+  const recentEnabled = Boolean(onOpenRecentDocument);
+  // In a project the picker is the project's documents, on any skill — not
+  // only skills that ship example documents.
+  const hasPickerContent =
+    welcomeExamples.length > 0 || welcomePrompts.length > 0 || (Boolean(projectId) && recentEnabled);
   const showPicker = hasPickerContent && (canDelegate || isFreshChat);
   // PPA-COMPARE-LAUNCHER M2: the Compare launcher renders on Workspace Home for
   // opted-in skills that own a launcher-capable tool (`optedIn` alone covers
@@ -477,7 +589,7 @@ function WorkbenchPane({
   // (repo principle #7 — auto-focus new workbench elements). extract → extract →
   // compare fills tabs; focus tracks the latest one.
   //
-  // v6.23.0 B4 — "Workspace tab sometimes needs a second click" (Dana; Mark had
+  // v6.23.0 B4 — "Workspace tab sometimes needs a second click" (a tester; Mark had
   // seen it too). This ref used to be REPLACED with the current id set on every
   // run (`prevArtifactIdsRef.current = currentIds`). `listArtifacts()` only
   // returns surfaces whose `state.surface` is non-null, so an artifact that
@@ -496,6 +608,26 @@ function WorkbenchPane({
     );
     if (focusId) onWorkbenchTabChange(focusId);
   }, [workbenchArtifacts, onWorkbenchTabChange]);
+
+  // DOC-WORKBENCH P1 — a newly created document MOUNTS ITSELF. `handleDocClick`
+  // (via onOpenCreatedDocument) adds the Document tab and pulls the workbench to
+  // it, which is the same path an upload takes — so "create a document" ends
+  // with the document on screen rather than a card telling the user where to go
+  // look for it.
+  //
+  // Reads `artifacts`, not `workbenchArtifacts`: the filter above has already
+  // removed exactly the entries this effect exists to act on.
+  //
+  // The seen-set is per-session and only grows, matching `nextFocusedResult` —
+  // a surface that blinks out during re-registration must not read as a fresh
+  // arrival and reopen a document the user has navigated away from.
+  const openedDocumentIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!onOpenCreatedDocument) return;
+    for (const doc of newlyCreatedDocuments(artifacts, openedDocumentIdsRef.current)) {
+      onOpenCreatedDocument(doc);
+    }
+  }, [artifacts, onOpenCreatedDocument]);
 
   // SKILL-DELEGATION M3b: badge the Activity tab when new activity (a tool
   // call, a delegation, or a pushed activity surface) arrives while the user
@@ -626,6 +758,10 @@ function WorkbenchPane({
       // obligation-refusal panel) renders via the generic A2UISurfaceMount.
       a.kind === "obligation-analysis" ? (
         <ObligationArtefactTab surfaceId={a.surfaceId} className="h-full" sessionId={sessionId} />
+      ) : a.kind === "help" ? (
+        // Guide hits from knowledge_search: the cited help page itself, rendered
+        // like /help from the app's own build. See HelpArtefactTab.
+        <HelpArtefactTab surfaceId={a.surfaceId} className="h-full" />
       ) : a.kind === "sources" ? (
         // 6.11: web-search Sources render as a clean, clickable domain list
         // (Basic-catalog Text can't do links), reading the raw list from the
@@ -702,7 +838,7 @@ function WorkbenchPane({
   //
   // Critically: the dominant workspace surface is NOT in here any more. That
   // single condition (`showHome = !workspaceHasContent && hasArtifacts`) was the
-  // whole bug — Dana, 2026-08-06 UAT, raised 4×.
+  // whole bug — a tester, 2026-08-06 UAT, raised 4×.
   const showIndex = hasArtifacts || Boolean(activeTabId);
   const homeContent =
     showLauncher || showPicker || showIndex ? (
@@ -716,9 +852,19 @@ function WorkbenchPane({
             allowObligations={allowObligationsLauncher}
             docTabs={docTabs}
             exampleDocuments={welcomeExamples}
+            recentDocuments={recentEnabled ? recentDocs.documents : undefined}
             onCompareViaChat={(text) => onSurfaceChatMessage?.(text)}
             onAnalyzeViaChat={(text) => onSurfaceChatMessage?.(text)}
-            onOpenDocument={onOpenLauncherDoc}
+            onOpenDocument={(identity) => {
+              // A recent document isn't an open tab yet — open it, rather than
+              // focusing a tab that doesn't exist (a dead click).
+              const recent =
+                "doc_id" in identity && !docTabs.some((t) => t.id === identity.doc_id)
+                  ? recentDocs.documents.find((d) => d.id === identity.doc_id)
+                  : undefined;
+              if (recent && onOpenRecentDocument) onOpenRecentDocument(recent);
+              else onOpenLauncherDoc?.(identity);
+            }}
             activitySink={activitySink}
           />
         )}
@@ -728,6 +874,31 @@ function WorkbenchPane({
             onPickExample={onPickExample}
             prompts={welcomePrompts}
             onPickPrompt={onPickPrompt}
+            recent={recentEnabled ? recentDocs.documents : undefined}
+            recentStatus={recentDocs.status}
+            onRetryRecent={recentDocs.refetch}
+            onOpenRecent={onOpenRecentDocument}
+            onResumeSession={onSelectSession}
+            recentHeading={
+              projectId
+                ? {
+                    eyebrow: "This project",
+                    title: projectName ? `${projectName}: documents` : "Project documents",
+                    description: "What chats in this project can read. Open one to ask about it, or jump back into the conversation you had.",
+                  }
+                : undefined
+            }
+            recentEmpty={
+              projectId ? (
+                <>
+                  No documents in this project yet.{" "}
+                  <Link href={`/projects/${encodeURIComponent(projectId)}`} className="text-primary underline underline-offset-2">
+                    Add some in project settings
+                  </Link>
+                  .
+                </>
+              ) : undefined
+            }
           />
         )}
         {showIndex && (
@@ -766,7 +937,7 @@ function WorkbenchPane({
       content: activeTabId ? (
         <div className="flex h-full flex-col">
           <div className="min-h-0 flex-1 overflow-auto">
-            <DocumentPanel docId={activeTabId} />
+            <DocumentPanel docId={activeTabId} onSurfaceChatMessage={onSurfaceChatMessage} activitySink={activitySink} />
           </div>
           <DocumentHistoryPanel
             documentId={activeTabId}
@@ -813,49 +984,6 @@ function WorkbenchPane({
   );
 }
 
-function StreamErrorBanner({
-  error,
-  onRetry,
-  onDismiss,
-}: {
-  error: StreamError;
-  onRetry: () => void;
-  onDismiss: () => void;
-}) {
-  // Rate-limit / quota renders amber ("wait & retry") to visually distinguish a
-  // key/quota issue from a red "the demo is broken" error.
-  const amber = error.kind === "rate_limited";
-  const boxTone = amber
-    ? "border-amber-500/40 bg-amber-500/10 text-amber-700"
-    : "border-destructive/40 bg-destructive/10 text-destructive";
-  const btnTone = amber
-    ? "border-amber-500/40 hover:bg-amber-500/20"
-    : "border-destructive/40 hover:bg-destructive/20";
-  return (
-    <div className={`inline-block max-w-[80%] space-y-2 rounded-md border px-3 py-2 text-sm ${boxTone}`}>
-      <p>{error.message}</p>
-      <div className="flex gap-2">
-        {error.retryable && (
-          <button
-            type="button"
-            onClick={onRetry}
-            className={`rounded border px-2 py-0.5 text-xs ${btnTone}`}
-          >
-            Try again
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="rounded border border-destructive/20 px-2 py-0.5 text-xs text-destructive/70 hover:bg-destructive/10"
-        >
-          Dismiss
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function ChatShell({
   skillId,
   pathPrefix,
@@ -876,12 +1004,26 @@ export function ChatShell({
     compactions,
     tidyingUp,
     resolvedModel,
-    sendMessage,
+    completedReplyId,
+    sendMessage: sendMessageRaw,
     isLoading,
     error,
     clearError,
     stop,
   } = useSkillAgent();
+  // Projects §6.3: the project this thread is scoped to. Every turn carries it
+  // (forwardedProps.project_id) — through this one wrapper, so no send path can
+  // forget it. A ref keeps the wrapper's identity stable across scope changes.
+  const [projectScopeId, setProjectScopeId] = useState<string | null>(null);
+  const projectScopeRef = useRef<string | null>(null);
+  useEffect(() => {
+    projectScopeRef.current = projectScopeId;
+  }, [projectScopeId]);
+  const sendMessage = useCallback(
+    (text: string, opts?: { documentIds?: string[]; resumedSession?: boolean; projectId?: string | null }) =>
+      sendMessageRaw(text, { ...opts, projectId: opts?.projectId ?? projectScopeRef.current }),
+    [sendMessageRaw],
+  );
   const {
     displayName,
     avatar: skillAvatar,
@@ -894,10 +1036,11 @@ export function ChatShell({
     tools: skillTools,
     canDelegate: skillCanDelegate,
     loading: skillMetaLoading,
+    slug: skillSlug,
   } = useSkillMeta(skillId);
   // PPA-OBLIGATION 7.6 M3: which workbench-launcher affordances the active
-  // skill supports, derived from its tool set. one-doc-compare → compare;
-  // one-ppa-expert → analyze obligations.
+  // skill supports, derived from its tool set. demo-doc-compare → compare;
+  // demo-ppa-expert → analyze obligations.
   const allowCompareLauncher = (skillTools ?? []).includes("compare_ppa_contracts");
   const allowObligationsLauncher = (skillTools ?? []).includes("map_ppa_obligations");
 
@@ -938,7 +1081,13 @@ export function ChatShell({
     null;
   const searchParams = useSearchParams();
   const router = useRouter();
+  // "Your instructions" (projects §6.5): the banner says when they're on.
+  const myInstructions = useMyInstructions();
+  const instructionsOn = myInstructions.status === "ready" && myInstructions.instructions.trim().length > 0;
   const [draft, setDraft] = useState("");
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
+  const composerVoice = useVoiceConfig(skillId);
   // 2026-08-06 UAT: auto-grow the composer with its content, so a wrapped
   // multi-line prompt is fully visible rather than scrolling inside one line.
   // Reset to `auto` first — scrollHeight only ever GROWS while an explicit
@@ -951,27 +1100,56 @@ export function ChatShell({
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [draft]);
-  // 2026-06-11 polish: sidebar default-collapsed + per-tab persistence.
-  // Most demo sessions don't need the sessions/docs list visible at all;
-  // start hidden so chat takes the full row. User can re-open via the
-  // DocTabsBar toggle button (top-left of the chat header). Persisted
-  // globally (not per-skill) in sessionStorage — sidebar visibility is
-  // a workspace-wide preference, not a per-skill one.
+  // 2026-06-11 polish: sidebar default-collapsed so a first visit gives chat
+  // the full row. The user's choice is a workspace-wide preference (not
+  // per-skill), remembered in localStorage — it used to live in
+  // sessionStorage, so a user who opened the sidebar to find their past
+  // conversations had to find the toggle again on every visit (customer
+  // feedback 2026-10-20: "I cannot easily access and continue an existing
+  // chat"). Storage can throw (Safari private mode) — fall back to the default.
   const [showDocBrowser, setShowDocBrowser] = useState(false);
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.sessionStorage.getItem("aitana.sidebar.open");
-    if (stored === "1") setShowDocBrowser(true);
+    try {
+      if (window.localStorage.getItem(SIDEBAR_OPEN_KEY) === "1") setShowDocBrowser(true);
+    } catch {
+      /* storage unavailable — keep the default */
+    }
   }, []);
   const toggleDocBrowser = useCallback(() => {
     setShowDocBrowser((v) => {
       const next = !v;
-      if (typeof window !== "undefined") {
-        window.sessionStorage.setItem("aitana.sidebar.open", next ? "1" : "0");
+      try {
+        window.localStorage.setItem(SIDEBAR_OPEN_KEY, next ? "1" : "0");
+      } catch {
+        /* storage unavailable — the toggle still works for this page */
       }
       return next;
     });
   }, []);
+  // Open the sidebar from elsewhere (the landing's "All conversations") and
+  // remember it, exactly like the header toggle.
+  const openDocBrowser = useCallback(() => {
+    setShowDocBrowser(true);
+    try {
+      window.localStorage.setItem(SIDEBAR_OPEN_KEY, "1");
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+  // The header (ShellChrome → SkillsBar) owns the sidebar button; this shell
+  // owns the state.
+  useRegisterSidebarToggle(showDocBrowser, toggleDocBrowser);
+
+  // The phone sidebar is a sheet over the page: Escape closes it, like any
+  // overlay.
+  useEffect(() => {
+    if (!showDocBrowser) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && window.matchMedia?.("(max-width: 767px)").matches) toggleDocBrowser();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [showDocBrowser, toggleDocBrowser]);
   const [openTabs, setOpenTabs] = useState<DocTabData[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   // v6.4.0 ITERATION 2026-06-09: Workbench is the right pane that holds
@@ -1025,8 +1203,33 @@ export function ChatShell({
   // expand strip renders instead.
   const workbenchVisible = workbenchHasContent && !workbenchCollapsed;
 
+  // MOBILE (below `md`): chat and workbench can't share a 390px row, so they
+  // swap behind a Chat | Workbench tab bar instead of splitting. Desktop
+  // ignores this state entirely — every class it drives is `max-md:`-scoped.
+  // Anything that focuses a workbench tab (a new result, an opened doc, an
+  // action run) brings the workbench forward — repo principle #7 — and
+  // sending a message brings chat back so the reply is on screen.
+  const [mobilePane, setMobilePane] = useState<"chat" | "workbench">("chat");
+  const focusWorkbenchTab = useCallback((id: string) => {
+    setWorkbenchTabId(id);
+    setMobilePane("workbench");
+  }, []);
+  // A help link clicked in chat: show the Help tab even if the workbench is folded.
+  const openHelpTab = useCallback(
+    (id: string) => {
+      setWorkbenchCollapsed(false);
+      focusWorkbenchTab(id);
+    },
+    [focusWorkbenchTab],
+  );
+
   // Session routing: read ?session= from URL, allow programmatic navigation
   const sessionId = searchParams.get("session");
+  useEffect(() => {
+    setVoiceBusy(false);
+    setVoiceNotice(null);
+    cancelVoicePlayback();
+  }, [skillId, sessionId]);
 
   // Effective thread id — the value threaded to the surface mounts
   // (sessionId ?? agentSessionId). The confirm→switch below keys off it.
@@ -1034,7 +1237,7 @@ export function ChatShell({
 
   const { initialMessages, a2uiSurfaces, historyError, sessionGone, transcriptUnavailable } =
     useSessionMessages(sessionId);
-  const { tabs: sessionDocTabs } = useSessionDocuments(sessionId);
+  const { tabs: sessionDocTabs, projectId: sessionProjectId } = useSessionDocuments(sessionId);
   // Session documents → "document added" entries in the Activity feed.
   const activityDocuments: ActivityDoc[] = (sessionDocTabs ?? []).map((t) => ({
     id: t.id,
@@ -1142,7 +1345,16 @@ export function ChatShell({
   // whichever agent the user happened to be standing on — a sitting spread
   // across two agents read as "it didn't record my session" (2026-08-05).
   const [sessionSkillFilter, setSessionSkillFilter] = useState<string | null>(null);
-  const { sessions, isLoading: sessionsLoading } = useSkillSessions(sessionSkillFilter);
+  const {
+    sessions,
+    isLoading: sessionsLoading,
+    error: sessionsError,
+    refetch: refetchSessions,
+    hasMore: sessionsHasMore,
+    isLoadingMore: sessionsLoadingMore,
+    loadMoreFailed: sessionsLoadMoreFailed,
+    loadMore: loadMoreSessions,
+  } = useSkillSessions(sessionSkillFilter);
 
   // Tracks whether the user reached this chat by clicking a conversation
   // thread (resume) vs starting a fresh chat. Backend uses this flag to
@@ -1156,14 +1368,46 @@ export function ChatShell({
     () => sessionId !== null,
   );
 
+  // Projects §6.3 — where the scope comes from besides `?project=` (below):
+  // a resumed chat takes its row's project (or none); a fresh scoped chat keeps
+  // its scope through the URL writeback even before the row says so; leaving a
+  // session for a new chat drops it.
+  // A chat opened FROM a project's list stays in that project even when it
+  // only belongs by having used a project document (no projectId on its row):
+  // the user is working in the project, and the next turn makes it explicit.
+  const scopeForResumeRef = useRef<{ sid: string; pid: string } | null>(null);
+  useEffect(() => {
+    if (!sessionId || sessionProjectId === undefined) return;
+    const opened = scopeForResumeRef.current;
+    if (sessionProjectId) setProjectScopeId(sessionProjectId);
+    else if (opened && opened.sid === sessionId) setProjectScopeId(opened.pid);
+    else if (enteredViaResume) setProjectScopeId(null);
+  }, [sessionId, sessionProjectId, enteredViaResume]);
+  const prevSessionIdRef = useRef(sessionId);
+  useEffect(() => {
+    const prev = prevSessionIdRef.current;
+    prevSessionIdRef.current = sessionId;
+    if (prev && !sessionId && !searchParams.get("project")) setProjectScopeId(null);
+  }, [sessionId, searchParams]);
+
   // v6.4.0 INTERNAL-SHELL M1: auto-collapse sidebar on first user message of
   // a fresh chat so the chat + workbench own the screen during a run.
   // Fires exactly once per session-start (isFreshChat true → false). Skipped
   // on resume; manual reopens stick.
+  //
+  // PHONES ONLY since 2026-10-20. There the sidebar is a sheet over the page,
+  // so it must get out of the way. On desktop it is a column the user opened
+  // on purpose — closing it on every new chat fought the remembered
+  // preference and hid their history again the moment they started working.
   const isFreshChat = messages.length === 0 && sessionId === null;
   const prevFreshChatRef = useRef(isFreshChat);
   useEffect(() => {
-    if (prevFreshChatRef.current && !isFreshChat && !enteredViaResume) {
+    if (
+      prevFreshChatRef.current &&
+      !isFreshChat &&
+      !enteredViaResume &&
+      window.matchMedia?.("(max-width: 767px)").matches
+    ) {
       setShowDocBrowser(false);
     }
     prevFreshChatRef.current = isFreshChat;
@@ -1288,9 +1532,12 @@ export function ChatShell({
 
   async function handleSend() {
     const text = draft.trim();
-    if (!text || isLoading || error) return;
+    if (!text || isLoading || error || voiceBusy) return;
+    cancelVoicePlayback();
+    setVoiceNotice(null);
     lastUserMessageRef.current = text;
     setDraft("");
+    setMobilePane("chat");
     await sendMessage(text, {
       documentIds: includedDocIds,
       resumedSession: enteredViaResume,
@@ -1314,6 +1561,7 @@ export function ChatShell({
     (text: string) => {
       if (!text.trim() || isLoading) return;
       lastUserMessageRef.current = text;
+      setMobilePane("chat");
       void sendMessage(text, {
         documentIds: includedDocIds,
         resumedSession: enteredViaResume,
@@ -1389,10 +1637,44 @@ export function ChatShell({
     [navigateToSession],
   );
 
+  // A shared thread (e.g. an agent's) belongs to the agent it was started on.
+  // Open it THERE: replying from another skill's page would run the turn on
+  // that skill with the thread owner's access, which may not include it.
+  const handleSelectSharedSession = useCallback(
+    (sid: string, sessionSkillId: string) => {
+      if (sessionSkillId && sessionSkillId !== skillId) {
+        setEnteredViaResume(true);
+        router.push(`/chat/${encodeURIComponent(sessionSkillId)}?session=${encodeURIComponent(sid)}`);
+        return;
+      }
+      handleSelectSession(sid);
+    },
+    [skillId, router, handleSelectSession],
+  );
+
+  // "New chat" stays in the project the user is in (leaving is the banner's
+  // ✕): it re-enters through `?project=`, the same door as a project link.
   const handleNewSession = useCallback(() => {
+    setEnteredViaResume(false);
+    const keep = projectScopeRef.current;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("session");
+    if (keep) params.set("project", keep);
+    else setProjectScopeId(null);
+    const qs = params.toString();
+    router.replace(qs ? `${pathPrefix}?${qs}` : pathPrefix);
+  }, [router, pathPrefix, searchParams]);
+
+  // Leave the project: a plain, unscoped new chat.
+  const handleLeaveProject = useCallback(() => {
+    setProjectScopeId(null);
+    projectScopeRef.current = null;
+    scopeForResumeRef.current = null;
     setEnteredViaResume(false);
     const params = new URLSearchParams(searchParams.toString());
     params.delete("session");
+    params.delete("project");
+    params.delete("ask");
     const qs = params.toString();
     router.replace(qs ? `${pathPrefix}?${qs}` : pathPrefix);
   }, [router, pathPrefix, searchParams]);
@@ -1465,8 +1747,23 @@ export function ChatShell({
     // doc-click. Same rationale as the DocTabsBar onSelect wrapper —
     // covers the case where activeTabId is already this doc (no state
     // change → activeTabId-change useEffect doesn't fire).
-    setWorkbenchTabId("document");
-  }, []);
+    focusWorkbenchTab("document");
+  }, [focusWorkbenchTab]);
+
+  // DOC-WORKBENCH P1: a document the agent just generated mounts itself in the
+  // workbench. Same shape as `handleUploadedDocOpen` below — handleDocClick only
+  // reads id/originalFilename/sourceFormat, so the lightweight ref built from the
+  // artifact (its surfaceId carries the docId, its title the filename) is enough.
+  const handleOpenCreatedDocument = useCallback(
+    (doc: CreatedDocumentRef) => {
+      handleDocClick({
+        id: doc.id,
+        originalFilename: doc.filename,
+        sourceFormat: doc.format,
+      } as ParsedDocument);
+    },
+    [handleDocClick],
+  );
 
   // Quick-start upload (landing screen): when a doc is uploaded from the
   // fresh-chat dropzone, mount it as an INCLUDED tab straight away — same path a
@@ -1491,6 +1788,152 @@ export function ChatShell({
       });
     },
     [handleDocClick],
+  );
+
+  // A recent document is already the user's own parsed record — no import,
+  // just mount it like a sidebar click.
+  const handleOpenRecentDocument = useCallback(
+    (doc: RecentDocument) => {
+      handleDocClick({
+        id: doc.id,
+        originalFilename: doc.originalFilename,
+        sourceFormat: doc.sourceFormat,
+      } as ParsedDocument);
+    },
+    [handleDocClick],
+  );
+
+  // `?doc=<id>&docName=…&docFormat=…` — a document opened from somewhere with
+  // no workbench of its own (a project home) arrives here and mounts as an
+  // included tab, exactly like a sidebar click. The params are then dropped so
+  // a reload or the session writeback doesn't re-open it.
+  const docParam = searchParams.get("doc");
+  useEffect(() => {
+    if (!docParam) return;
+    handleDocClick({
+      id: docParam,
+      originalFilename: searchParams.get("docName") || "Document",
+      sourceFormat: searchParams.get("docFormat") || "",
+    } as ParsedDocument);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("doc");
+    params.delete("docName");
+    params.delete("docFormat");
+    const qs = params.toString();
+    router.replace(qs ? `${pathPrefix}?${qs}` : pathPrefix);
+    // Only when a new ?doc= arrives — not on every searchParams change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docParam]);
+
+  // `?project=<id>[&ask=<text>]` — "Ask about this project…" on a project home
+  // starts a fresh chat here scoped to that project, and sends the question
+  // once the chat is ready. Params are dropped like `?doc=`.
+  const projectParam = searchParams.get("project");
+  const [pendingAsk, setPendingAsk] = useState<{ text: string; projectId: string } | null>(null);
+  useEffect(() => {
+    if (!projectParam) return;
+    const resumingSid = searchParams.get("session");
+    // With ?session= it is a chat opened from a project's list on another
+    // agent: still a resume, and it stays in the project.
+    if (resumingSid) scopeForResumeRef.current = { sid: resumingSid, pid: projectParam };
+    else setEnteredViaResume(false);
+    setProjectScopeId(projectParam);
+    projectScopeRef.current = projectParam;
+    const ask = (searchParams.get("ask") || "").trim();
+    if (ask) setPendingAsk({ text: ask, projectId: projectParam });
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("project");
+    params.delete("ask");
+    // A link can carry ?doc= too (open a document in a project chat). Both
+    // effects rewrite the URL from the same snapshot, so this one — which runs
+    // after the ?doc= one — drops those as well, or the last write puts them back.
+    params.delete("doc");
+    params.delete("docName");
+    params.delete("docFormat");
+    const qs = params.toString();
+    router.replace(qs ? `${pathPrefix}?${qs}` : pathPrefix);
+    // Only when a new ?project= arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectParam]);
+  useEffect(() => {
+    if (!pendingAsk || !chatReady || isLoading) return;
+    const { text, projectId } = pendingAsk;
+    setPendingAsk(null);
+    lastUserMessageRef.current = text;
+    setMobilePane("chat");
+    void sendMessage(text, { documentIds: includedDocIds, resumedSession: false, projectId });
+  }, [pendingAsk, chatReady, isLoading, sendMessage, includedDocIds]);
+
+  // A chat row's project action (⋯ → Make this a project / Move to project…).
+  const [sessionProjectFeedback, setSessionProjectFeedback] = useState<SessionProjectFeedback | null>(null);
+  const dismissSessionProjectFeedback = useCallback(() => setSessionProjectFeedback(null), []);
+  // Moving the OPEN chat changes its scope for the next turn, too.
+  useEffect(() => {
+    if (sessionProjectFeedback?.kind !== "done" || !sessionId) return;
+    let cancelled = false;
+    void fetchWithAuth(`/api/proxy/api/sessions/${encodeURIComponent(sessionId)}`)
+      .then((res) => (res.ok ? (res.json() as Promise<{ session?: { project_id?: string | null } }>) : null))
+      .then((body) => {
+        if (cancelled || !body) return;
+        const pid = body.session?.project_id;
+        setProjectScopeId(typeof pid === "string" && pid ? pid : null);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionProjectFeedback, sessionId]);
+
+  // The scoped project, for the banner. A deleted (404) project drops the
+  // scope, so the banner never claims one that the backend won't apply.
+  const scopedProject = useProject(projectScopeId);
+  useEffect(() => {
+    if (scopedProject.status === "not_found") setProjectScopeId(null);
+  }, [scopedProject.status]);
+  const projectContext = useMemo<ActiveProjectContext | null>(() => {
+    const p = scopedProject.project;
+    if (!p || p.id !== projectScopeId) return null;
+    return {
+      id: p.id,
+      name: p.name,
+      docCount: p.docCount,
+      instructionsOn: instructionsOn || p.instructions.trim().length > 0,
+      searchPreparing: p.search?.status === "indexing",
+    };
+  }, [scopedProject.project, projectScopeId, instructionsOn]);
+
+  // Tell the header's "New chat" which project to stay in.
+  useEffect(() => {
+    setActiveProject(projectContext?.id ?? null);
+    return () => setActiveProject(null);
+  }, [projectContext?.id]);
+
+  // In a project, the sidebar history and the landing's recent list are the
+  // PROJECT's chats (explicit ∪ derived) — the chat screen is the project.
+  const projectSessions = useProjectSessions(projectScopeId);
+  const handleSelectProjectSession = useCallback(
+    (sid: string) => {
+      const pid = projectScopeRef.current;
+      if (pid) scopeForResumeRef.current = { sid, pid };
+      const s = projectSessions.sessions.find((x) => x.session_id === sid);
+      if (s?.skill_id && s.skill_id !== skillId) {
+        setEnteredViaResume(true);
+        const qs = new URLSearchParams({ session: sid });
+        if (pid) qs.set("project", pid);
+        router.push(`/chat/${encodeURIComponent(s.skill_id)}?${qs.toString()}`);
+        return;
+      }
+      handleSelectSession(sid);
+    },
+    [projectSessions.sessions, skillId, router, handleSelectSession],
+  );
+
+  // Where a project in the sidebar opens: the chat screen, scoped, on the
+  // project's assistant — or this one while skills are still loading.
+  const projectHref = useProjectChatHref(user.uid);
+  const chatHrefFor = useCallback(
+    (p: ProjectSummary) => projectHref(p) ?? projectChatHref(pathPrefix, p.id),
+    [projectHref, pathPrefix],
   );
 
   // DOC-IMPORT-REF M3: shared handler for the picker + GCSFileBrowser. POSTs
@@ -1534,10 +1977,10 @@ export function ChatShell({
         if (m) void handleImportByReference(m[1], m[2]);
       } else {
         setActiveTabId(identity.doc_id);
-        setWorkbenchTabId("document");
+        focusWorkbenchTab("document");
       }
     },
-    [handleImportByReference],
+    [handleImportByReference, focusWorkbenchTab],
   );
 
   // #11: when the AI reads/analyses a document via a tool (get_document_content,
@@ -1571,6 +2014,26 @@ export function ChatShell({
   }, []);
 
   const inputDisabled = isLoading || error !== null || !chatReady;
+
+  // A dropped stream (e.g. the phone suspended the app mid-answer) may still
+  // complete on the server — reload the conversation from history to see it.
+  // Full navigation on purpose: the history fetch runs on load.
+  const reloadConversation = effectiveSessionId
+    ? () => {
+        const url = new URL(window.location.href);
+        url.searchParams.set("session", effectiveSessionId);
+        window.location.assign(url.toString());
+      }
+    : undefined;
+
+  // A backgrounded desktop tab gets "Reply ready · in <skill>" when the turn
+  // finishes (no message text — it lands on lock screens).
+  useReplyReadyNotification({
+    isLoading,
+    hasError: error !== null,
+    skillName: displayName,
+    sessionId: effectiveSessionId,
+  });
 
   // The composer (connecting banner + in-context badge + input row). Extracted
   // so it can render pinned at the bottom during a conversation OR centered on
@@ -1615,16 +2078,21 @@ export function ChatShell({
           state so the user always knows which files the agent will see next
           turn. Renders nothing when no docs are included. */}
       <InContextBadge openTabs={openTabs} includedDocIds={includedDocIds} />
+      {/* One card, the way native chat apps draw it: the text on top, the
+          tools in a row underneath — attach on the left, send on the right.
+          A tap anywhere on the card focuses the text, so on a phone a single
+          tap brings the keyboard up (iOS opens it only on a real tap). */}
       <form
-        // items-end: as the textarea grows the Send/Stop button stays aligned
-        // with the LAST line rather than stretching to the full box height.
-        className="flex items-end gap-2"
+        className="cursor-text rounded-[var(--radius)] border border-input bg-background p-1.5 transition-colors focus-within:border-ring"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) draftRef.current?.focus();
+        }}
         onSubmit={(e) => {
           e.preventDefault();
           void handleSend();
         }}
       >
-        {/* 2026-08-06 UAT (ONE): this was a single-line <input>, which by
+        {/* 2026-08-06 acceptance testing: this was a single-line <input>, which by
             definition never wraps — a long prompt scrolled sideways and the
             user could not see what they had typed. Reported independently by
             two users as the #1 complaint. A textarea wraps; `rows={1}` +
@@ -1635,7 +2103,10 @@ export function ChatShell({
         <textarea
           ref={draftRef}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            cancelVoicePlayback();
+            setDraft(e.target.value);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -1643,26 +2114,68 @@ export function ChatShell({
             }
           }}
           rows={1}
-          placeholder={chatReady ? "Message…" : "Connecting…"}
-          className="max-h-48 flex-1 resize-none overflow-y-auto rounded-md border px-3 py-2 text-sm"
-          disabled={inputDisabled}
+          placeholder={
+            !chatReady ? "Connecting…" : projectContext ? `Ask about ${projectContext.name}…` : `Message ${displayName}…`
+          }
+          className="block max-h-48 min-h-[44px] w-full resize-none overflow-y-auto border-0 bg-transparent px-2.5 py-2 text-base leading-6 placeholder:text-muted-foreground focus:outline-none md:text-sm"
+          // Blocked while connecting and while an error is showing (deal with
+          // it first: Retry / Dismiss). NOT while a reply streams — disabling
+          // blurs the box, and on a phone that drops the keyboard after every
+          // message — so the next message can be typed during this one. Sending
+          // is still gated: Send is swapped for Stop until the reply ends, and
+          // handleSend refuses while loading.
+          disabled={!chatReady || error !== null}
         />
-        {isLoading ? (
-          <button type="button" onClick={stop} className="rounded-md border px-3 py-2 text-sm">
-            Stop
-          </button>
-        ) : (
-          <button
-            type="submit"
-            className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
-            disabled={!draft.trim() || inputDisabled}
-          >
-            Send
-          </button>
-        )}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1">
+            <UploadDropZone variant="button" skillId={skillId} onUploadComplete={handleUploadedDocOpen} />
+            <VoiceComposerControls key={`${skillId}:${sessionId ?? "new"}`}
+              skillId={skillId} lang={composerVoice.tts.language ?? "auto"}
+              voiceInputEnabled={composerVoice.stt.enabled}
+              maxDurationSeconds={composerVoice.stt.maxDurationSeconds}
+              disabled={!chatReady || isLoading || error !== null}
+              onTranscript={(text) => setDraft((current) => current.trim() ? `${current} ${text}` : text)}
+              onBusyChange={setVoiceBusy} onNotice={setVoiceNotice} />
+            {process.env.NEXT_PUBLIC_ENABLE_READ_ALOUD === "true" && composerVoice.tts.enabled && <AutoReadToggle />}
+          </div>
+          {isLoading ? (
+            <button
+              type="button"
+              onClick={stop}
+              aria-label="Stop"
+              title="Stop (Esc)"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-border text-foreground hover:bg-muted"
+            >
+              <span aria-hidden className="h-3 w-3 rounded-[2px] bg-current" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              aria-label="Send"
+              title="Send (Enter)"
+              // Keep focus in the text box, so on a phone the keyboard stays up
+              // between messages instead of dropping after every send.
+              onMouseDown={(e) => e.preventDefault()}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:bg-primary/90 disabled:opacity-40"
+              disabled={!draft.trim() || inputDisabled || voiceBusy}
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 19V5M6 11l6-6 6 6" />
+              </svg>
+            </button>
+          )}
+        </div>
       </form>
+      {voiceNotice && <p role="status" aria-live="polite" className="mt-1 px-2 text-xs text-muted-foreground">{voiceNotice}</p>}
     </>
   );
+
+  // A fresh chat starts with the cursor in the composer, ready to type. On a
+  // desktop that is the whole story; on iOS the keyboard only opens on a real
+  // tap, which is why the composer card is one big tap target.
+  useEffect(() => {
+    if (isFreshChat && chatReady) draftRef.current?.focus({ preventScroll: true });
+  }, [isFreshChat, chatReady, skillId]);
 
   // Esc cancels an in-flight run — perceived-snappiness affordance from
   // ttft-instrumentation.md M2. Bound at document level because the
@@ -1682,9 +2195,11 @@ export function ChatShell({
 
   return (
     <SurfaceRegistryProvider>
+    <WorkspaceAgentTools sessionId={effectiveSessionId} skillId={skillId} running={isLoading || actionRunning} onFocus={(id) => setWorkbenchTabId(id === "workspace" ? WORKSPACE_RESULT_TAB_ID : id)} />
     <SurfaceSessionLifecycle sessionId={sessionId} />
     <WorkspaceA2uiEventRouter />
     <ArtifactPresenceReporter onPresent={setHasAnyArtifact} />
+    <HelpOpenerBridge onOpen={openHelpTab} />
     <RehydrateSurfaces surfaces={a2uiSurfaces} enabled={enteredViaResume} />
     {/* SkillsBar (top nav) lifted to ShellChrome in ShellRouter so every shell
         mode shares it — see components/shells/ShellChrome.tsx. This shell body
@@ -1705,25 +2220,78 @@ export function ChatShell({
         showBrowser={showDocBrowser}
         onSelect={(id) => {
           setActiveTabId(id);
-          setWorkbenchTabId("document");
+          focusWorkbenchTab("document");
         }}
         onClose={handleTabClose}
         onToggleInclude={handleTabToggleInclude}
         onToggleBrowser={toggleDocBrowser}
       />
 
-      <div className="flex min-h-0 flex-1" data-workspace-row>
+      {/* MOBILE: the Chat | Workbench switch that replaces the side-by-side
+          split below `md`. Only when the workbench has something to show —
+          otherwise chat is the whole screen and a tab bar is noise. */}
+      {workbenchHasContent && (
+        <div className="flex shrink-0 justify-center pb-2 md:hidden">
+          <div className="inline-flex rounded-full bg-muted p-1" role="tablist" aria-label="Chat or workbench">
+            {(["chat", "workbench"] as const).map((pane) => (
+              <button
+                key={pane}
+                type="button"
+                role="tab"
+                aria-selected={mobilePane === pane}
+                onClick={() => setMobilePane(pane)}
+                className={
+                  "min-h-[36px] rounded-full px-5 text-sm font-medium capitalize transition-colors " +
+                  (mobilePane === pane
+                    ? "bg-background text-foreground ring-1 ring-border"
+                    : "text-muted-foreground")
+                }
+              >
+                {pane}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="relative flex min-h-0 flex-1" data-workspace-row>
         {showDocBrowser && (
-          <aside className="flex w-64 shrink-0 flex-col overflow-hidden border-r bg-muted/30">
+          // MOBILE: a 256px column would leave ~130px for everything else on a
+          // phone, so below `md` the sidebar floats over the row as a sheet,
+          // with a backdrop that closes it.
+          <button
+            type="button"
+            aria-label="Dismiss sidebar"
+            tabIndex={-1}
+            onClick={toggleDocBrowser}
+            className="absolute inset-0 z-20 bg-[hsl(var(--foreground)/0.25)] md:hidden"
+          />
+        )}
+        {showDocBrowser && (
+          <aside className="flex w-64 shrink-0 flex-col overflow-y-auto border-r bg-muted/30 max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-30 max-md:w-[85vw] max-md:max-w-sm max-md:bg-background">
+            {/* Phone sheet header: a visible way out besides the backdrop. */}
+            <div className="flex min-h-[52px] shrink-0 items-center justify-between border-b px-4 md:hidden">
+              <span className="text-base font-semibold text-foreground">Files and conversations</span>
+              <button
+                type="button"
+                onClick={toggleDocBrowser}
+                aria-label="Close sidebar"
+                className="-mr-2 flex h-11 w-11 items-center justify-center rounded-[var(--radius)] text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
+                  <path d="M4 4l8 8M12 4l-8 8" />
+                </svg>
+              </button>
+            </div>
             {/* v6.6.0: order the sidebar skill-first. The skill's own
                 affordances (its curated Library + anything the agent streams
                 into the A2UI sidebar surface) sit at the top because they're
                 the most relevant while working; the generic workspace utilities
-                (your uploads, chat history) sit below. Each section remembers
+                (chat history, then your uploads) sit below. Each section remembers
                 its open/closed state across sidebar reopens (persistId). */}
 
             {/* Skill-related #1 — the skill's curated document library
-                (v6.4.0 4.5 SKILL-ONBOARDING M4), e.g. ONE's PPA library. Click
+                (v6.4.0 4.5 SKILL-ONBOARDING M4), e.g. a tenant's shared library. Click
                 a file → import-by-reference, no upload. Only present when the
                 skill declares welcome.bucket_browser. */}
             {skillWelcome?.bucketBrowser?.bucket && (
@@ -1732,7 +2300,7 @@ export function ChatShell({
                 persistId="library"
                 defaultOpen={skillWelcome.bucketBrowser.defaultOpen ?? true}
               >
-                {/* Cap + scroll the library so a large folder (ONE's PPA library
+                {/* Cap + scroll the library so a large folder (the tenant's PPA library
                     has 50+ files) can't push "Your files" / "Past conversations"
                     off-screen — the whole point of a sidebar is that every
                     section stays reachable (2026-07-16 report). */}
@@ -1754,20 +2322,34 @@ export function ChatShell({
                 high so AI-streamed content is prominent. */}
             <SidebarSurfaceRegion sessionId={sessionId ?? agentSessionId} />
 
-            {/* Generic workspace utility — the user's own uploaded files. */}
-            <SidebarSection title="Your files" persistId="files" defaultOpen={true} bodyClassName="">
+            {/* Chat history — ABOVE "Your files" since 2026-10-20. It used to
+                sit last, under the uploads, in a five-row box, which is exactly
+                where a customer looked and couldn't find their chats ("I can
+                see the uploads … but I cannot easily access and continue an
+                existing chat"). Getting back to earlier work is the most common
+                reason to open the sidebar at all. */}
+            {/* Projects (projects design §4): a named tag on documents, with a
+                home for its chats. Above history — it is the way to group it.
+                Always shown, so a first-time user finds "+ New project". */}
+            <SidebarSection title="Projects" persistId="projects" defaultOpen={true}>
               <div className="max-h-[30vh] overflow-y-auto">
-                <DocListView uid={user.uid} onDocClick={handleDocClick} />
-              </div>
-              <div className="border-t">
-                <UploadDropZone skillId={skillId} />
+                <ProjectsSection chatHrefFor={chatHrefFor} activeProjectId={projectContext?.id ?? null} />
               </div>
             </SidebarSection>
 
-            {/* Generic workspace utility — chat history. Lowest priority while
-                working, so it sits at the bottom. */}
             <SidebarSection title="Past conversations" persistId="conversations" defaultOpen={true}>
-              <div className="max-h-40 overflow-y-auto">
+              {projectScopeId ? (
+                <ProjectChatsList
+                  projectName={projectContext?.name ?? null}
+                  chats={projectSessions}
+                  activeSessionId={sessionId}
+                  onSelectSession={handleSelectProjectSession}
+                  onDelete={(sid) => void handleDeleteSkillSession(sid)}
+                  onShowAll={handleLeaveProject}
+                  rowActions={(s) => <SessionProjectMenu session={s} onFeedback={setSessionProjectFeedback} />}
+                />
+              ) : (
+              <div className="max-h-[40vh] overflow-y-auto">
                 <SkillSessionPanel
                   sessions={sessions}
                   activeSessionId={sessionId}
@@ -1776,9 +2358,43 @@ export function ChatShell({
                   onDelete={(sid) => void handleDeleteSkillSession(sid)}
                   skillFilter={sessionSkillFilter}
                   onFilterChange={setSessionSkillFilter}
+                  groupByDate
+                  error={sessionsError}
+                  onRetry={refetchSessions}
+                  hasMore={sessionsHasMore}
+                  isLoadingMore={sessionsLoadingMore}
+                  loadMoreFailed={sessionsLoadMoreFailed}
+                  onLoadMore={loadMoreSessions}
+                  rowActions={(s) => <SessionProjectMenu session={s} onFeedback={setSessionProjectFeedback} />}
                 />
               </div>
+              )}
+              <SessionProjectNotice feedback={sessionProjectFeedback} onDismiss={dismissSessionProjectFeedback} />
             </SidebarSection>
+
+            {/* Generic workspace utility — the user's own uploaded files. */}
+            <SidebarSection title="Your files" persistId="files" defaultOpen={true} bodyClassName="">
+              <div className="max-h-[30vh] overflow-y-auto">
+                <DocListView uid={user.uid} skillId={skillId} onDocClick={handleDocClick} />
+              </div>
+              <div className="border-t">
+                <UploadDropZone skillId={skillId} />
+              </div>
+            </SidebarSection>
+
+            {/* Conversations owned by someone else (e.g. an agent's threads)
+                that this user collaborates on — read AND reply. Renders
+                nothing when there are none; a load failure shows visibly. */}
+            <SharedSessionsSection
+              activeSessionId={sessionId}
+              onSelectSession={handleSelectSharedSession}
+            />
+
+            {/* Phones: who you are and the account actions live here, so the
+                header can stay as just menu · skill · new chat. */}
+            <div className="mt-auto md:hidden">
+              <AccountPanel />
+            </div>
           </aside>
         )}
 
@@ -1794,7 +2410,12 @@ export function ChatShell({
             live, with per-skill sessionStorage persistence. */}
         <div
           className={
-            workbenchVisible ? "flex min-w-0 flex-col" : "flex min-w-0 flex-1 flex-col"
+            (workbenchVisible ? "relative flex min-w-0 flex-col" : "relative flex min-w-0 flex-1 flex-col") +
+            // MOBILE: full width when showing, gone when the workbench is.
+            // `!` beats the inline flex-basis the desktop split sets.
+            (workbenchHasContent && mobilePane === "workbench"
+              ? " max-md:hidden"
+              : " max-md:!flex-1 max-md:!basis-full")
           }
           style={
             workbenchVisible
@@ -1802,44 +2423,39 @@ export function ChatShell({
               : undefined
           }
         >
+          {/* The skill's illustration behind the landing — at a glance, which
+              skill this is. It fades out with the first message so it never
+              sits behind a transcript. Renders nothing for a skill with no art. */}
+          <SkillArt slug={skillSlug} visible={isFreshChat && !enteredViaResume} />
+          {/* ONE composer, in ONE place, for both the landing and the
+              conversation: only what sits above it swaps. Keyed siblings keep
+              React from remounting it on the first send — a remounted textarea
+              loses focus, and on a phone that drops the keyboard right after
+              the first message. */}
           {isFreshChat ? (
-            // Fresh session — no transcript yet. Center the greeting + composer
-            // vertically (ChatGPT/Claude-style landing) instead of pinning the
-            // input to the bottom of an empty pane. Flips to the transcript
-            // layout the instant the first message is sent (isFreshChat→false).
-            <div className="flex flex-1 flex-col items-center justify-center overflow-auto p-4">
-              <div className="w-full max-w-2xl space-y-6">
-                {skillIntroMessage && !enteredViaResume && (
-                  <AssistantIntroBubble content={skillIntroMessage} skillName={displayName} />
-                )}
-                {/* NEVER SILENT (#8): an error on the very first turn must still
-                    be visible on the landing screen, not hidden with the
-                    (unrendered) transcript. */}
-                {error && (
-                  <StreamErrorBanner error={error} onRetry={handleRetry} onDismiss={clearError} />
-                )}
-                {composer}
-                {/* Quick-start upload — the same drag-and-drop that lives in the
-                    sidebar, surfaced right under the landing composer so a user
-                    can drop a document and immediately start working on it. The
-                    upload mounts the doc as included context (handleUploadedDocOpen)
-                    and the composer's InContextBadge confirms it. Fresh-session
-                    only: during a conversation the composer pins to the bottom and
-                    the sidebar upload is enough. */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-muted-foreground/70">
-                    <div className="h-px flex-1 bg-border" />
-                    <span>or start from a document</span>
-                    <div className="h-px flex-1 bg-border" />
-                  </div>
-                  <div className="rounded-lg border bg-muted/20">
-                    <UploadDropZone skillId={skillId} onUploadComplete={handleUploadedDocOpen} />
-                  </div>
+            // Fresh session — no transcript yet. Phones: the welcome fills the
+            // space above the composer, which sits under the thumb. Desktop:
+            // auto margins centre welcome + composer together (Claude/ChatGPT-
+            // style landing). Flips to the transcript the instant the first
+            // message is sent (isFreshChat→false).
+            <div
+              key="welcome"
+              className="relative z-10 flex flex-1 flex-col items-center justify-center overflow-auto px-5 py-8 md:mt-auto md:flex-none md:px-8"
+            >
+              {!enteredViaResume ? (
+                <SkillWelcome name={displayName} avatar={skillAvatar} intro={skillIntroMessage} />
+              ) : null}
+              {/* NEVER SILENT (#8): an error on the very first turn must still
+                  be visible on the landing screen, not hidden with the
+                  (unrendered) transcript. */}
+              {error && (
+                <div className="mt-6 w-full max-w-2xl">
+                  <StreamErrorBanner error={error} onRetry={handleRetry} onDismiss={clearError} onReload={reloadConversation} />
                 </div>
-              </div>
+              )}
             </div>
           ) : (
-            <>
+            <div key="transcript" className="flex min-h-0 flex-1 flex-col">
           <ChatMessageListWithSurfaces
             messages={messages}
             introMessage={
@@ -1862,6 +2478,7 @@ export function ChatShell({
             toolCalls={toolCalls}
             thinkingContent={thinkingContent}
             isThinking={isThinking}
+            completedReplyId={completedReplyId}
             isLoading={isLoading}
             error={error}
             skillId={displayName}
@@ -1869,6 +2486,9 @@ export function ChatShell({
             userInitial={userInitial}
             userDisplayName={userDisplayName}
             userPhotoURL={user.photoURL}
+            instructionsOn={instructionsOn}
+            projectContext={projectContext}
+            onLeaveProject={handleLeaveProject}
             stageLabel={stageLabel}
             delegations={delegations}
             onAction={handleAction}
@@ -1881,6 +2501,7 @@ export function ChatShell({
                   error={error}
                   onRetry={handleRetry}
                   onDismiss={clearError}
+                  onReload={reloadConversation}
                 />
               ) : undefined
             }
@@ -1893,10 +2514,61 @@ export function ChatShell({
             // display label passed to MessageBubble).
             formSkillId={skillId}
           />
-
-          <footer className="border-t p-3">{composer}</footer>
-            </>
+            </div>
           )}
+          <footer
+            key="composer"
+            className={
+              "relative z-10 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-8 " +
+              (isFreshChat ? "" : "border-t pt-3")
+            }
+          >
+            {/* Same column as the transcript (max-w-3xl on a conversation,
+                a little narrower on the landing). */}
+            {/* A scoped chat that hasn't started yet still says which project
+                it's in — the transcript's banner only appears after a send. */}
+            {isFreshChat && projectContext && (
+              <div className="mx-auto mb-2 w-full max-w-2xl overflow-hidden rounded-md border">
+                <ContextBanner context={null} project={projectContext} onLeaveProject={handleLeaveProject} />
+              </div>
+            )}
+            <div className={"mx-auto w-full " + (isFreshChat ? "max-w-2xl" : "max-w-3xl")}>{composer}</div>
+          </footer>
+          {/* Desktop quick-start: drop a document straight onto the landing.
+              Phones attach with the composer's + (no drag-and-drop on a
+              phone). The upload mounts the doc as included context
+              (handleUploadedDocOpen) and the InContextBadge confirms it. */}
+          {isFreshChat ? (
+            <div key="dropzone" className="relative z-10 mx-auto mb-auto mt-8 hidden w-full max-w-2xl space-y-6 px-8 md:block">
+              {/* The way back to earlier work, where the user is when they want
+                  it. Absent until there is history; the sidebar holds the rest. */}
+              {projectContext ? (
+                <RecentConversations
+                  title={`Recent chats in ${projectContext.name}`}
+                  sessions={projectSessions.sessions}
+                  onSelectSession={handleSelectProjectSession}
+                  onShowAll={openDocBrowser}
+                />
+              ) : (
+                !sessionSkillFilter && (
+                  <RecentConversations
+                    sessions={sessions}
+                    onSelectSession={handleSelectSession}
+                    onShowAll={openDocBrowser}
+                  />
+                )
+              )}
+              {/* The default project's instructions (projects §6.5): where every
+                  chat starts, so it's noticed. Also in Settings. */}
+              <YourInstructionsCard />
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                <div className="h-px flex-1 bg-border" />
+                <span>Or start from a document</span>
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              <UploadDropZone skillId={skillId} onUploadComplete={handleUploadedDocOpen} className="" />
+            </div>
+          ) : null}
         </div>
 
         {/* 2026-06-11 polish: drag handle between chat and workbench.
@@ -1905,7 +2577,9 @@ export function ChatShell({
             Only rendered when the workbench is visible (content + not
             user-collapsed) — otherwise chat takes the full row. */}
         {workbenchVisible && (
-          <WorkbenchResizeHandle ratio={workspaceRatio} onChange={setWorkspaceRatio} />
+          <div className="flex max-md:hidden">
+            <WorkbenchResizeHandle ratio={workspaceRatio} onChange={setWorkspaceRatio} />
+          </div>
         )}
 
         {/* 2026-06-11 user-driven collapse: when content exists but the
@@ -1918,7 +2592,7 @@ export function ChatShell({
           <button
             type="button"
             onClick={toggleWorkbenchCollapsed}
-            className="group flex h-full w-6 shrink-0 flex-col items-center justify-center border-l bg-muted/40 transition-colors hover:bg-muted"
+            className="group flex h-full w-6 shrink-0 flex-col items-center justify-center border-l bg-muted/40 transition-colors hover:bg-muted max-md:hidden"
             aria-label="Expand workbench"
             title="Expand workbench"
           >
@@ -1957,7 +2631,14 @@ export function ChatShell({
             md:w-[520px]…2xl:w-[760px] breakpoint scale inside Workbench
             since width is now parent-driven. */}
         <div
-          className="relative flex min-w-0 flex-col"
+          className={
+            "relative flex min-w-0 flex-col" +
+            // MOBILE: the workbench is a full-screen tab, never a sliver, and
+            // the desktop collapse state doesn't apply.
+            (workbenchHasContent && mobilePane === "workbench"
+              ? " max-md:!flex-1 max-md:!basis-full"
+              : " max-md:hidden")
+          }
           style={
             workbenchVisible
               ? { flexBasis: `${workspaceRatio * 100}%`, flexGrow: 0, flexShrink: 1 }
@@ -1971,7 +2652,7 @@ export function ChatShell({
           <button
             type="button"
             onClick={toggleWorkbenchCollapsed}
-            className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground max-md:hidden"
             aria-label="Collapse workbench"
             title="Collapse workbench"
           >
@@ -1990,7 +2671,12 @@ export function ChatShell({
           </button>
         )}
         <WorkbenchPane
-          workbenchClassName=""
+          onOpenCreatedDocument={handleOpenCreatedDocument}
+          // Width comes from this column; HEIGHT must too. Without min-h-0 +
+          // flex-1 the pane kept its content height (shrink-0), so a long tab
+          // (a help page, a big sources list) stretched the whole page instead
+          // of scrolling inside the workbench.
+          workbenchClassName="min-h-0 flex-1"
           onContentChange={setWorkbenchHasContent}
           activeTabId={activeTabId}
           sessionId={sessionId ?? agentSessionId}
@@ -1998,7 +2684,7 @@ export function ChatShell({
           userUid={user.uid}
           onSurfaceChatMessage={handleSurfaceChatMessage}
           workbenchTabId={workbenchTabId}
-          onWorkbenchTabChange={setWorkbenchTabId}
+          onWorkbenchTabChange={focusWorkbenchTab}
           toolCalls={mergedToolCalls}
           delegations={mergedDelegations}
           compactions={compactions}
@@ -2029,6 +2715,9 @@ export function ChatShell({
           }}
           onPickPrompt={handleSurfaceChatMessage}
           onOpenLauncherDoc={handleOpenDocFromLauncher}
+          onOpenRecentDocument={handleOpenRecentDocument}
+          projectId={projectContext?.id ?? null}
+          projectName={projectContext?.name ?? null}
           onOpenSource={handleOpenSourceDoc}
         />
         </div>

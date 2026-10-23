@@ -77,7 +77,7 @@ def get_my_client(user: Annotated[User, Depends(get_current_user)]) -> ClientMeR
 class ClientConfigUpdate(BaseModel):
     documents_bucket: str | None = None
     display_name: str = ""
-    # v6.4.0 ONE-DEMO M1: per-tenant skill visibility filter (additive nullable).
+    # v6.4.0 TENANT-DEMO M1: per-tenant skill visibility filter (additive nullable).
     # None = unchanged for the upsert merge. Non-empty list = filter active.
     # Empty list intentionally collapses to None — "no skills enabled" wouldn't
     # be a useful tenant state; clear via null instead.
@@ -189,7 +189,7 @@ def upsert_client(
     # field the caller didn't send as its model default — so a one-field update
     # replied with `derived_group_tags: null, documents_bucket: null, …` and read
     # exactly like it had just wiped a customer's config. (2026-08-05: adding one
-    # skill to acmeenergy.com's enabled_skills looked destructive; Firestore was
+    # skill to energy.example's enabled_skills looked destructive; Firestore was
     # fine.) The danger isn't the scare — it's the obvious "repair", re-PUTting
     # every field from a response that never described stored state.
     merged = get_document(_COLLECTION, domain) or data

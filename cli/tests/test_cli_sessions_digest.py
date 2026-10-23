@@ -13,8 +13,19 @@ ENDPOINT = f"{BASE}/api/sessions/sess-1/activity"
 
 _DIGEST = {
     "session_id": "sess-1",
-    "tool_calls": [{"id": "t1", "name": "map_ppa_obligations", "status": "success", "ts": 1.0, "notability": "artifact"}],
-    "delegations": [{"id": "d1", "target": "one-ppa-expert", "targetDisplay": "Contract Expert", "mode": "auto", "ts": 1.0, "notability": "notable"}],
+    "tool_calls": [
+        {"id": "t1", "name": "map_ppa_obligations", "status": "success", "ts": 1.0, "notability": "artifact"}
+    ],
+    "delegations": [
+        {
+            "id": "d1",
+            "target": "demo-ppa-expert",
+            "targetDisplay": "Contract Expert",
+            "mode": "auto",
+            "ts": 1.0,
+            "notability": "notable",
+        }
+    ],
     "session_start_ts": 1.0,
 }
 

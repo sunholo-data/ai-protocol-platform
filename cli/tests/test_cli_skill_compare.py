@@ -23,7 +23,7 @@ BASE = "http://localhost:1956"
 # New-session ids look like `compare-<hex>`; match the dynamic segment.
 _BOOTSTRAP_RE = re.compile(r"http://localhost:1956/api/sessions/compare-[0-9a-f]+/bootstrap")
 _ACTION_RE = re.compile(
-    r"http://localhost:1956/api/skills/one-doc-compare/sessions/compare-[0-9a-f]+/surface-action-run"
+    r"http://localhost:1956/api/skills/demo-doc-compare/sessions/compare-[0-9a-f]+/surface-action-run"
 )
 
 
@@ -53,7 +53,7 @@ def test_compare_new_session_bootstraps_then_streams() -> None:
         return_value=httpx.Response(200, headers={"content-type": "text/event-stream"}, text=_sse_body(_OK_EVENTS))
     )
 
-    result = _invoke(["one-doc-compare", "--left", "doc-a", "--right", "doc-b"])
+    result = _invoke(["demo-doc-compare", "--left", "doc-a", "--right", "doc-b"])
 
     assert result.exit_code == 0, result.output
     assert boot.called, "a fresh session must be bootstrapped"
@@ -86,17 +86,17 @@ def test_compare_gs_url_and_doc_id_duality() -> None:
 
     result = _invoke(
         [
-            "one-doc-compare",
+            "demo-doc-compare",
             "--left",
             "doc-a",
             "--right",
-            "gs://multivac-acme-energy-bucket/PPAs/B.pdf",
+            "gs://example-customer-documents/PPAs/B.pdf",
         ]
     )
     assert result.exit_code == 0, result.output
     ctx = json.loads(action.calls.last.request.content)["action"]["context"]
     assert ctx["left"] == {"doc_id": "doc-a"}
-    assert ctx["right"] == {"gs_url": "gs://multivac-acme-energy-bucket/PPAs/B.pdf"}
+    assert ctx["right"] == {"gs_url": "gs://example-customer-documents/PPAs/B.pdf"}
 
 
 # --- config narrowing ---------------------------------------------------------
@@ -111,7 +111,7 @@ def test_compare_config_flags_reach_the_payload() -> None:
 
     result = _invoke(
         [
-            "one-doc-compare",
+            "demo-doc-compare",
             "--left",
             "doc-a",
             "--right",
@@ -135,7 +135,7 @@ def test_compare_config_flags_reach_the_payload() -> None:
 
 @respx.mock
 def test_compare_invalid_severity_is_click_usage_error() -> None:
-    result = _invoke(["one-doc-compare", "--left", "a", "--right", "b", "--severity", "nope"])
+    result = _invoke(["demo-doc-compare", "--left", "a", "--right", "b", "--severity", "nope"])
     assert result.exit_code == 2, result.output
     assert "--severity" in result.output or "Invalid value" in result.output
 
@@ -146,11 +146,11 @@ def test_compare_invalid_severity_is_click_usage_error() -> None:
 @respx.mock
 def test_compare_reuses_session_without_bootstrap() -> None:
     boot = respx.post(url__regex=_BOOTSTRAP_RE.pattern).mock(return_value=httpx.Response(200, json={}))
-    action = respx.post(f"{BASE}/api/skills/one-doc-compare/sessions/sess-fixed/surface-action-run").mock(
+    action = respx.post(f"{BASE}/api/skills/demo-doc-compare/sessions/sess-fixed/surface-action-run").mock(
         return_value=httpx.Response(200, text=_sse_body(_OK_EVENTS))
     )
 
-    result = _invoke(["one-doc-compare", "--left", "doc-a", "--right", "doc-b", "--session", "sess-fixed"])
+    result = _invoke(["demo-doc-compare", "--left", "doc-a", "--right", "doc-b", "--session", "sess-fixed"])
     assert result.exit_code == 0, result.output
     assert action.called
     assert not boot.called, "an explicit --session must NOT be bootstrapped"
@@ -165,7 +165,7 @@ def test_compare_403_not_opted_in_exits_2() -> None:
     respx.post(url__regex=_ACTION_RE.pattern).mock(
         return_value=httpx.Response(403, json={"detail": "not opted in to action-triggered runs"})
     )
-    result = _invoke(["one-doc-compare", "--left", "doc-a", "--right", "doc-b"])
+    result = _invoke(["demo-doc-compare", "--left", "doc-a", "--right", "doc-b"])
     assert result.exit_code == 2, result.output
     combined = result.output + (getattr(result, "stderr", "") or "")
     assert "403" in combined
@@ -180,13 +180,13 @@ def test_compare_run_error_exits_1() -> None:
         {"type": "RUN_ERROR", "message": "compare blew up", "code": "TOOL_ERROR"},
     ]
     respx.post(url__regex=_ACTION_RE.pattern).mock(return_value=httpx.Response(200, text=_sse_body(events)))
-    result = _invoke(["one-doc-compare", "--left", "doc-a", "--right", "doc-b"])
+    result = _invoke(["demo-doc-compare", "--left", "doc-a", "--right", "doc-b"])
     assert result.exit_code == 1, result.output
     lines = [ln for ln in result.output.splitlines() if ln.strip().startswith("{")]
     assert json.loads(lines[-1])["type"] == "RUN_ERROR"
 
 
 def test_compare_missing_required_left_is_usage_error() -> None:
-    result = _invoke(["one-doc-compare", "--right", "doc-b"])
+    result = _invoke(["demo-doc-compare", "--right", "doc-b"])
     assert result.exit_code == 2, result.output
     assert "--left" in result.output

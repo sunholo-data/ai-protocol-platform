@@ -205,7 +205,13 @@ def probe_bucket(bucket_name: str) -> dict[str, Any]:
     Best-effort: any unexpected error -> ``checked=False`` and never raises."""
     from google.api_core.exceptions import Forbidden, NotFound
 
-    result: dict[str, Any] = {"bucket": bucket_name, "exists": False, "readable": False, "checked": False}
+    result: dict[str, Any] = {
+        "bucket": bucket_name,
+        "exists": False,
+        "readable": False,
+        "writable": None,
+        "checked": False,
+    }
     if not bucket_name:
         return result
     try:
@@ -216,6 +222,15 @@ def probe_bucket(bucket_name: str) -> dict[str, Any]:
         # empty iterator (no error) → still exists+readable.
         next(iter(client.list_blobs(bucket_name, max_results=1)), None)
         result.update(exists=True, readable=True, checked=True)
+        # Uploads WRITE. A read-only grant used to pass this probe and then fail
+        # every upload. testIamPermissions answers "which of these may I do?"
+        # without storage.buckets.get (no metadata call), so the runtime SA can
+        # ask it. None = couldn't tell (reported as unverified, not as broken).
+        try:
+            granted = client.bucket(bucket_name).test_iam_permissions(["storage.objects.create"]) or []
+            result["writable"] = "storage.objects.create" in granted
+        except Exception as exc:
+            log.info("probe_bucket: %s write check unavailable: %s", bucket_name, exc)
     except NotFound:
         result["checked"] = True  # bucket genuinely absent
     except Forbidden as exc:
@@ -332,19 +347,49 @@ def _validate_skill_refs(
     return checks
 
 
-def _validate_bucket(documents_bucket: str | None) -> ValidationCheck | None:
+def _validate_bucket(documents_bucket: str | None) -> ValidationCheck:
     if not documents_bucket:
-        return None
+        # NEVER SILENT: with no bucket, saying nothing read as "bucket fine" —
+        # while a fail-closed deployment refuses every upload for this tenant
+        # (TENANT_NOT_PROVISIONED). Say which it is.
+        from db.clients import _fail_closed
+
+        if _fail_closed():
+            return ValidationCheck(
+                field="documents_bucket",
+                level=_LEVEL_WARNING,
+                message=(
+                    "No documents bucket set — this deployment refuses uploads for tenants "
+                    "without one, so this tenant's users can't upload documents."
+                ),
+                details={"bucket": None},
+            )
+        return ValidationCheck(
+            field="documents_bucket",
+            level=_LEVEL_SKIPPED,
+            message="No documents bucket set — uploads use the deployment's shared bucket.",
+            details={"bucket": None},
+        )
     probe = probe_bucket(documents_bucket)
     details = {
         "bucket": documents_bucket,
         "exists": bool(probe.get("exists")),
         "readable": bool(probe.get("readable")),
+        "writable": probe.get("writable"),
     }
     if not probe.get("checked"):
         msg = f"Could not verify bucket {documents_bucket!r} reachability (SA/creds unavailable)."
+    elif probe.get("exists") and probe.get("readable") and probe.get("writable") is False:
+        msg = (
+            f"Bucket {documents_bucket!r} is readable but the service account cannot WRITE to it — "
+            "uploads will fail (grant roles/storage.objectAdmin on the bucket)."
+        )
     elif probe.get("exists") and probe.get("readable"):
-        msg = f"Bucket {documents_bucket!r} is reachable by the service account."
+        msg = (
+            f"Bucket {documents_bucket!r} is reachable and writable by the service account."
+            if probe.get("writable")
+            else f"Bucket {documents_bucket!r} is readable by the service account (write access not verified)."
+        )
         return ValidationCheck(field="documents_bucket", level=_LEVEL_OK, message=msg, details=details)
     elif probe.get("exists"):
         msg = (
@@ -368,9 +413,7 @@ def build_validation(
 ) -> TenantValidation:
     checks: list[ValidationCheck] = []
     checks.extend(_validate_skill_refs(enabled_skills, default_skill, actor_uid))
-    bucket_check = _validate_bucket(documents_bucket)
-    if bucket_check is not None:
-        checks.append(bucket_check)
+    checks.append(_validate_bucket(documents_bucket))
     checks.append(_validate_group_tags(derived_group_tags))
     ok = not any(c.level == _LEVEL_ERROR for c in checks)
     return TenantValidation(domain=domain, ok=ok, checks=checks)
@@ -390,7 +433,7 @@ def onboard_tenant(
     write; a bucket/group-tag warning is surfaced but does not block."""
     domain = (body.domain or "").strip().lower()
     if not domain or "." not in domain:
-        raise HTTPException(status_code=422, detail="A valid email domain is required (e.g. acmeenergy.com).")
+        raise HTTPException(status_code=422, detail="A valid email domain is required (e.g. energy.example).")
 
     _require_tenant_admin(user, domain)
 
@@ -449,6 +492,39 @@ def onboard_tenant(
     )
     config = ClientConfig(domain=domain, **data)
     return TenantOnboardResponse(domain=domain, config=config, validation=validation)
+
+
+class TenantDraft(BaseModel):
+    """Unsaved editor values for a dry-run validation (POST …/validate)."""
+
+    enabled_skills: list[str] | None = None
+    default_skill: str | None = None
+    documents_bucket: str | None = None
+    derived_group_tags: list[str] | None = None
+
+
+@router.post("/{domain}/validate", response_model=TenantValidation)
+def validate_tenant_draft(
+    domain: str,
+    body: TenantDraft,
+    user: Annotated[User, Depends(get_current_user)],
+) -> TenantValidation:
+    """Dry-run validation of the editor's UNSAVED values (read-only).
+
+    The GET variant checks the STORED config, so a bucket typed into the form
+    wasn't checked until after Save — the editor's Validate button looked like
+    it ignored it. Works whether or not the tenant exists yet. Writes nothing.
+    """
+    domain = domain.strip().lower()
+    _require_tenant_admin(user, domain)
+    return build_validation(
+        domain=domain,
+        enabled_skills=body.enabled_skills or None,
+        default_skill=(body.default_skill or "").strip() or None,
+        documents_bucket=(body.documents_bucket or "").strip() or None,
+        derived_group_tags=body.derived_group_tags or None,
+        actor_uid=user.uid,
+    )
 
 
 @router.get("/{domain}/validate", response_model=TenantValidation)

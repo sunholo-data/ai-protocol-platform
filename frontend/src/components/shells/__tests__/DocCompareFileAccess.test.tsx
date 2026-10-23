@@ -49,7 +49,7 @@ import { DocCompareShell } from "@/components/shells/DocCompareShell";
 
 const props = {
   skillId: "skill-1",
-  pathPrefix: "/chat/@aitana-platform/one-doc-compare",
+  pathPrefix: "/chat/@aitana-platform/demo-doc-compare",
   user: { uid: "u1", displayName: "Mark", email: "m@x.com", photoURL: null } as never,
 };
 const fullWelcome: WelcomeConfig = {

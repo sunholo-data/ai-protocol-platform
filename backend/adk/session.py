@@ -19,6 +19,7 @@ from google.adk.apps.app import EventsCompactionConfig
 from google.adk.artifacts import GcsArtifactService, InMemoryArtifactService
 from google.adk.memory import InMemoryMemoryService, VertexAiMemoryBankService
 from google.adk.sessions import InMemorySessionService, VertexAiSessionService
+from google.adk.sessions.base_session_service import BaseSessionService
 
 from config.gcp import require_gcp_project
 
@@ -36,7 +37,7 @@ logger = logging.getLogger(__name__)
 # and has no way to reach back for them. A user watching a full transcript
 # reasonably assumes the model sees it too.
 #
-# That is not hypothetical: at the 2026-08-06 ONE UAT a ~12-turn expert
+# That is not hypothetical: at the 2026-08-06 acceptance testing a ~12-turn expert
 # conversation compacted once at turn 10, and the "summarise everything we just
 # worked out" payoff request produced the wrong material. See
 # docs/design/v6.23.0/conversation-context-fidelity.md.
@@ -355,7 +356,7 @@ def _reset_session_service_for_tests() -> None:
     _session_service_singleton = None
 
 
-def get_session_service() -> InMemorySessionService | VertexAiSessionService:
+def get_session_service() -> BaseSessionService:
     """Get session service — Vertex AI Agent Engine or in-memory.
 
     Returns a module-level singleton so all callers (skill_processor, messages
@@ -373,11 +374,19 @@ def get_session_service() -> InMemorySessionService | VertexAiSessionService:
             # counting turns (issue #30). Import here to keep the module import
             # light and avoid a cycle.
             from adk.resilient_session import ResilientVertexSessionService
+            from adk.session_memo import ReadMemoSessionService
 
-            _session_service_singleton = ResilientVertexSessionService(
-                project=require_gcp_project(),
-                location=os.environ["GOOGLE_CLOUD_LOCATION"],
-                agent_engine_id=_normalize_agent_engine_id(agent_engine_id),
+            # ReadMemoSessionService on the OUTSIDE: one fetch per turn instead
+            # of three, and no Agent Engine write on the turn's critical path
+            # (each is ~0.6 s; measured ~2.4 s of a 4.2 s first token). Read
+            # adk/session_memo.py before touching this — it changes what a
+            # failed write does to the turn.
+            _session_service_singleton = ReadMemoSessionService(
+                ResilientVertexSessionService(
+                    project=require_gcp_project(),
+                    location=os.environ["GOOGLE_CLOUD_LOCATION"],
+                    agent_engine_id=_normalize_agent_engine_id(agent_engine_id),
+                )
             )
             # Log the active backend ONCE per instance so "were sessions even
             # going to Vertex on this instance?" is answerable from logs (the

@@ -379,3 +379,184 @@ class TestSupersedeSeam:
         summaries = [t for t in texts if t in ("live one", "live two", "SECOND PASS")]
         assert summaries == ["live two"], f"exactly the widest live summary must survive, got {summaries}"
         assert not any("early raw" in t for t in texts), "compacted raw turns must not leak"
+
+
+# --- Live compaction THEN second pass, through ADK's real live path ----------
+#
+# ADK 2 upgrade sub-doc 04, item 4. The tests above hand-build the live
+# compaction events; these let the INSTALLED ADK produce them via
+# `_run_compaction_for_token_threshold_config`, then run our second pass on
+# top. Live selection changed repeatedly between 1.31 and 2.12 (seeding,
+# `_longest_self_contained_prefix`, `_is_range_worth_compacting`), so this is
+# what proves the second pass still composes with whatever live compaction now
+# writes. Must stay green on the 1.31.1, 1.39.1 and 2.12 venvs.
+
+_RETENTION = 2
+
+
+def _turn(ts: float, invocation_id: str, author: str = "user", prompt_tokens: int | None = None) -> Event:
+    e = Event(
+        author=author,
+        invocation_id=invocation_id,
+        content=types.Content(
+            role="user" if author == "user" else "model",
+            parts=[types.Part(text=f"{author} turn at {ts}: strike price EUR 48.62, indexed annually to CPI")],
+        ),
+    )
+    e.timestamp = ts
+    if prompt_tokens is not None:
+        e.usage_metadata = types.GenerateContentResponseUsageMetadata(prompt_token_count=prompt_tokens)
+    return e
+
+
+def _turn_with_pending_call(ts: float, invocation_id: str) -> Event:
+    e = _pending_call_event(ts)
+    e.invocation_id = invocation_id
+    return e
+
+
+class _AppendingService(_Service):
+    """Like the real service, the append lands on the session too — the live
+    path reads `session.events` again on the next run."""
+
+    async def append_event(self, *, session, event):
+        await super().append_event(session=session, event=event)
+        session.events = [*session.events, event]
+
+
+def _live_summarizer(text: str):
+    from google.adk.apps.base_events_summarizer import BaseEventsSummarizer
+
+    class _LiveSummarizer(BaseEventsSummarizer):
+        """Stamps the range of the events it saw, as `LlmEventSummarizer` does."""
+
+        async def maybe_summarize_events(self, *, events):
+            if not events:
+                return None
+            e = Event(
+                author="user",
+                actions=EventActions(
+                    compaction=EventCompaction(
+                        start_timestamp=events[0].timestamp,
+                        end_timestamp=events[-1].timestamp,
+                        compacted_content=types.Content(role="model", parts=[types.Part(text=text)]),
+                    )
+                ),
+            )
+            e.timestamp = events[-1].timestamp + 0.5
+            return e
+
+    return _LiveSummarizer()
+
+
+async def _live_compaction(session, service, text: str) -> bool:
+    """One post-invocation token-threshold compaction, run by ADK itself."""
+    from google.adk.apps.app import EventsCompactionConfig
+    from google.adk.apps.compaction import _run_compaction_for_token_threshold_config
+
+    config = EventsCompactionConfig(
+        summarizer=_live_summarizer(text),
+        compaction_interval=1000,  # sliding window never fires; token path only
+        overlap_size=0,
+        token_threshold=100,
+        event_retention_size=_RETENTION,
+    )
+    return await _run_compaction_for_token_threshold_config(
+        config=config, session=session, session_service=service, agent=None
+    )
+
+
+def _adk_major() -> int:
+    from google.adk import version
+
+    return int(version.__version__.split(".")[0])
+
+
+@pytest.mark.adk_contract
+class TestLiveCompactionThenSecondPass:
+    @pytest.mark.asyncio
+    async def test_second_pass_subsumes_every_live_compaction_and_keeps_the_retention_floor(self):
+        from google.adk.flows.llm_flows import contents
+
+        from adk.compaction_compat import latest_compaction_event
+
+        session = _Session(
+            [
+                _turn(1.0, "inv-1"),
+                _turn(2.0, "inv-1", author="model"),
+                _turn(3.0, "inv-2"),
+                _turn(4.0, "inv-2", author="model"),
+                _turn(5.0, "inv-3"),
+                _turn(6.0, "inv-3", author="model", prompt_tokens=10_000),
+            ]
+        )
+        service = _AppendingService()
+
+        assert await _live_compaction(session, service, "live summary 1")
+        session.events = [
+            *session.events,
+            _turn(7.0, "inv-4"),
+            _turn(8.0, "inv-4", author="model", prompt_tokens=10_000),
+        ]
+        assert await _live_compaction(session, service, "live summary 2")
+        live_ranges = [
+            (e.actions.compaction.start_timestamp, e.actions.compaction.end_timestamp) for e in service.appended
+        ]
+        assert live_ranges == [(1.0, 4.0), (1.0, 6.0)], f"live compaction selection moved: {live_ranges}"
+
+        stub = _StubSummarizer(text="SECOND PASS")
+        outcome = await run_second_pass(session=session, session_service=service, summarizer=stub)
+
+        assert outcome.appended and outcome.prior_compactions == 2
+        ours = service.appended[-1]
+        assert (ours.actions.compaction.start_timestamp, ours.actions.compaction.end_timestamp) == (1.0, 6.0)
+        # Retention floor: the turns live compaction kept raw are neither
+        # re-summarised nor claimed.
+        assert [e.timestamp for e in stub.calls[0]] == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        assert latest_compaction_event(session.events) is ours
+
+        effective = contents._get_contents(current_branch=None, events=session.events, agent_name="")
+        texts = [p.text for c in effective for p in (c.parts or []) if p.text]
+        summaries = [t for t in texts if t in ("live summary 1", "live summary 2", "SECOND PASS")]
+        assert summaries == ["SECOND PASS"], f"exactly our summary must reach the model, got {summaries}"
+        assert sum("turn at 7.0" in t or "turn at 8.0" in t for t in texts) == _RETENTION
+        assert not any("turn at 1.0" in t for t in texts), "compacted raw turns must not leak"
+
+    @pytest.mark.asyncio
+    async def test_pending_call_inside_a_live_span_still_fails_safe(self):
+        """1.x live compaction stops before an unanswered call. 2.x compacts
+        PAST one it can prove dead (older invocation, no response anywhere) —
+        so on 2.x a pending call can now sit INSIDE the live span, and the
+        second pass must decline rather than claim a range it would only
+        partly summarise."""
+        session = _Session(
+            [
+                _turn(1.0, "inv-a"),
+                _turn_with_pending_call(2.0, "inv-a"),
+                _turn(3.0, "inv-a", author="model"),
+                _turn(4.0, "inv-b"),
+                _turn(5.0, "inv-b", author="model"),
+                _turn(6.0, "inv-c"),
+                _turn(7.0, "inv-c", author="model", prompt_tokens=10_000),
+            ]
+        )
+        service = _AppendingService()
+        assert await _live_compaction(session, service, "live summary")
+        live_end = service.appended[0].actions.compaction.end_timestamp
+
+        stub = _StubSummarizer(text="SECOND PASS")
+        outcome = await run_second_pass(session=session, session_service=service, summarizer=stub)
+
+        if _adk_major() >= 2:
+            assert live_end == 5.0, "2.x dead-call pass should compact past the orphaned call"
+        else:
+            assert live_end == 1.0, "1.x should stop before the pending call"
+
+        if live_end >= 2.0:
+            assert outcome.nothing_to_improve and not outcome.appended
+            assert stub.calls == [] and len(service.appended) == 1
+            assert any("pending function call" in n for n in outcome.notes)
+        else:
+            assert outcome.appended
+            assert service.appended[-1].actions.compaction.end_timestamp < 2.0
+            assert all(e.timestamp < 2.0 for e in stub.calls[0])

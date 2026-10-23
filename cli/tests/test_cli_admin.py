@@ -29,9 +29,7 @@ def test_whoami_platform() -> None:
 @respx.mock
 def test_whoami_tenant_lists_domains() -> None:
     respx.get(f"{BASE}/api/admin/whoami").mock(
-        return_value=httpx.Response(
-            200, json={"scope": "tenant", "domains": ["a.com", "b.com"], "email": "ops@a.com"}
-        )
+        return_value=httpx.Response(200, json={"scope": "tenant", "domains": ["a.com", "b.com"], "email": "ops@a.com"})
     )
     result = _run()
     assert result.exit_code == 0, result.output

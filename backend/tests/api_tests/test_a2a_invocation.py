@@ -158,6 +158,49 @@ def test_a2a_middleware_skips_auth_for_discovery_path() -> None:
     app.state._monkey.undo()
 
 
+def test_discovery_stays_public_under_the_mount_with_auth_on() -> None:
+    """Discovery must stay public when the app is MOUNTED at /a2a *and*
+    auth is on — the actual production configuration.
+
+    Regression for the 2026-09-01 prod deploy. `_UNAUTH_PATHS` holds
+    post-mount paths, but the check compared `request.url.path`, which
+    Starlette reconstructs as `root_path + path` — so under the mount it
+    read "/a2a/.well-known/agent.json" and never matched. Discovery was
+    therefore auth-gated the moment auth was switched on.
+
+    It survived two existing tests because each covers only half the
+    condition: `test_a2a_middleware_skips_auth_for_discovery_path` runs the
+    app UNMOUNTED (where the full path and the post-mount path are the same
+    string, so the comparison passes trivially), and
+    `test_build_a2a_app_returns_mountable_starlette_app` mounts at /a2a but
+    with auth DISABLED, so the middleware returns before reaching the
+    exemption. Only mounted + auth-on reproduces it — which is exactly what
+    every environment ran, since A2A_INVOCATION_REQUIRE_AUTH was false
+    everywhere until prod flipped it.
+    """
+    inner = _build_test_app(auth_required=True)
+    outer = FastAPI()
+    outer.mount("/a2a", inner)
+    client = TestClient(outer)
+
+    resp = client.get("/a2a/.well-known/agent.json")
+    assert resp.status_code == 200, (
+        f"discovery hit the auth wall under the mount: {resp.status_code}. "
+        "The exemption must match the POST-MOUNT path, not request.url.path."
+    )
+    assert resp.json()["name"] == "test agent"
+
+    # The other half of the contract: invocation under the same mount must
+    # STILL be gated. A fix that simply widened the exemption would pass the
+    # assertion above and silently reopen the hole this auth flag exists to
+    # close.
+    rpc = client.post("/a2a/", json={"jsonrpc": "2.0", "id": "1", "method": "message/send"})
+    assert 400 <= rpc.status_code < 500, f"invocation must stay gated under the mount, got {rpc.status_code}"
+    _expects_json_rpc_error(rpc.json())
+
+    inner.state._monkey.undo()
+
+
 def test_a2a_middleware_passes_through_when_auth_disabled() -> None:
     """`A2A_INVOCATION_REQUIRE_AUTH=false` short-circuits the middleware
     for forks that need to rely on network-level isolation instead of

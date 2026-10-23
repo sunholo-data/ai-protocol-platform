@@ -58,7 +58,10 @@ async def bootstrap_session(
     """
     existing = get_session_index(session_id)
     if existing is not None:
-        if existing.owner_uid != user.uid:
+        # A collaborator opening a shared thread mounts the same chat page, so
+        # the bootstrap must answer "already exists" rather than refuse.
+        is_collaborator = (user.email or "").strip().lower() in (existing.collaborators or [])
+        if existing.owner_uid != user.uid and not is_collaborator:
             raise HTTPException(status_code=403, detail="Session owned by another user")
         return BootstrapResponse(session_id=session_id, created=False)
 

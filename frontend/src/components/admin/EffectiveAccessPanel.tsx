@@ -4,7 +4,7 @@
 // at their own skill list is looking at a STRICTLY WIDER set than their users
 // get, because skill-admins bypass the tenant's enabled_skills narrowing. There
 // was no way to tell which entries an ordinary user would lose — so the tenant
-// screen appeared to list skills ONE's users don't have.
+// screen appeared to list skills the tenant's users don't have.
 //
 // Every verdict and reason string here comes from the backend
 // (POST /api/admin/access/check with includeSkills). This component deliberately

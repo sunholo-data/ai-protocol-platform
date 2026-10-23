@@ -9,15 +9,15 @@ from click.testing import CliRunner
 from aiplatform.cli import main
 
 BASE = "http://localhost:1956"
-ONE = f"{BASE}/api/admin/analytics/sessions/sess-1/reconcile"
+SINGLE_SESSION = f"{BASE}/api/admin/analytics/sessions/sess-1/reconcile"
 SWEEP = f"{BASE}/api/admin/analytics/sessions-reconcile-sweep"
 
 _BROKEN = {
     "session_id": "sess-1",
     "mirror_present": True,
     "owner_uid": "u1",
-    "owner_domain": "acmeenergy.com",
-    "skill_id": "one-assistant",
+    "owner_domain": "energy.example",
+    "skill_id": "demo-assistant",
     "mirror_turn_count": 4,
     "provisional": False,
     "archived": False,
@@ -46,8 +46,8 @@ _CLEAN = {
     "mirror_present": True,
     "canonical_present": True,
     "owner_uid": "u2",
-    "owner_domain": "acmeenergy.com",
-    "skill_id": "one-assistant",
+    "owner_domain": "energy.example",
+    "skill_id": "demo-assistant",
     "mirror_turn_count": 1,
     "findings": [{"code": "OK", "severity": "info", "detail": "All three stores agree."}],
 }
@@ -55,7 +55,7 @@ _CLEAN = {
 
 @respx.mock
 def test_reconcile_one_session_shows_findings_most_severe_first() -> None:
-    route = respx.get(ONE).mock(return_value=httpx.Response(200, json=_BROKEN))
+    route = respx.get(SINGLE_SESSION).mock(return_value=httpx.Response(200, json=_BROKEN))
     result = CliRunner().invoke(main, ["--env", "local", "sessions", "reconcile", "sess-1"])
     assert result.exit_code == 0, result.output
     assert route.called
@@ -69,7 +69,7 @@ def test_reconcile_one_session_shows_findings_most_severe_first() -> None:
 
 @respx.mock
 def test_reconcile_json_flag_emits_raw() -> None:
-    respx.get(ONE).mock(return_value=httpx.Response(200, json=_BROKEN))
+    respx.get(SINGLE_SESSION).mock(return_value=httpx.Response(200, json=_BROKEN))
     result = CliRunner().invoke(main, ["--env", "local", "sessions", "reconcile", "sess-1", "--json"])
     assert result.exit_code == 0, result.output
     assert '"responses_missing_id": 2' in result.output

@@ -81,6 +81,11 @@ cd backend && pytest tests/ -m "not slow" --tb=line -q  # Backend health
 
 For each milestone, identify:
 - **Scope**: `frontend`, `backend`, or `fullstack`
+- **Repo**: `upstream` or `here` — **only when this repo merges from an upstream**
+  (check `git remote`; skip entirely if it does not). Carry the design doc's Repo
+  Routing decision onto each milestone rather than re-deriving it. A milestone
+  that touches both is a smell worth splitting: it cannot be ported up as one
+  unit, and cherry-picking it drags deployment-specific files upstream.
 - **Dependencies**: What blocks what
 - **Estimated LOC**: Implementation + tests
 - **Priority**: Critical path vs nice-to-have

@@ -6,7 +6,7 @@ user. A dry-run that disagrees with enforcement is worse than no dry-run, becaus
 an admin will act on it.
 
 That risk is not hypothetical — it is the bug that motivated this whole feature.
-The tenant screen listed skills ONE's users did not have, because admins bypass
+The tenant screen listed skills the tenant's users did not have, because admins bypass
 the ``enabled_skills`` narrowing and nothing said so.
 """
 
@@ -40,13 +40,13 @@ def _skill(slug: str, ac_type: str = "public", skill_id: str = "") -> SimpleName
     )
 
 
-def _ctx(*tags: str, email: str = "u@one.com"):
+def _ctx(*tags: str, email: str = "u@customer.example"):
     user = User(uid="u1", email=email, domain=email.split("@")[-1], group_tags=frozenset(tags))
     return build_access_context(user)
 
 
-_ALL = [_skill("one-assistant"), _skill("one-ppa-expert"), _skill("wip-demo")]
-_ENABLED = ["one-assistant", "one-ppa-expert"]
+_ALL = [_skill("demo-assistant"), _skill("demo-ppa-expert"), _skill("wip-demo")]
+_ENABLED = ["demo-assistant", "demo-ppa-expert"]
 
 
 def _real(slug: str) -> SkillConfig:
@@ -58,33 +58,33 @@ def _real(slug: str) -> SkillConfig:
         instructions="Help with stuff.",
         skillId=f"id-{slug}",
         displayName=slug.replace("-", " ").title(),
-        ownerEmail="platform@aitana.ai",
+        ownerEmail="platform@platform.example",
         ownerId="platform-uid",
         slug=slug,
         accessControl={"type": "public"},
     )
 
 
-_REAL = [_real("one-assistant"), _real("one-ppa-expert"), _real("wip-demo")]
+_REAL = [_real("demo-assistant"), _real("demo-ppa-expert"), _real("wip-demo")]
 
 
 class TestTenantNarrowing:
     def test_ordinary_user_loses_skills_outside_enabled_list(self):
-        v = evaluate_visibility(_ALL, _ctx("ONE"), _ENABLED)
-        assert [x.slug for x in v if x.visible] == ["one-assistant", "one-ppa-expert"]
+        v = evaluate_visibility(_ALL, _ctx("example-team"), _ENABLED)
+        assert [x.slug for x in v if x.visible] == ["demo-assistant", "demo-ppa-expert"]
 
     def test_no_filter_means_everything_access_allows(self):
-        v = evaluate_visibility(_ALL, _ctx("ONE"), None)
-        assert [x.slug for x in v if x.visible] == ["one-assistant", "one-ppa-expert", "wip-demo"]
+        v = evaluate_visibility(_ALL, _ctx("example-team"), None)
+        assert [x.slug for x in v if x.visible] == ["demo-assistant", "demo-ppa-expert", "wip-demo"]
 
     def test_reason_names_the_tenant_filter(self):
-        v = {x.slug: x for x in evaluate_visibility(_ALL, _ctx("ONE"), _ENABLED)}
+        v = {x.slug: x for x in evaluate_visibility(_ALL, _ctx("example-team"), _ENABLED)}
         assert "not in the tenant's enabled_skills" in v["wip-demo"].reason
 
     def test_empty_enabled_list_hides_everything(self):
         """An empty list is a real (if odd) config — it must narrow to nothing
         rather than being treated as 'unset = allow all'."""
-        v = evaluate_visibility(_ALL, _ctx("ONE"), [])
+        v = evaluate_visibility(_ALL, _ctx("example-team"), [])
         assert [x.slug for x in v if x.visible] == []
 
 
@@ -123,7 +123,7 @@ class TestAccessControlIsTheHardGate:
     def test_private_skill_denied_regardless_of_tenant_list(self):
         private = _skill("secret", ac_type="private")
         private.owner_id = "someone-else"
-        v = evaluate_visibility([private], _ctx("ONE"), ["secret"])
+        v = evaluate_visibility([private], _ctx("example-team"), ["secret"])
         assert v[0].visible is False
         assert v[0].access_allowed is False
 
@@ -175,16 +175,16 @@ class TestNoDivergence:
     @pytest.mark.parametrize(
         "tags,enabled",
         [
-            (("ONE",), _ENABLED),
-            (("ONE",), None),
+            (("example-team",), _ENABLED),
+            (("example-team",), None),
             (("aitana-admin",), _ENABLED),
             (("one-admin",), _ENABLED),
             ((), _ENABLED),
-            (("ONE",), []),
+            (("example-team",), []),
         ],
     )
     def test_panel_matches_the_real_list_endpoint(self, tags, enabled):
-        user = User(uid="u1", email="u@one.com", domain="one.com", group_tags=frozenset(tags))
+        user = User(uid="u1", email="u@customer.example", domain="customer.example", group_tags=frozenset(tags))
         ctx = build_access_context(user)
 
         panel_visible = sorted(v.slug for v in evaluate_visibility(_REAL, ctx, enabled) if v.visible)
@@ -199,7 +199,7 @@ class TestNoDivergence:
     def test_helper_agrees_with_itself(self):
         """Cheap invariant kept separately so the expensive HTTP test above
         isn't the only thing guarding the helper."""
-        ctx = _ctx("ONE")
+        ctx = _ctx("example-team")
         assert [v.slug for v in evaluate_visibility(_ALL, ctx, _ENABLED) if v.visible] == [
             c.slug for c in visible_configs(_ALL, ctx, _ENABLED)
         ]
@@ -212,7 +212,7 @@ class TestHiddenByTenantFilterSummary:
         private = _skill("secret", ac_type="private")
         private.owner_id = "someone-else"
         configs = [*_ALL, private]
-        verdicts = evaluate_visibility(configs, _ctx("ONE"), _ENABLED)
+        verdicts = evaluate_visibility(configs, _ctx("example-team"), _ENABLED)
         hidden = [v.slug for v in verdicts if v.access_allowed and not v.tenant_allowed]
         assert hidden == ["wip-demo"]
         assert "secret" not in hidden

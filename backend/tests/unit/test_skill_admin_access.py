@@ -1,7 +1,7 @@
 """Unit tests for the Skill Studio management access gate.
 
-v6.6.0 ONE-FORK-CONVERGENCE M3: skill writes (PUT/DELETE) are allowed for the
-skill owner OR a holder of the `one-admin` group tag. This lets ONE's admin
+v6.6.0 TENANT-FORK-CONVERGENCE M3: skill writes (PUT/DELETE) are allowed for the
+skill owner OR a holder of the `one-admin` group tag. This lets the tenant's admin
 team manage skills they don't personally own via the Skill Studio.
 """
 
@@ -38,7 +38,7 @@ class TestIsSkillAdmin:
         assert ctx.is_skill_admin(_skill(owner_id="owner-1")) is True
 
     def test_non_owner_without_tag_cannot_manage(self):
-        ctx = AccessContext(uid="someone-else", email="a@x.com", group_tags=frozenset({"ONE"}))
+        ctx = AccessContext(uid="someone-else", email="a@x.com", group_tags=frozenset({"example-team"}))
         assert ctx.is_skill_admin(_skill(owner_id="owner-1")) is False
 
     def test_owner_check_still_distinct(self):

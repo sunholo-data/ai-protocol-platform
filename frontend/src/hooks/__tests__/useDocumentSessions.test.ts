@@ -63,7 +63,7 @@ describe("useDocumentSessions", () => {
     const abortSpy = vi.fn();
     const fakeController = { abort: abortSpy, signal: { aborted: false } };
     vi.spyOn(globalThis, "AbortController").mockImplementation(
-      () => fakeController as unknown as AbortController
+      function () { return fakeController as unknown as AbortController; }
     );
     // fetch never resolves so the abort fires before any response
     global.fetch = vi.fn().mockReturnValue(new Promise(() => {})) as typeof global.fetch;

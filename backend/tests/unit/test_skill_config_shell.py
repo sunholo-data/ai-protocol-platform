@@ -58,7 +58,7 @@ def test_skill_config_round_trip_chat_primary() -> None:
 
 
 def test_skill_config_round_trip_doc_compare() -> None:
-    """doc-compare with chat as a minimised right drawer — the one-doc-compare shape."""
+    """doc-compare with chat as a minimised right drawer — the demo-doc-compare shape."""
     cfg = SkillConfig(
         name="doc-compare-skill",
         description="Side-by-side document comparison experience",

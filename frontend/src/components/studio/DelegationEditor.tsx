@@ -14,7 +14,7 @@ import type { DelegateEntry, DelegationConfig } from "@/types/skill";
 
 /** Skill id off either shape a backend `allow` entry can take: a bare string, or
  * a `{skill, floor}` rule (v6.8.0 8.2). Rendering the raw object as a React child
- * is what crashed the Studio on skills like the ONE front door. */
+ * is what crashed the Studio on skills like the tenant front door. */
 const entryId = (e: DelegateEntry): string => (typeof e === "string" ? e : (e?.skill ?? ""));
 
 interface SkillOption {

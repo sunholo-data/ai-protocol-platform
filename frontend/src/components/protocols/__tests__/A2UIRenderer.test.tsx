@@ -54,6 +54,15 @@ vi.mock("@a2ui/react/v0_9", () => ({
   ),
 }));
 
+// The markdown catalog is Basic with one component swapped, built at module
+// load from `createReactComponent` + `basicCatalog.components`. These suites
+// stub the SDK to avoid rendering it, so the real builder would explode on the
+// stub — and it has nothing to do with what is under test here. Stubbed to the
+// only field this code path reads.
+vi.mock("@/components/protocols/a2uiMarkdownCatalog", () => ({
+  markdownCatalog: { id: "https://a2ui.org/specification/v0_9/basic_catalog.json" },
+}));
+
 vi.mock("@a2ui/react/styles", () => ({
   injectStyles: vi.fn(),
 }));

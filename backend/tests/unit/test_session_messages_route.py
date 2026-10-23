@@ -315,3 +315,52 @@ class TestTranscriptUnavailable:
 
         assert resp.json()["transcript_unavailable"] is False
         assert len(resp.json()["messages"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# M6: the resident is attributed in the transcript
+# ---------------------------------------------------------------------------
+
+
+class TestResidentAuthorAttribution:
+    """A message the user did not ask for must say what produced it.
+
+    M5a appends the resident's answer — and, since M6, its restart notice —
+    minutes after the turn the user was watching, unprompted. `_author_agent_map`
+    is built by walking SKILLS, and the resident is not one, so it was absent:
+    the late message rendered as a bare assistant bubble with no avatar and no
+    label, in the one case where the reader most needs to know what spoke and
+    why it spoke now.
+    """
+
+    def test_resident_author_is_in_the_map(self):
+        from internal_tasks.resident_routes import RESIDENT_AUTHOR
+        from protocols.sessions_route import _author_agent_map
+
+        idx = MagicMock(skill_id="does-not-resolve")
+        out = _author_agent_map(idx, None)
+
+        assert RESIDENT_AUTHOR in out, "a late resident message would render with no provenance"
+        assert out[RESIDENT_AUTHOR]["label"] == "Resident agent"
+
+    def test_survives_skill_resolution_failing(self):
+        """Seeded before the skill walk, so a resolution error still attributes it."""
+        from internal_tasks.resident_routes import RESIDENT_AUTHOR
+        from protocols.sessions_route import _author_agent_map
+
+        idx = MagicMock(skill_id="boom")
+        with patch("skills.skill_config.get_skill", side_effect=RuntimeError("no firestore")):
+            out = _author_agent_map(idx, None)
+
+        assert out[RESIDENT_AUTHOR]["label"] == "Resident agent"
+
+    def test_late_message_carries_the_label_through_to_the_bubble(self):
+        from internal_tasks.resident_routes import RESIDENT_AUTHOR
+        from protocols.sessions_route import _author_agent_map, _events_to_messages
+
+        idx = MagicMock(skill_id="does-not-resolve")
+        events = [_make_event(RESIDENT_AUTHOR, "Your resident agent finished.", 2.0)]
+        msgs = _events_to_messages(events, _author_agent_map(idx, None))
+
+        assert len(msgs) == 1
+        assert msgs[0].agent_label == "Resident agent"

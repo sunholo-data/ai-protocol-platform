@@ -1,30 +1,39 @@
 # Default skill avatars
 
-A small, **stylistically cohesive** set of professional avatars users pick from
-in the Skill Studio. Consistency is the whole point — a matched set looks
-intentional; a grab-bag looks cheap. (The v5 avatar library was a grab-bag of
-clashing styles + trademarked characters, so it was deliberately not reused.)
+The Skill Studio ("Create a new skill") offers the icons in `gallery/` — one
+**cohesive** set, listed in `src/lib/defaultAvatars.ts`. A new skill starts
+with a random one. Consistency is the whole point: a matched set looks
+intentional; a grab-bag looks cheap.
 
-## Style spec — generate new avatars to match
+## Style spec — make new icons to match
 
-- **Form:** head-and-shoulders portrait, centred, facing forward.
-- **Look:** flat vector illustration — clean bold outlines, simple flat shading,
-  friendly and approachable, professional/business-casual attire.
-- **Background:** plain light / very-soft-gradient, no scenery, no props, no text.
-- **Framing:** square 1:1, subject centred so it crops cleanly to a circle.
-- **Size / format:** export 512×512, optimised JPG (or PNG/SVG if flat enough),
-  aim for < 60 KB. Resize with `sips -s format jpeg -Z 512 in.png --out out.jpg`.
-- **Diversity:** vary hair, skin tone, gender, glasses, attire colour — but keep
-  the SAME line weight, shading, and background treatment across the whole set.
+- **Subject:** one small 3D object that says what KIND of skill it is (a chat
+  bubble, a magnifying glass over a globe, a funnel of cubes…) — no people,
+  no text, no letters, no logos.
+- **Look:** Blender-style matte clay, soft studio light, isometric
+  three-quarter view, sitting on a rounded slate-blue square plinth.
+- **Colours:** slate blue, coral orange, teal and off-white only.
+- **Background:** pure white `#FFFFFF` edge to edge — no backdrop, no gradient,
+  no cast shadow (it sits in a round avatar).
+- **File:** square, trimmed to the object with ~12% margin, 256×256 WebP
+  (`quality 88`), ~5 KB each. Name it by kind: `gallery/<id>.webp`.
 
-The seed avatars `ana.jpg` and `marco.jpg` are the reference. Match their line
-weight and flat-shading style.
+The reference renders are the Sunholo website's service icons
+(sunholo.com/assets). The set here was generated on 2026-10-01 with Gemini 2.5
+Flash Image (Vertex AI), passing three of those renders as style references
+plus the spec above as the prompt; reject any result whose corners are not
+pure white and regenerate.
 
 ## Adding one
 
-1. Generate/resize the image to the spec above.
-2. Drop it in this folder.
-3. Add an entry to `frontend/src/lib/defaultAvatars.ts`:
-   ```ts
-   { id: "kebab-id", label: "Friendly Name", src: "/images/avatars/file.jpg" },
-   ```
+1. Generate the image to the spec, trim/pad/resize to 256×256 WebP.
+2. Drop it in `gallery/`.
+3. Add `gallery("<id>", "<Label>")` to `DEFAULT_AVATARS` in
+   `frontend/src/lib/defaultAvatars.ts`.
+
+## The older files in this folder
+
+`ana.jpg`, `marco.jpg` and the `skill-*.svg` glyphs were the previous set.
+They are no longer offered in the Studio but are kept on purpose: template
+`SKILL.md` frontmatter and skills already stored in any deployment's database
+point at these paths, and removing a file would break those avatars.

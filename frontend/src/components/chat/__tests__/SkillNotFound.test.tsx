@@ -34,9 +34,9 @@ describe("SkillNotFound", () => {
         headers: { "Content-Type": "application/json" },
       }),
     );
-    render(<SkillNotFound slug="one-ppa-expert" />);
+    render(<SkillNotFound slug="demo-ppa-expert" />);
     expect(screen.getByText(/Skill not found/i)).toBeInTheDocument();
-    expect(screen.getByText("one-ppa-expert")).toBeInTheDocument();
+    expect(screen.getByText("demo-ppa-expert")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText("wrong-user@example.com")).toBeInTheDocument();
@@ -50,7 +50,7 @@ describe("SkillNotFound", () => {
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
-    render(<SkillNotFound slug="one-ppa-expert" />);
+    render(<SkillNotFound slug="demo-ppa-expert" />);
     await waitFor(() => {
       expect(screen.getByText("workshop-attendee")).toBeInTheDocument();
     });
@@ -63,7 +63,7 @@ describe("SkillNotFound", () => {
         headers: { "Content-Type": "application/json" },
       }),
     );
-    render(<SkillNotFound slug="one-ppa-expert" />);
+    render(<SkillNotFound slug="demo-ppa-expert" />);
     screen.getByRole("button", { name: /sign out/i }).click();
     expect(mockSignOut).toHaveBeenCalledOnce();
   });

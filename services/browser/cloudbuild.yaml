@@ -1,0 +1,218 @@
+# platform-browser — build, verify, deploy.
+#
+# The service is created and configured by Terraform
+# (deployment-infrastructure infrastructure/environments/<env>/browser_service.tf); this
+# pipeline only builds an image and rolls a new revision onto it. Terraform owns
+# the service account, the `invokers` IAM binding and the ingress posture,
+# because those are the security boundary and must not be settable from a build.
+#
+# The verify step is not optional and not decoration. The 2026-09-02 audit of
+# Obscura ran against the aarch64-macOS binary; what ships here is
+# x86_64-linux, built with different features by a different toolchain. Every
+# claim the design leans on — that the SSRF guard refuses loopback, that the
+# credential tools are withheld, that markdown extraction works — is re-checked
+# against the actual artefact before it reaches a revision.
+
+timeout: 2400s
+
+options:
+  logging: GCS_ONLY
+logsBucket: '${_LOG_BUCKET}'
+
+substitutions:
+  _SERVICE_NAME: platform-browser
+  _REGION: terraform_managed
+  _PROJECT_ID: terraform_managed
+  _ARTIFACT_REGISTRY_REPO_URL_CLIENT: terraform_managed
+  _LOG_BUCKET: 'gs://${_PROJECT_ID}-cloudbuild-logs'
+
+steps:
+  # --- Build ---------------------------------------------------------------
+  # The Dockerfile fetches a pinned Obscura release tarball and verifies its
+  # SHA-256; a mismatch fails the build. See services/browser/OBSCURA_PIN.md.
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-browser
+    dir: services/browser
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'COMMIT_SHA=${SHORT_SHA}'
+      - '-t'
+      - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/browser:${SHORT_SHA}'
+      - '.'
+
+  # --- Verify the artefact, before it can reach a revision ------------------
+  - name: 'gcr.io/cloud-builders/docker'
+    id: verify-browser
+    waitFor: ['build-browser']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        chmod +x services/browser/verify_image.sh
+        services/browser/verify_image.sh \
+          "${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/browser:${SHORT_SHA}"
+
+  # --- Push, recording the digest for a pinned deploy -----------------------
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-browser
+    waitFor: ['verify-browser']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        REPO="${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/browser"
+        docker push "$${REPO}:${SHORT_SHA}"
+        if [ -n "${BRANCH_NAME}" ]; then
+          docker tag "$${REPO}:${SHORT_SHA}" "$${REPO}:${BRANCH_NAME}"
+          docker push "$${REPO}:${BRANCH_NAME}"
+        fi
+        if [ -n "${TAG_NAME}" ]; then
+          docker tag "$${REPO}:${SHORT_SHA}" "$${REPO}:${TAG_NAME}"
+          docker push "$${REPO}:${TAG_NAME}"
+        fi
+        DIGEST=$$(docker inspect --format='{{index .RepoDigests 0}}' "$${REPO}:${SHORT_SHA}")
+        if [ -z "$${DIGEST}" ]; then
+          echo "could not resolve a digest for $${REPO}:${SHORT_SHA}" >&2
+          exit 1
+        fi
+        echo -n "$${DIGEST}" > /workspace/image_browser
+        echo "pinned image: $${DIGEST}"
+
+  # --- Deploy a revision onto the Terraform-managed service -----------------
+  # Only the image and env vars. NOT --allow-unauthenticated, NOT the service
+  # account, NOT ingress: those are Terraform's, and a build that could change
+  # them could quietly make an unauthenticated remote browser public.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: deploy-browser
+    waitFor: ['push-browser']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        IMAGE=$$(cat /workspace/image_browser)
+
+        # The FULL runtime env, not just COMMIT_SHA. modules/run declares
+        # `ignore_changes` on containers.0.env, so Terraform sets env at create
+        # and never again — from then on it belongs to the deploy. Setting only
+        # COMMIT_SHA here left the container with COMMIT_SHA and nothing else.
+        #
+        # Keep these in sync with browser_service.tf; Terraform's copy is what a
+        # freshly created service starts with, this is what every revision after
+        # that gets.
+        gcloud run services update ${_SERVICE_NAME} \
+          --project=${_PROJECT_ID} \
+          --region=${_REGION} \
+          --image="$${IMAGE}" \
+          --set-env-vars=COMMIT_SHA=${SHORT_SHA} \
+          --set-env-vars=GOOGLE_CLOUD_PROJECT=${_PROJECT_ID} \
+          --set-env-vars=BROWSER_SESSION_TTL_SECONDS=1800 \
+          --set-env-vars=BROWSER_SESSION_IDLE_SECONDS=600 \
+          --set-env-vars=BROWSER_MAX_RSS_MB=600 \
+          --set-env-vars=BROWSER_MAX_SESSIONS=12 \
+          --set-env-vars=BROWSER_OBEY_ROBOTS=1 \
+          --set-env-vars=BROWSER_STEALTH=1
+
+  # --- Post-deploy smoke ----------------------------------------------------
+  # Asserts the two claims that make this service safe to run at all. Both are
+  # about configuration, which is exactly what a code deploy cannot verify.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: smoke-browser
+    waitFor: ['deploy-browser']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+
+        URL=$$(gcloud run services describe ${_SERVICE_NAME} \
+          --project=${_PROJECT_ID} --region=${_REGION} --format='value(status.url)')
+        SA=$$(gcloud run services describe ${_SERVICE_NAME} \
+          --project=${_PROJECT_ID} --region=${_REGION} \
+          --format='value(spec.template.spec.serviceAccountName)')
+        echo "service $${URL} running as $${SA}"
+
+        # 1. It must NOT be publicly invokable. An unauthenticated 200 here
+        #    means an anonymous remote browser with arbitrary JS evaluation is
+        #    on the internet.
+        #
+        #    Deliberately /status and never /healthz: Google's frontend
+        #    intercepts the bare /healthz path and answers a generic 404 itself,
+        #    so a check against it would pass without ever reaching the service
+        #    — green for the wrong reason.
+        CODE=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$${URL}/status" || echo 000)
+        if [ "$${CODE}" = "200" ]; then
+          echo "FAIL: /status answered 200 WITHOUT credentials — the service is public" >&2
+          exit 1
+        fi
+        echo "PASS: unauthenticated request refused ($${CODE})"
+
+        # 2. Its service account must hold NO project roles. This is the
+        #    isolation claim of the whole design; assert it rather than trust it.
+        ROLES=$$(gcloud projects get-iam-policy ${_PROJECT_ID} \
+          --flatten='bindings[].members' \
+          --filter="bindings.members:serviceAccount:$${SA}" \
+          --format='value(bindings.role)' | sort -u || true)
+        if [ -n "$${ROLES}" ]; then
+          echo "FAIL: browser SA $${SA} holds project roles it must not have:" >&2
+          echo "$${ROLES}" >&2
+          exit 1
+        fi
+        echo "PASS: browser SA holds no project roles"
+
+        # 3. Authenticated liveness — asserted on CONTENT, never on status code.
+        #
+        #    A 200 proves nothing here, and this check previously passed while
+        #    the service was completely broken. modules/run_multiple builds a
+        #    TWO-container revision and only container 0's image is swapped by
+        #    the deploy; container 1 keeps the cloudrun/container/hello
+        #    bootstrap. Hello binds 8080 and answers 200 on EVERY path. So when
+        #    our container crash-looped (uv: Permission denied -> exit 127), the
+        #    TCP startup probe still succeeded against hello, the revision went
+        #    Ready, traffic flowed, and /status returned 200 — of an HTML
+        #    "Congratulations, you deployed a container" page.
+        #
+        #    Asserting on a field only our service emits is the only check that
+        #    distinguishes "our app is serving" from "something is serving".
+        TOKEN=$$(gcloud auth print-identity-token --audiences="$${URL}")
+        BODY=$$(curl -s --max-time 60 -H "Authorization: Bearer $${TOKEN}" "$${URL}/status" || true)
+        # Each field checked independently. A single glob with two fields is
+        # ORDER-DEPENDENT — `*"service_account"*"sessions"*` requires that order
+        # and the response emits them the other way round, so the check failed
+        # against a service that was working perfectly.
+        case "$${BODY}" in
+          *'"service_account"'*)
+            case "$${BODY}" in
+              *'"status"'*'ok'*) echo "PASS: /status is served by the browser service" ;;
+              *) echo "FAIL: /status JSON lacks a status field. Got: $${BODY}" >&2; exit 1 ;;
+            esac ;;
+          *Congratulations*|*"Cloud Run"*)
+            echo "FAIL: /status is answered by the cloudrun hello bootstrap, not our container." >&2
+            echo "The main container is almost certainly crash-looping — check:" >&2
+            echo "  gcloud logging read 'resource.labels.service_name=\"${_SERVICE_NAME}\"' --project=${_PROJECT_ID} --limit=20" >&2
+            exit 1 ;;
+          *)
+            echo "FAIL: /status did not return the expected JSON. Got: $${BODY}" >&2
+            exit 1 ;;
+        esac
+
+        # 4. The MCP endpoint the backend actually dials, again on content.
+        TOOLS=$$(curl -s --max-time 60 -X POST "$${URL}/mcp" \
+          -H "Authorization: Bearer $${TOKEN}" \
+          -H 'Content-Type: application/json' \
+          -H 'Accept: application/json, text/event-stream' \
+          -H 'X-Aitana-User: smoke@build' \
+          -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' || true)
+        case "$${TOOLS}" in
+          *browser_storage_state*)
+            echo "FAIL: a withheld credential tool is exposed in tools/list." >&2
+            exit 1 ;;
+          *jsonrpc*)
+            echo "PASS: MCP endpoint responds and withholds the credential tools" ;;
+          *)
+            echo "FAIL: MCP endpoint did not return JSON-RPC. Got: $${TOOLS}" >&2
+            exit 1 ;;
+        esac

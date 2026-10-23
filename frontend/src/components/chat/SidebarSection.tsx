@@ -79,7 +79,9 @@ export function SidebarSection({
           e.preventDefault();
           toggle();
         }}
-        className="flex cursor-pointer select-none items-center gap-1.5 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground/60 hover:text-muted-foreground"
+        // Sentence case, readable weight (brand: no all-caps headings); a
+        // 44px row on phones so the sheet's sections are easy to tap.
+        className="flex min-h-[44px] cursor-pointer select-none items-center gap-2 px-4 text-sm font-semibold text-foreground hover:bg-muted/60 md:min-h-[36px] md:px-3"
       >
         <SectionChevron />
         <span className="flex-1 truncate">{title}</span>
@@ -94,7 +96,7 @@ export function SidebarSection({
 function SectionChevron() {
   return (
     <svg
-      className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
+      className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90"
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"

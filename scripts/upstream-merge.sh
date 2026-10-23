@@ -31,7 +31,7 @@ cd "$REPO_ROOT"
 
 GO="${GO:-}"
 REMOTE="${UPSTREAM_REMOTE:-upstream}"
-BRANCH="${UPSTREAM_BRANCH:-main}"
+BRANCH="${UPSTREAM_BRANCH:-dev}"
 
 if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then
   echo "ERROR: no '$REMOTE' remote. Add it:" >&2
@@ -59,6 +59,18 @@ fi
 echo
 echo "Incoming commits:"
 git --no-pager log --oneline "HEAD..$REMOTE/$BRANCH" | sed 's/^/  /'
+
+# Upgrade notes travel WITH the merge: anything new in UPGRADING.md is an
+# action this fork may need to take (e.g. 2026-10-01: the template's default
+# look became the Sunholo brand, and forks that edited globals.css move their
+# values into a theme file). Printed before merging so it is seen whether the
+# merge goes clean or stops on a conflict — the conflict is often the reason.
+NOTES="$(git diff "HEAD" "$REMOTE/$BRANCH" -- UPGRADING.md 2>/dev/null | sed -n 's/^+\([^+]\)/\1/p; s/^+$//p')"
+if [ -n "$NOTES" ]; then
+  echo
+  echo "!! UPGRADE NOTES in this merge (UPGRADING.md) — read before committing:"
+  printf '%s\n' "$NOTES" | sed 's/^/    /'
+fi
 
 echo
 echo "Merging (no commit yet) …"

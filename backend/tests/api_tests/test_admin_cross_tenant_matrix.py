@@ -89,6 +89,10 @@ _EXEMPT: dict[str, str] = {
     "GET /api/admin/tenants/{domain}/validate": (
         "Enforced via _require_tenant_admin -> resolve_admin_scope; covered behaviourally below."
     ),
+    "POST /api/admin/tenants/{domain}/validate": (
+        "Draft dry-run (writes nothing). Enforced via _require_tenant_admin -> resolve_admin_scope; "
+        "covered behaviourally below."
+    ),
 }
 
 _SCOPE_DEPS = {require_admin_scope, require_platform_scope}
@@ -189,8 +193,8 @@ def _b_com_probes():
         ("clients.put", clients, "PUT", "/api/admin/clients/b.com", {"display_name": "x"}),
         ("clients.delete", clients, "DELETE", "/api/admin/clients/b.com", None),
         ("users.get", users, "GET", "/api/admin/users/someone@b.com", None),
-        ("users.grant", users, "POST", "/api/admin/users/someone@b.com/groups", {"tag": "ONE"}),
-        ("users.revoke", users, "DELETE", "/api/admin/users/someone@b.com/groups/ONE", None),
+        ("users.grant", users, "POST", "/api/admin/users/someone@b.com/groups", {"tag": "example-team"}),
+        ("users.revoke", users, "DELETE", "/api/admin/users/someone@b.com/groups/example-team", None),
         ("users.refresh", users, "POST", "/api/admin/users/someone@b.com/refresh-claims", None),
         ("toolperms.get", tool_permissions, "GET", "/api/admin/tool-permissions/b.com", None),
         (
@@ -208,6 +212,7 @@ def _b_com_probes():
         # exemption becomes a blind spot.
         ("tenants.onboard", tenants, "POST", "/api/admin/tenants", {"domain": "b.com", "display_name": "B"}),
         ("tenants.validate", tenants, "GET", "/api/admin/tenants/b.com/validate", None),
+        ("tenants.validate_draft", tenants, "POST", "/api/admin/tenants/b.com/validate", {}),
     ]
 
 

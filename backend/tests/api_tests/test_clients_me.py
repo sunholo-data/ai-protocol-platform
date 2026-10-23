@@ -13,17 +13,17 @@ from db.clients import ClientConfig, resolve_default_skill
 
 
 def _make_user() -> User:
-    return User(uid="caller-uid", email="user@acmeenergy.com", domain="acmeenergy.com")
+    return User(uid="caller-uid", email="user@energy.example", domain="energy.example")
 
 
 # --- ClientConfig.default_skill model ---
 
 
 def test_client_config_default_skill_round_trips():
-    cfg = ClientConfig(domain="acmeenergy.com", default_skill="one-ppa-expert")
-    assert cfg.default_skill == "one-ppa-expert"
+    cfg = ClientConfig(domain="energy.example", default_skill="demo-ppa-expert")
+    assert cfg.default_skill == "demo-ppa-expert"
     restored = ClientConfig.model_validate(cfg.model_dump())
-    assert restored.default_skill == "one-ppa-expert"
+    assert restored.default_skill == "demo-ppa-expert"
 
 
 def test_client_config_default_skill_defaults_none():
@@ -34,15 +34,15 @@ def test_client_config_default_skill_defaults_none():
 
 
 def test_resolve_default_skill_prefers_explicit():
-    cfg = ClientConfig(domain="acmeenergy.com", default_skill="one-ppa-expert", enabled_skills=["other", "x"])
+    cfg = ClientConfig(domain="energy.example", default_skill="demo-ppa-expert", enabled_skills=["other", "x"])
     with mock.patch("db.clients.get_client_sync", return_value=cfg):
-        assert resolve_default_skill(_make_user()) == "one-ppa-expert"
+        assert resolve_default_skill(_make_user()) == "demo-ppa-expert"
 
 
 def test_resolve_default_skill_falls_back_to_first_enabled():
-    cfg = ClientConfig(domain="acmeenergy.com", enabled_skills=["one-ppa-expert", "web-researcher"])
+    cfg = ClientConfig(domain="energy.example", enabled_skills=["demo-ppa-expert", "web-researcher"])
     with mock.patch("db.clients.get_client_sync", return_value=cfg):
-        assert resolve_default_skill(_make_user()) == "one-ppa-expert"
+        assert resolve_default_skill(_make_user()) == "demo-ppa-expert"
 
 
 def test_resolve_default_skill_none_when_unconfigured():
@@ -74,19 +74,19 @@ def client(app):
 
 def test_clients_me_returns_resolved_config(client):
     cfg = ClientConfig(
-        domain="acmeenergy.com",
+        domain="energy.example",
         display_name="Acme Energy",
-        enabled_skills=["one-ppa-expert", "one-doc-compare", "web-researcher"],
-        default_skill="one-ppa-expert",
+        enabled_skills=["demo-ppa-expert", "demo-doc-compare", "web-researcher"],
+        default_skill="demo-ppa-expert",
         documents_bucket="secret-bucket",
     )
     with mock.patch("db.clients.get_client_sync", return_value=cfg):
         resp = client.get("/api/clients/me")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["domain"] == "acmeenergy.com"
-    assert body["default_skill"] == "one-ppa-expert"
-    assert body["enabled_skills"] == ["one-ppa-expert", "one-doc-compare", "web-researcher"]
+    assert body["domain"] == "energy.example"
+    assert body["default_skill"] == "demo-ppa-expert"
+    assert body["enabled_skills"] == ["demo-ppa-expert", "demo-doc-compare", "web-researcher"]
     # documents_bucket must NOT leak via this non-admin endpoint.
     assert "documents_bucket" not in body
 

@@ -3,16 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchWithAuth } from "@/lib/apiClient";
 import type { Skill } from "@/types/skill";
+import { PLATFORM_OWNER_UID } from "@/lib/platformOwner";
 
 interface UseUserSkillsReturn {
   skills: Skill[];
   isLoading: boolean;
   error: string | null;
 }
-
-// Sentinel ownerId for skills shipped by Aitana Labs (the five defaults
-// available to every tenant). Mirrored from backend/skills/platform.py.
-const PLATFORM_OWNER_UID = "aitana-platform";
 
 /**
  * Returns the skills shown in the SkillsBar: the user's own skills plus the

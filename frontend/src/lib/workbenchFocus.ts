@@ -19,7 +19,7 @@
 //
 // If the user had clicked Workspace in between, that steal silently undid their
 // click. They click again, and it "works" — which is exactly how the bug was
-// reported: Dana (Mark had seen it too), ONE UAT 2026-08-06, and reproduced
+// reported: a tester (Mark had seen it too), acceptance testing 2026-08-06, and reproduced
 // live on 2026-08-07 with a prices result open.
 //
 // So: "new" means NEVER SEEN in this session. The seen set only ever grows,

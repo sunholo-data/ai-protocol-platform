@@ -73,15 +73,15 @@ class ClientConfig(BaseModel):
     domain: str
     documents_bucket: str | None = None
     display_name: str = ""
-    # v6.4.0 ONE-DEMO M1: per-tenant skill visibility filter. None = all skills
+    # v6.4.0 TENANT-DEMO M1: per-tenant skill visibility filter. None = all skills
     # visible (existing default). Non-empty list = only these skill slugs are
     # surfaced to the user via /api/skills. Defence-in-depth even when the
     # deployment is single-tenant (admin domains accidentally landing here
-    # don't see ONE-internal skills if any are marked that way later).
+    # don't see tenant-internal skills if any are marked that way later).
     enabled_skills: list[str] | None = None
     # Domain-derived group tags unioned into the JWT's `groupTags` claim at
-    # request time. Lets a deployment grant the `ONE` tag to every
-    # acmeenergy.com user without an admin running `set_custom_user_claims`
+    # request time. Lets a deployment grant the `example-team` tag to every
+    # energy.example user without an admin running `set_custom_user_claims`
     # per signup. Tagged-access skills (type=tagged) become reachable to the
     # whole domain. None/empty = no derived tags.
     derived_group_tags: list[str] | None = None
@@ -263,8 +263,8 @@ def documents_bucket_for_domain(domain: str) -> str | None:
 
     Viewer-INDEPENDENT resolution for a resource that belongs to a specific
     tenant regardless of who is looking at it — e.g. a skill's curated example
-    library (ONE's PPAs), which lives in ONE's per-env bucket whether the viewer
-    is a ONE user or a platform admin. Unlike ``resolve_documents_bucket`` there
+    library (the tenant's PPAs), which lives in the tenant's per-env bucket whether the viewer
+    is a tenant user or a platform admin. Unlike ``resolve_documents_bucket`` there
     is NO env fallback: the caller leaves the value empty when there's no mapping
     rather than borrowing the wrong (deployment-default) bucket."""
     if not domain:

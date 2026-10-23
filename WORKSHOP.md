@@ -12,7 +12,7 @@ with **zero GCP credentials required**.
 
 ```bash
 git clone https://github.com/sunholo-data/ai-protocol-platform.git
-cd platform
+cd ai-protocol-platform
 cp .env.example .env
 
 # Edit .env and uncomment these two lines:

@@ -19,7 +19,7 @@ class TestResolveDocumentsBucket:
         mock_client.documents_bucket = "rockwool-documents"
 
         with patch("db.clients.get_client_sync", return_value=mock_client):
-            result = resolve_documents_bucket(_user("rockwool.com"))
+            result = resolve_documents_bucket(_user("other.example"))
 
         assert result == "rockwool-documents"
 
@@ -91,7 +91,7 @@ class TestResolveDocumentsBucket:
         mock_client.documents_bucket = "rockwool-documents"
 
         with patch("db.clients.get_client_sync", return_value=mock_client):
-            result = resolve_documents_bucket(_user("rockwool.com"))
+            result = resolve_documents_bucket(_user("other.example"))
 
         assert result == "rockwool-documents"
 
@@ -115,12 +115,12 @@ class TestResolveDerivedGroupTags:
         from db.clients import resolve_derived_group_tags
 
         mock_client = MagicMock()
-        mock_client.derived_group_tags = ["ONE", "beta"]
+        mock_client.derived_group_tags = ["example-team", "beta"]
 
         with patch("db.clients.get_client_sync", return_value=mock_client):
-            tags = resolve_derived_group_tags("acmeenergy.com")
+            tags = resolve_derived_group_tags("energy.example")
 
-        assert tags == frozenset({"ONE", "beta"})
+        assert tags == frozenset({"example-team", "beta"})
 
     def test_returns_empty_when_no_mapping(self):
         from db.clients import resolve_derived_group_tags
@@ -252,13 +252,13 @@ class TestClientConfigCache:
     def test_resolve_enabled_skills_uses_cache(self):
         from db import clients
 
-        cfg = clients.ClientConfig(domain="acme.com", enabled_skills=["one-assistant"])
+        cfg = clients.ClientConfig(domain="acme.com", enabled_skills=["demo-assistant"])
         user = _user("acme.com")
         with patch("db.clients.get_client_sync", return_value=cfg) as mock_sync:
             a = clients.resolve_enabled_skills(user)
             b = clients.resolve_default_skill(user)
 
-        assert a == ["one-assistant"]
-        assert b == "one-assistant"  # falls back to enabled_skills[0]
+        assert a == ["demo-assistant"]
+        assert b == "demo-assistant"  # falls back to enabled_skills[0]
         # Two hot-path resolvers, ONE source read — the >=2x re-read is removed.
         assert mock_sync.call_count == 1

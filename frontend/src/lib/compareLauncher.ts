@@ -2,15 +2,15 @@
 //
 // Extracted from ChatShell's WorkbenchPane so the gating is unit-testable
 // without rendering the whole chat page. The launcher belongs to the Workspace
-// tab's HOME for a launcher-capable skill (one-doc-compare,
-// one-obligation-analysis) — and, since v6.23.0 WORKSPACE-HOME-PERSISTENCE, it
+// tab's HOME for a launcher-capable skill (demo-doc-compare,
+// demo-obligation-analysis) — and, since v6.23.0 WORKSPACE-HOME-PERSISTENCE, it
 // stays there for the whole conversation.
 //
 // v6.23.0: the `artifactCount === 0 && !workspaceHasContent` gate is GONE.
 // It existed because Home and Results were the same tab, so a launcher left
 // visible would have fought the result for one pane. Now Home is a permanent
 // tab and every result (including the once-exempt dominant `workspace` surface)
-// gets its own Result tab, so there is nothing to fight over. Dana raised the
+// gets its own Result tab, so there is nothing to fight over. a tester raised the
 // eviction four times in the 2026-08-06 UAT — "if you want to keep the same
 // conversation but use a new skill, you cannot do that in the Workspace
 // anymore". Deleting the gate is the fix.

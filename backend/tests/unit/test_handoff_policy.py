@@ -65,9 +65,9 @@ def _tool(name: str):
 def test_agent_name_is_slug_derived():
     taken: set[str] = set()
     name = _delegate_agent_name(
-        _sub("26124699-f558-4096", "PPA Obligation Analysis", slug="one-obligation-analysis"), taken
+        _sub("26124699-f558-4096", "PPA Obligation Analysis", slug="demo-obligation-analysis"), taken
     )
-    assert name == "one_obligation_analysis"
+    assert name == "demo_obligation_analysis"
     assert name in taken
 
 

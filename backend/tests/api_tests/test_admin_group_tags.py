@@ -56,17 +56,17 @@ def nonadmin_client() -> TestClient:
 
 def test_list_group_tags(admin_client: TestClient) -> None:
     docs = [
-        {"__id": "ONE", "label": "Acme Energy", "grants": ["one-ppa-expert"]},
+        {"__id": "example-team", "label": "Acme Energy", "grants": ["demo-ppa-expert"]},
         {"__id": "aitana-admin", "label": "Platform admin"},
     ]
     with patch("admin.group_tags_routes.query_documents", return_value=docs):
         resp = admin_client.get("/api/admin/group-tags")
     assert resp.status_code == 200
     body = resp.json()
-    assert {t["id"] for t in body} == {"ONE", "aitana-admin"}
-    one = next(t for t in body if t["id"] == "ONE")
+    assert {t["id"] for t in body} == {"example-team", "aitana-admin"}
+    one = next(t for t in body if t["id"] == "example-team")
     assert one["label"] == "Acme Energy"
-    assert one["grants"] == ["one-ppa-expert"]
+    assert one["grants"] == ["demo-ppa-expert"]
 
 
 def test_list_group_tags_non_admin_403(nonadmin_client: TestClient) -> None:
@@ -85,19 +85,19 @@ def test_upsert_group_tag_creates_and_audits(admin_client: TestClient) -> None:
         patch("admin.group_tags_routes.record_admin_action") as mock_audit,
     ):
         resp = admin_client.put(
-            "/api/admin/group-tags/ONE",
-            json={"label": "Acme Energy", "description": "ONE tenant", "grants": ["one-ppa-expert"]},
+            "/api/admin/group-tags/example-team",
+            json={"label": "Acme Energy", "description": "example tenant", "grants": ["demo-ppa-expert"]},
         )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["id"] == "ONE"
+    assert body["id"] == "example-team"
     assert body["label"] == "Acme Energy"
     # created_by stamped from the admin uid on first create.
     assert body["createdBy"] == "admin-uid"
     mock_set.assert_called_once()
     mock_audit.assert_called_once()
     assert mock_audit.call_args.kwargs["action"] == "upsert_group_tag"
-    assert mock_audit.call_args.kwargs["target"] == "ONE"
+    assert mock_audit.call_args.kwargs["target"] == "example-team"
 
 
 def test_upsert_group_tag_preserves_created_by_on_update(admin_client: TestClient) -> None:
@@ -107,7 +107,7 @@ def test_upsert_group_tag_preserves_created_by_on_update(admin_client: TestClien
         patch("admin.group_tags_routes.set_document"),
         patch("admin.group_tags_routes.record_admin_action"),
     ):
-        resp = admin_client.put("/api/admin/group-tags/ONE", json={"label": "new"})
+        resp = admin_client.put("/api/admin/group-tags/example-team", json={"label": "new"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["createdBy"] == "someone-else"
@@ -115,7 +115,7 @@ def test_upsert_group_tag_preserves_created_by_on_update(admin_client: TestClien
 
 
 def test_upsert_group_tag_non_admin_403(nonadmin_client: TestClient) -> None:
-    resp = nonadmin_client.put("/api/admin/group-tags/ONE", json={"label": "x"})
+    resp = nonadmin_client.put("/api/admin/group-tags/example-team", json={"label": "x"})
     assert resp.status_code == 403
 
 
@@ -139,8 +139,8 @@ def test_is_known_tag_bootstrap_when_registry_empty() -> None:
 def test_is_known_tag_rejects_unknown_when_registry_populated() -> None:
     from admin.group_tags_routes import is_known_tag
 
-    with patch("admin.group_tags_routes.query_documents", return_value=[{"__id": "ONE"}]):
-        assert is_known_tag("ONE") is True
+    with patch("admin.group_tags_routes.query_documents", return_value=[{"__id": "example-team"}]):
+        assert is_known_tag("example-team") is True
         assert is_known_tag("TYPO") is False
 
 
@@ -166,28 +166,30 @@ def _fake_fb_users(users):
 def test_list_tag_members_filters_by_claim(admin_client: TestClient) -> None:
     fb = _fake_fb_users(
         [
-            ("alice@one.com", "u1", ["ONE"]),
+            ("alice@customer.example", "u1", ["example-team"]),
             ("bob@x.com", "u2", ["OTHER"]),
-            ("carol@one.com", "u3", ["ONE", "aitana-admin"]),
+            ("carol@customer.example", "u3", ["example-team", "aitana-admin"]),
         ]
     )
     with patch("admin.group_tags_routes._fb_auth", return_value=fb):
-        resp = admin_client.get("/api/admin/groups/ONE/members")
+        resp = admin_client.get("/api/admin/groups/example-team/members")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["tag"] == "ONE"
-    assert {m["email"] for m in body["members"]} == {"alice@one.com", "carol@one.com"}
+    assert body["tag"] == "example-team"
+    assert {m["email"] for m in body["members"]} == {"alice@customer.example", "carol@customer.example"}
     assert body["scanned"] == 3
     assert body["truncated"] is False
 
 
 def test_list_tag_members_truncation_reported(admin_client: TestClient) -> None:
-    fb = _fake_fb_users([("a@one.com", "u1", ["ONE"]), ("b@one.com", "u2", ["ONE"])])
+    fb = _fake_fb_users(
+        [("a@customer.example", "u1", ["example-team"]), ("b@customer.example", "u2", ["example-team"])]
+    )
     with (
         patch("admin.group_tags_routes._MEMBERS_SCAN_CAP", 1),
         patch("admin.group_tags_routes._fb_auth", return_value=fb),
     ):
-        resp = admin_client.get("/api/admin/groups/ONE/members")
+        resp = admin_client.get("/api/admin/groups/example-team/members")
     assert resp.status_code == 200
     body = resp.json()
     assert body["truncated"] is True
@@ -195,5 +197,5 @@ def test_list_tag_members_truncation_reported(admin_client: TestClient) -> None:
 
 
 def test_list_tag_members_non_admin_403(nonadmin_client: TestClient) -> None:
-    resp = nonadmin_client.get("/api/admin/groups/ONE/members")
+    resp = nonadmin_client.get("/api/admin/groups/example-team/members")
     assert resp.status_code == 403

@@ -164,7 +164,7 @@ Mechanical, and the spec is literally the existing `TOKEN_REPLACEMENTS` table.
 
 **Risks:** A half-applied rule leaves an assertion comparing a scrubbed value to an
 unscrubbed one (this exact failure happened to the sanitizer twice — the
-`acmeenergy\.com` regex-escaped form, and the `deal_tracker` ordering bug).
+`energy\.example` regex-escaped form, and the `deal_tracker` ordering bug).
 Mitigate by batching per rule with a full test run per batch.
 
 ### Milestone 5: Carve the `deploy/` tier

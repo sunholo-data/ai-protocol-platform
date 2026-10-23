@@ -27,16 +27,19 @@ def test_expands_bare_datastore_id_using_env(monkeypatch):
 
 
 def test_search_specific_env_takes_precedence_over_compute_project(monkeypatch):
-    """Datastores live in a dedicated search-infra project (aitana-ai-search),
+    """Datastores live in a dedicated search-infra project (example-search-project),
     not the compute project. VERTEX_AI_SEARCH_* must win over GOOGLE_CLOUD_*."""
-    monkeypatch.setenv("VERTEX_AI_SEARCH_PROJECT", "aitana-ai-search")
+    monkeypatch.setenv("VERTEX_AI_SEARCH_PROJECT", "example-search-project")
     monkeypatch.setenv("VERTEX_AI_SEARCH_LOCATION", "eu")
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "your-project-id")
     monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "europe-west1")
 
-    out = resolve_resource_id("vertex_datastore", "aitana4")
+    out = resolve_resource_id("vertex_datastore", "example-datastore-2")
 
-    assert out == "projects/aitana-ai-search/locations/eu/collections/default_collection/dataStores/aitana4"
+    assert (
+        out
+        == "projects/example-search-project/locations/eu/collections/default_collection/dataStores/example-datastore-2"
+    )
 
 
 def test_falls_back_to_global_location_when_GOOGLE_CLOUD_LOCATION_unset(monkeypatch):

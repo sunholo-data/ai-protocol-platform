@@ -8,7 +8,7 @@
 #
 # Branch-based deployment: dev -> your-project-id (only env this
 # sprint; test/prod follow the same shape when they're cut). Substitutions
-# managed by Terraform — see multivac-aitana infrastructure repo.
+# managed by Terraform — see deployment-infrastructure infrastructure repo.
 # TEMPLATE-INVERT M5 / downstream feedback #12: this pipeline used to build,
 # push AND deploy `:${BRANCH_NAME}`. BRANCH_NAME is EMPTY on a tag build, so the
 # reference rendered as `image:` and the step died with "invalid reference
@@ -85,6 +85,33 @@ steps:
     args:
       - 'push'
       - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/sandbox:${SHORT_SHA}'
+
+  # --- Version tag, so a release can be promoted as a unit ---
+  #
+  # `:${SHORT_SHA}` is immutable and is what this build deploys, but a promotion
+  # asks for a VERSION: `crane copy <repo>:vX.Y.Z`. Without this step no such
+  # tag exists for this service, so `make promote … VERSION=vX.Y.Z` could not
+  # carry it and a release tag described only the frontend/backend/toolbox.
+  #
+  # No-op on branch builds: TAG_NAME is empty there (and BRANCH_NAME is empty on
+  # tag builds — that asymmetry is what broke this pipeline once already, see the
+  # header).
+  - name: 'gcr.io/cloud-builders/docker'
+    id: tag-version-mcp-sandbox
+    waitFor: ['push-mcp-sandbox']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        REPO="${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/sandbox"
+        if [ -z "${TAG_NAME}" ]; then
+          echo "not a tag build — no version tag to publish"
+          exit 0
+        fi
+        docker tag "$${REPO}:${SHORT_SHA}" "$${REPO}:${TAG_NAME}"
+        docker push "$${REPO}:${TAG_NAME}"
+        echo "published $${REPO}:${TAG_NAME}"
 
   # --- Deploy to Cloud Run (single container, public) ---
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'

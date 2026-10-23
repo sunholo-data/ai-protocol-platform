@@ -85,6 +85,12 @@ describe("SkillSwitcher", () => {
     expect(screen.getByLabelText("Switch skill")).toHaveTextContent("Writer");
   });
 
+  it("shows no generated letter chip for a skill without an avatar", () => {
+    const skills = [makeSkill({ skillId: "s1", displayName: "Research", avatar: "" })];
+    render(<SkillSwitcher skills={skills} activeSkillId="s1" />);
+    expect(screen.getByLabelText("Switch skill").textContent).toBe("Research");
+  });
+
   it("shows 'Select a skill' when there is no active skill", () => {
     const skills = [makeSkill({ skillId: "s1", displayName: "Research" })];
     render(<SkillSwitcher skills={skills} activeSkillId="none" />);
@@ -191,15 +197,15 @@ describe("SkillSwitcher", () => {
   it("pins + highlights the tenant default skill at the top under a 'Default' header", async () => {
     const skills = [
       withCategory("specialist", { skillId: "ppa", displayName: "PPA Expert" }),
-      makeSkill({ skillId: "one", displayName: "ONE Assistant" }),
+      makeSkill({ skillId: "one", displayName: "Example Assistant" }),
     ];
-    // Active skill differs from the default so "ONE Assistant" appears once (in
+    // Active skill differs from the default so "Example Assistant" appears once (in
     // the default row, not the trigger).
     render(<SkillSwitcher skills={skills} activeSkillId="ppa" defaultSkillId="one" />);
     await userEvent.click(screen.getByLabelText("Switch skill"));
 
     const defaultHeader = screen.getByText("Default");
-    const oneRow = screen.getByText("ONE Assistant").closest("button")!;
+    const oneRow = screen.getByText("Example Assistant").closest("button")!;
     const ppaHeader = screen.getByText("Specialists");
     // Default header + its row precede the Specialists section.
     expect(defaultHeader.compareDocumentPosition(oneRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

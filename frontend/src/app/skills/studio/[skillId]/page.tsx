@@ -23,6 +23,8 @@ import {
 import { AGUIProvider } from "@/providers/AGUIProvider";
 import { DelegationEditor } from "@/components/studio/DelegationEditor";
 import { AccessControlEditor } from "@/components/studio/AccessControlEditor";
+import { KnowledgeBasePicker } from "@/components/studio/KnowledgeBasePicker";
+import { KNOWLEDGE_TOOL, MY_FOLDERS_KEY, searchesMyFolders } from "@/lib/knowledgeBases";
 import { SignInRequired } from "@/components/chat/SignInRequired";
 import {
   AuthoringCopilot,
@@ -34,16 +36,13 @@ import {
   type StudioDraft,
 } from "@/components/studio/applyProposal";
 import type { InteractionStyle, Skill, SkillVoiceConfig } from "@/types/skill";
-import { DEFAULT_AVATARS, randomGlyphAvatar } from "@/lib/defaultAvatars";
+import { DEFAULT_AVATARS, randomDefaultAvatar } from "@/lib/defaultAvatars";
+import { PLATFORM_OWNER_UID } from "@/lib/platformOwner";
 
 const STUDIO_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SKILL_STUDIO === "true";
 
 /** The copilot always talks to this platform skill (seeded backend M3). */
 const AUTHORING_SKILL_ID = "skill-authoring-assistant";
-
-/** Sentinel owner uid for platform-owned (read-only) skills. Mirrors
- * backend skills/platform.py PLATFORM_OWNER_UID. */
-const PLATFORM_OWNER_UID = "aitana-platform";
 
 const INTERACTION_STYLES: InteractionStyle[] = [
   "concise",
@@ -89,7 +88,12 @@ function StudioInner({ skillId }: { skillId: string }) {
   const isNew = skillId === "new";
   const router = useRouter();
   const [draft, setDraft] = useState<StudioDraft>(() => emptyDraft());
+  // Phones: the form and the copilot can't share a 390px screen, so they swap
+  // behind an Editor | Copilot toggle (desktop keeps the side-by-side split).
+  const [mobilePane, setMobilePane] = useState<"editor" | "copilot">("editor");
   const [loadingSkill, setLoadingSkill] = useState(!isNew);
+  // The server's answer to "may I change this skill?" (null = it didn't say).
+  const [canEdit, setCanEdit] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>({ status: "idle" });
   // Snapshot of the last loaded/saved draft, used to detect unsaved edits so
@@ -119,6 +123,7 @@ function StudioInner({ skillId }: { skillId: string }) {
         const loaded = skillToDraft(data);
         setDraft(loaded);
         setPristine(JSON.stringify(loaded));
+        setCanEdit(typeof data.canEdit === "boolean" ? data.canEdit : null);
         setLoadingSkill(false);
       })
       .catch((err) => {
@@ -133,6 +138,8 @@ function StudioInner({ skillId }: { skillId: string }) {
 
   const onApplyProposal = useCallback((proposal: Proposal) => {
     setDraft((prev) => applyProposal(prev, proposal));
+    // On a phone, show the form the proposal just changed.
+    setMobilePane("editor");
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -214,10 +221,14 @@ function StudioInner({ skillId }: { skillId: string }) {
     }
   }, [skillId, router]);
 
-  // Offer Fork on platform skills, or after any save is rejected as read-only.
+  // Offer Fork up front on any skill this viewer can't change (the server says
+  // so with `canEdit`: platform skills, and skills shared with you), and after
+  // any save rejected as read-only (an older server that doesn't send canEdit).
+  const readOnly = !isNew && canEdit === false;
   const saveBlockedAsReadOnly =
     saveState.status === "error" && /fork/i.test(saveState.message);
-  const showForkButton = isPlatformOwned || saveBlockedAsReadOnly;
+  const showForkButton = isPlatformOwned || readOnly || saveBlockedAsReadOnly;
+  const forkIsPrimary = isPlatformOwned || readOnly;
 
   if (loadingSkill) {
     return <div className="p-6 text-sm text-muted-foreground">Loading skill…</div>;
@@ -233,22 +244,22 @@ function StudioInner({ skillId }: { skillId: string }) {
   }
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className="flex items-center justify-between border-b px-4 py-3">
-        <div>
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex items-center justify-between gap-3 border-b px-4 py-3">
+        <div className="min-w-0">
           <h1 className="text-lg font-semibold">
             {isNew ? "New skill" : "Edit skill"}
           </h1>
-          <p className="text-xs text-muted-foreground">
+          <p className="truncate text-xs text-muted-foreground">
             {draft.displayName || draft.name || "Untitled skill"}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           {saveState.status === "ok" && (
-            <span className="text-xs text-green-700">{saveState.message}</span>
+            <span className="hidden text-xs text-green-700 sm:inline">{saveState.message}</span>
           )}
           {saveState.status === "error" && (
-            <span className="max-w-md truncate text-xs text-destructive">
+            <span className="hidden max-w-md truncate text-xs text-destructive sm:inline">
               {saveState.message}
             </span>
           )}
@@ -256,7 +267,7 @@ function StudioInner({ skillId }: { skillId: string }) {
             type="button"
             onClick={handleCancel}
             disabled={saveState.status === "saving" || forking}
-            className="rounded-md border px-4 py-2 text-sm disabled:opacity-50"
+            className="min-h-[44px] rounded-md border px-3 text-sm disabled:opacity-50 sm:px-4 md:min-h-[36px]"
           >
             Cancel
           </button>
@@ -266,13 +277,17 @@ function StudioInner({ skillId }: { skillId: string }) {
               onClick={() => void handleFork()}
               disabled={forking}
               className={
-                isPlatformOwned
+                forkIsPrimary
                   ? "rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
                   : "rounded-md border px-4 py-2 text-sm disabled:opacity-50"
               }
               title="Make your own editable copy of this skill"
             >
-              {forking ? "Forking…" : "Fork to customize"}
+              {forking ? "Forking…" : (
+                <>
+                  Fork<span className="hidden sm:inline"> to customize</span>
+                </>
+              )}
             </button>
           )}
           {/* Save stays visible for platform skills too — platform admins can
@@ -280,9 +295,10 @@ function StudioInner({ skillId }: { skillId: string }) {
           <button
             type="button"
             onClick={() => void handleSave()}
-            disabled={saveState.status === "saving" || !isDirty || forking}
+            disabled={saveState.status === "saving" || !isDirty || forking || readOnly}
+            title={readOnly ? "You can't change this skill. Fork it to make your own copy." : undefined}
             className={
-              isPlatformOwned
+              forkIsPrimary
                 ? "rounded-md border px-4 py-2 text-sm disabled:opacity-50"
                 : "rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
             }
@@ -292,8 +308,47 @@ function StudioInner({ skillId }: { skillId: string }) {
         </div>
       </header>
 
+      {/* NEVER SILENT on a phone: a save error shown only in the hidden header
+          span would be invisible, so it gets its own line here. */}
+      {saveState.status === "error" && (
+        <p role="alert" className="border-b px-4 py-2 text-xs text-destructive sm:hidden">
+          {saveState.message}
+        </p>
+      )}
+
+      <div className="flex shrink-0 justify-center border-b py-2 md:hidden">
+        <div className="inline-flex rounded-full bg-muted p-1" role="tablist" aria-label="Editor or copilot">
+          {(["editor", "copilot"] as const).map((pane) => (
+            <button
+              key={pane}
+              type="button"
+              role="tab"
+              aria-selected={mobilePane === pane}
+              onClick={() => setMobilePane(pane)}
+              className={
+                "min-h-[36px] rounded-full px-5 text-sm font-medium capitalize transition-colors " +
+                (mobilePane === pane ? "bg-background text-foreground ring-1 ring-border" : "text-muted-foreground")
+              }
+            >
+              {pane}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-2">
-        <div className="min-h-0 overflow-auto border-r">
+        <div
+          className={
+            "min-h-0 overflow-auto md:border-r" + (mobilePane === "editor" ? "" : " max-md:hidden")
+          }
+        >
+          {readOnly && !isPlatformOwned && (
+            <div role="note" className="m-4 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+              This skill was shared with you, so you can use it but not change it. Use{" "}
+              <span className="font-medium text-foreground">Fork to customize</span> to make
+              your own editable copy.
+            </div>
+          )}
           {isPlatformOwned && (
             <div className="m-4 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
               This is a built-in <span className="font-medium text-foreground">platform skill</span>.
@@ -304,7 +359,9 @@ function StudioInner({ skillId }: { skillId: string }) {
           )}
           <BuilderForm draft={draft} setDraft={setDraft} isNew={isNew} />
         </div>
-        <div className="min-h-0 overflow-hidden">
+        {/* Kept mounted on phones when hidden, so the copilot's stream and
+            thread survive switching to the editor and back. */}
+        <div className={"min-h-0 overflow-hidden" + (mobilePane === "copilot" ? "" : " max-md:hidden")}>
           <AGUIProvider skillId={AUTHORING_SKILL_ID} sessionId={seededThreadId}>
             <AuthoringCopilot
               skillId={skillId}
@@ -423,6 +480,27 @@ function BuilderForm({
 
       <ToolsPicker selected={tools} onChange={(next) => setMeta({ tools: next })} />
 
+      {tools.includes(KNOWLEDGE_TOOL) && (
+        <KnowledgeBasePicker
+          value={knowledgeBaseRefs(draft)}
+          onChange={(next) => {
+            const configs = draft.skillMetadata?.toolConfigs ?? {};
+            const current = (configs[KNOWLEDGE_TOOL] ?? {}) as Record<string, unknown>;
+            setMeta({ toolConfigs: { ...configs, [KNOWLEDGE_TOOL]: { ...current, knowledge_bases: next } } });
+          }}
+          includeMyFolders={searchesMyFolders({ tools: [KNOWLEDGE_TOOL], toolConfigs: draft.skillMetadata?.toolConfigs })}
+          onIncludeMyFoldersChange={(on) => {
+            const configs = draft.skillMetadata?.toolConfigs ?? {};
+            const current = { ...((configs[KNOWLEDGE_TOOL] ?? {}) as Record<string, unknown>) };
+            if (on) current[MY_FOLDERS_KEY] = true;
+            else delete current[MY_FOLDERS_KEY];
+            setMeta({ toolConfigs: { ...configs, [KNOWLEDGE_TOOL]: current } });
+          }}
+          accessControl={draft.accessControl}
+          ownerId={draft.ownerId}
+        />
+      )}
+
       <DelegationEditor
         value={draft.skillMetadata?.delegation}
         currentSkillId={draft.skillId}
@@ -489,12 +567,12 @@ function BuilderForm({
           your own organisation&apos;s documents.
         </p>
 
-        <Field label="Folder path" hint="e.g. aitana3/PPAs/longform/ — leave blank for no library">
+        <Field label="Folder path" hint="e.g. handbooks/2026/ — leave blank for no library">
           <input
             type="text"
             value={draft.welcome?.bucketBrowser?.rootPath ?? ""}
             onChange={(e) => setLibrary({ rootPath: e.target.value })}
-            placeholder="aitana3/PPAs/longform/"
+            placeholder="handbooks/2026/"
             className="w-full rounded-md border px-3 py-2 text-sm"
           />
         </Field>
@@ -596,7 +674,7 @@ function AvatarPicker({
           Pick one, or paste an image URL below.
         </span>
       </div>
-      <div className="flex flex-wrap gap-3">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(4rem,1fr))] gap-3">
         {DEFAULT_AVATARS.map((a) => {
           const selected = value === a.src;
           return (
@@ -607,16 +685,17 @@ function AvatarPicker({
               title={a.label}
               aria-label={a.label}
               aria-pressed={selected}
-              className={`h-16 w-16 overflow-hidden rounded-full border-2 transition ${
+              className={`aspect-square w-full max-w-[4.5rem] overflow-hidden rounded-full border bg-background transition ${
                 selected
-                  ? "border-primary ring-2 ring-primary"
-                  : "border-transparent hover:border-muted-foreground/40"
+                  ? "border-primary ring-2 ring-primary ring-offset-2 ring-offset-background"
+                  : "border-border hover:border-muted-foreground/60"
               }`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={a.src}
                 alt={a.label}
+                loading="lazy"
                 className="h-full w-full object-cover"
               />
             </button>
@@ -628,7 +707,7 @@ function AvatarPicker({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-md border px-3 py-2 text-sm"
-        placeholder="/images/avatars/… or https://…"
+        placeholder="Or paste an image URL: https://…"
       />
     </div>
   );
@@ -807,7 +886,7 @@ const INSTRUCTION_FIELDS: {
     key: "goal",
     label: "Goal",
     hint: "What is this skill's job?",
-    placeholder: "e.g. Help users review and compare power-purchase agreements.",
+    placeholder: "e.g. Help users review contracts and summarise the key terms.",
     rows: 2,
   },
   {
@@ -928,8 +1007,8 @@ const TIER_LABELS: Record<string, { label: string; blurb: string }> = {
 const TIER_ORDER = ["smart", "pro", "lite"];
 const FALLBACK_TIERS: TierOption[] = [
   { tier: "smart", model: "claude-opus-4-8", desc: "" },
-  { tier: "pro", model: "gemini-2.5-pro", desc: "" },
-  { tier: "lite", model: "gemini-flash-lite", desc: "" },
+  { tier: "pro", model: "gemini-3.8-flash", desc: "" },
+  { tier: "lite", model: "gemini-3.5-flash-lite", desc: "" },
 ];
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -1154,7 +1233,7 @@ function emptyDraft(): StudioDraft {
     instructions: "",
     // Default to the most capable tier (smart → claude-opus).
     skillMetadata: { model: "smart", tools: [], subSkills: [], toolConfigs: {} },
-    persona: { avatar: randomGlyphAvatar(), interactionStyle: "concise", voice: {} },
+    persona: { avatar: randomDefaultAvatar(), interactionStyle: "concise", voice: {} },
     welcome: {},
   };
 }
@@ -1209,10 +1288,19 @@ function buildSaveBody(draft: StudioDraft, isNew: boolean): Record<string, unkno
   return body;
 }
 
+/** The knowledge bases bound to the draft's knowledge_search tool. */
+function knowledgeBaseRefs(draft: StudioDraft): string[] {
+  const cfg = (draft.skillMetadata?.toolConfigs?.[KNOWLEDGE_TOOL] ?? {}) as { knowledge_bases?: unknown };
+  return Array.isArray(cfg.knowledge_bases) ? (cfg.knowledge_bases as string[]) : [];
+}
+
 async function safeErrorDetail(res: Response): Promise<string | null> {
   try {
     const data = (await res.json()) as { detail?: unknown };
     if (typeof data.detail === "string") return data.detail;
+    // Structured refusals ({code, message}) — show the human message, not JSON.
+    const message = (data.detail as { message?: unknown } | null)?.message;
+    if (typeof message === "string" && message) return message;
     if (data.detail) return JSON.stringify(data.detail);
   } catch {
     // non-JSON body — no detail

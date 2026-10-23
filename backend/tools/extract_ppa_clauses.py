@@ -1,4 +1,4 @@
-"""extract_ppa_clauses — typed PPA-contract clause extraction (v6.4.0 ONE-DEMO M2).
+"""extract_ppa_clauses — typed PPA-contract clause extraction (v6.4.0 TENANT-DEMO M2).
 
 ADK FunctionTool that takes a `doc_id` for an already-parsed PPA contract and
 returns structured `PpaClauses` JSON with `block_id` citations on every
@@ -28,8 +28,9 @@ import os
 
 from google.adk.tools import ToolContext
 
+from tools.document_identity import identity_mismatch
 from tools.documents.ailang_parse import parse_gcs_file
-from tools.documents.context import build_document_context
+from tools.documents.context import build_document_context, resolve_caller_uid
 from tools.resilient_genai import generate_content_resilient
 from tools.schemas.ppa_clauses import PpaClauses
 
@@ -44,7 +45,7 @@ _EXTRACTION_TIER = os.environ.get("PPA_EXTRACTION_TIER", "lite")
 # Output-token budget for a single extraction. The default cap truncated large
 # contracts mid-JSON, so we raise it — but the model's `maxOutputTokens` range is
 # 1 (inclusive) to 65_536 (EXCLUSIVE), so the ceiling is 65_535. Passing 65_536
-# is a hard 400 INVALID_ARGUMENT (the 2026-07-14 live failure on Google LEAP).
+# is a hard 400 INVALID_ARGUMENT (the 2026-07-14 live failure on Vantage Grid).
 _EXTRACTION_MAX_OUTPUT_TOKENS = int(os.environ.get("PPA_EXTRACTION_MAX_TOKENS", "65535"))
 
 
@@ -239,6 +240,7 @@ async def extract_ppa_clauses(
     gs_url: str | None = None,
     clauses: list[str] | None = None,
     max_other_clauses: int | None = None,
+    expected_name: str = "",
     tool_context: ToolContext = None,
 ) -> str:
     """Extract PPA clauses from a contract document with block_id citations.
@@ -246,6 +248,13 @@ async def extract_ppa_clauses(
     Use this tool when the user asks to "extract clauses", "summarise the
     contract terms", "show me the PPA structure", or similar requests on
     a specific document.
+
+    ALWAYS pass `expected_name` when the user named the contract — e.g. they
+    said "the Brightfield PPA", pass `expected_name="Brightfield PPA"`. The
+    tool then checks the id you resolved actually IS that document and refuses
+    if it is not, instead of analysing a different contract under the name the
+    user said. Leave it blank only when the user genuinely named no document
+    (e.g. they said "this one" about an attachment). Never invent a value.
 
     Two input modes — pass EXACTLY ONE:
       - `doc_id`: an already-uploaded document in parsed_documents/{doc_id}
@@ -348,7 +357,27 @@ async def extract_ppa_clauses(
 
     if doc_id is not None:
         try:
-            _content, blocks = await asyncio.to_thread(build_document_context, doc_id, "blocks", None)
+            _content, blocks = await asyncio.to_thread(
+                build_document_context, doc_id, "blocks", None, caller_uid=resolve_caller_uid(tool_context)
+            )
+            # Confirm this is the document the USER named before spending an
+            # extraction call on it — and, more importantly, before its contents
+            # are returned under a name that may not be its own. Blocks mode
+            # carries the filename, so this costs no extra read.
+            _resolved_name = ""
+            try:
+                _resolved_name = json.loads(_content).get("filename") or ""
+            except Exception:  # a shape change here must not break extraction
+                _resolved_name = ""
+            _mismatch = identity_mismatch(expected_name, _resolved_name)
+            if _mismatch:
+                log.warning(
+                    "extract_ppa_clauses: identity mismatch — expected %r, resolved %r (doc_id=%s)",
+                    expected_name,
+                    _resolved_name,
+                    doc_id,
+                )
+                return json.dumps({"error": _mismatch, "doc_id": doc_id, "filename": _resolved_name})
         except KeyError:
             return json.dumps(
                 {
@@ -518,7 +547,7 @@ async def _run_clause_extraction(blocks: list[dict], doc_id: str, clauses: list[
         config={
             "response_mime_type": "application/json",
             "response_schema": schema_dict,
-            # Large contracts (e.g. Google LEAP, 137pp) produce clause JSON well
+            # Large contracts (e.g. Vantage Grid, 137pp) produce clause JSON well
             # past the model's default output cap, truncating mid-string →
             # "Invalid JSON: EOF while parsing" (live-hit 2026-07-14). Request the
             # flash tier's full 65_536-token output budget so extraction isn't cut off.

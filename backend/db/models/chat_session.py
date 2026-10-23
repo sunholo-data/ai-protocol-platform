@@ -69,12 +69,23 @@ class ChatSessionIndex(BaseModel):
     #
     # Set by `aiplatform sessions reconcile --mark-lost` for rows that have turns
     # but no ADK session. Measured on test 2026-08-10: 14 of the 100 most recent
-    # sessions, 6 of them ONE's, all casualties of the SessionManager sweep fixed
+    # sessions, 6 of them the tenant's, all casualties of the SessionManager sweep fixed
     # by 44ca9b6 on 2026-08-05 (zero since). The per-session views already say
     # "transcript unavailable" once opened; without this flag the LIST still shows
     # them as ordinary conversations, so a user only discovers the session is
     # empty by clicking it. Unrecoverable, so the honest move is to label them.
     transcript_lost: bool = Field(default=False, alias="transcriptLost")
+    # Shared machine threads: lower-cased emails of non-owners who may read AND
+    # reply in this thread (a machine principal's `supervisors`, stamped at
+    # creation). A collaborator's reply runs as the OWNER — see stream_skill.
+    collaborators: list[str] = Field(default_factory=list)
+    # Projects (docs/design/private/projects.md §5). ``project_id`` is EXPLICIT
+    # membership: the chat was started in, made into, or moved into a project.
+    # ``project_ids`` is DERIVED and denormalised: the union of the projectIds of
+    # the documents this chat used, kept true by db/projects.py. Both live on the
+    # model so a full-row ``save_session_index`` round-trips them.
+    project_id: str | None = Field(default=None, alias="projectId")
+    project_ids: list[str] = Field(default_factory=list, alias="projectIds")
 
     model_config = ConfigDict(populate_by_name=True)
 

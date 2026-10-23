@@ -126,7 +126,7 @@ function renderForms() {
     wrap(
       <>
         <Capture />
-        <ChatPlacementForms sessionId="sess-1" skillId="one-ppa-expert" />
+        <ChatPlacementForms sessionId="sess-1" skillId="demo-ppa-expert" />
       </>,
     ),
   );

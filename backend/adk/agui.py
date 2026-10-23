@@ -33,7 +33,6 @@ this module integrates instead.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from collections.abc import AsyncGenerator
@@ -45,6 +44,8 @@ from google.adk.agents import BaseAgent
 from google.adk.artifacts import BaseArtifactService
 from google.adk.memory import BaseMemoryService
 from google.adk.sessions import BaseSessionService
+
+from protocols.stream_poll import IDLE, poll_stream
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,17 @@ _TERMINAL_EVENT_TYPES = frozenset({"RUN_ERROR", "RUN_FINISHED"})
 # events are buffered in stream_agui_events and flushed only AFTER RUN_STARTED.
 HEARTBEAT_EVENT_NAME = "HEARTBEAT"
 _DEFAULT_HEARTBEAT_SECONDS = 20.0
+# How often the loop WAKES to flush queued stage events, as opposed to how often
+# it emits a HEARTBEAT. They used to be the same number, and that made every
+# progressive surface a lie for runs shorter than the heartbeat: a tool blocking
+# for 15s enqueued its updates every 2s and the loop did not wake to drain them
+# ONCE, so the whole story arrived in a burst when the tool returned and looked
+# exactly like no streaming at all (reported from the browser, 2026-09-06).
+#
+# Separate knobs because they answer different questions. The heartbeat is a
+# keepalive and a "Thinking…" cadence — 20s is right and more would be noise.
+# The drain is "how stale may a queued update be", where the answer is ~1s.
+_DEFAULT_DRAIN_SECONDS = 1.0
 
 
 def _heartbeat_interval(override: float | None) -> float:
@@ -78,6 +90,16 @@ def _heartbeat_interval(override: float | None) -> float:
         return float(os.environ.get("AGUI_HEARTBEAT_SECONDS", _DEFAULT_HEARTBEAT_SECONDS))
     except ValueError:
         return _DEFAULT_HEARTBEAT_SECONDS
+
+
+def _drain_interval(hb_interval: float) -> float:
+    """Wake cadence for flushing queued stage events. Never longer than the
+    heartbeat — a drain that lags the keepalive would be pointless."""
+    try:
+        want = float(os.environ.get("AGUI_DRAIN_SECONDS", _DEFAULT_DRAIN_SECONDS))
+    except ValueError:
+        want = _DEFAULT_DRAIN_SECONDS
+    return max(0.05, min(want, hb_interval))
 
 
 def _heartbeat_event(n: int) -> dict:
@@ -300,46 +322,50 @@ async def stream_agui_events(
     buffered_pre_agent = [ev.model_dump(by_alias=True, exclude_none=True) for ev in tracker.drain_stage_events()]
 
     hb_interval = _heartbeat_interval(heartbeat_seconds)
+    drain_interval = _drain_interval(hb_interval)
     hb_count = 0
+    since_hb = 0.0
+    # One session fetch per turn, no session write on the critical path — see
+    # adk/session_memo.py. Opened here because this generator IS the request:
+    # the memo must cover ag_ui_adk's reads, the Runner's, and the callbacks'.
+    from adk.session_memo import drain_pending_session_writes, session_read_memo
+
+    memo = session_read_memo()
+    memo.__enter__()
     source = agui_agent.run(run_input).__aiter__()
-    pending: asyncio.Task | None = None
+    stream = poll_stream(source, drain_interval if hb_interval > 0 else None)
     try:
-        while True:
-            if pending is None:
-                pending = asyncio.ensure_future(anext(source))
-            if hb_interval > 0:
-                try:
-                    event = await asyncio.wait_for(asyncio.shield(pending), timeout=hb_interval)
-                except TimeoutError:
-                    # Nothing may follow a terminal event — if one has already
-                    # gone out, stay silent while draining the tail of `source`.
-                    if terminal_event_yielded is not None:
-                        continue
-                    # Silence tick: keep the wire warm and flush any stage
-                    # labels queued mid-silence (e.g. "Thinking…") — the
-                    # underlying anext task keeps running via shield().
-                    hb_count += 1
-                    yield _heartbeat_event(hb_count)
-                    drained = False
-                    for stage_event in tracker.drain_stage_events():
-                        drained = True
-                        yield stage_event.model_dump(by_alias=True, exclude_none=True)
-                    # M4 silent-phase fallback label: no visible token yet and
-                    # nothing fresher queued -> keep the user informed that the
-                    # model is working (models with omitted thinking display
-                    # emit no REASONING traffic at all). Same label repeats ~
-                    # every heartbeat; the frontend overwrites in place.
-                    if not first_model_token_seen and not drained:
-                        yield {"type": "CUSTOM", "name": "STAGE_PROGRESS", "value": {"label": "Thinking…"}}
+        async for event in stream:
+            if event is IDLE:
+                # Nothing may follow a terminal event — if one has already
+                # gone out, stay silent while draining the tail of `source`.
+                if terminal_event_yielded is not None or not first_agui_event_seen:
                     continue
-                except StopAsyncIteration:
-                    break
-            else:
-                try:
-                    event = await pending
-                except StopAsyncIteration:
-                    break
-            pending = None
+                since_hb += drain_interval
+                # Flush FIRST and unconditionally: this is the whole point
+                # of waking, and it must not be gated behind the heartbeat.
+                drained = False
+                for stage_event in tracker.drain_stage_events():
+                    drained = True
+                    yield stage_event.model_dump(by_alias=True, exclude_none=True)
+                # The keepalive keeps its own, slower cadence. Emitting one
+                # per drain would put ~20x the heartbeats on the wire to buy
+                # nothing — they exist to prove the connection is alive, and
+                # a stage event proves that already.
+                if since_hb + 1e-9 < hb_interval:
+                    continue
+                since_hb = 0.0
+                hb_count += 1
+                yield _heartbeat_event(hb_count)
+                # M4 silent-phase fallback label: no visible token yet and
+                # nothing fresher queued -> keep the user informed that the
+                # model is working (models with omitted thinking display
+                # emit no REASONING traffic at all). Same label repeats ~
+                # every heartbeat; the frontend overwrites in place.
+                if not first_model_token_seen and not drained:
+                    yield {"type": "CUSTOM", "name": "STAGE_PROGRESS", "value": {"label": "Thinking…"}}
+                continue
+
             if not first_agui_event_seen:
                 tracker.mark(STAGE_FIRST_AGUI_EVENT)
                 first_agui_event_seen = True
@@ -425,7 +451,12 @@ async def stream_agui_events(
                 yield event.model_dump(by_alias=True, exclude_none=True)
                 continue
 
-            yield event.model_dump(by_alias=True, exclude_none=True)
+            payload = event.model_dump(by_alias=True, exclude_none=True)
+            if type_value == "STATE_DELTA":
+                # JSON Patch null is a value, not an absent field. Typed AG-UI
+                # 1.0 operations lose `value: null` under exclude_none=True.
+                payload["delta"] = event.model_dump(by_alias=True)["delta"]
+            yield payload
 
             # Flush the pre-agent events (buffered above) now that the first real
             # event — RUN_STARTED — is on the wire. One-shot; cleared after.
@@ -441,8 +472,13 @@ async def stream_agui_events(
             for stage_event in tracker.drain_stage_events():
                 yield stage_event.model_dump(by_alias=True, exclude_none=True)
     finally:
-        # Consumer disconnected (or agent errored): don't leak the in-flight
-        # anext task — cancelling it also propagates into the underlying
-        # ag_ui_adk generator so the ADK run can clean up.
-        if pending is not None and not pending.done():
-            pending.cancel()
+        try:
+            # Await cleanup in the producer's Context before releasing the memo.
+            await stream.aclose()
+        finally:
+            # Background writes must land before Cloud Run throttles the CPU.
+            # A source cleanup error must not leak the request's session memo.
+            try:
+                await drain_pending_session_writes()
+            finally:
+                memo.__exit__(None, None, None)

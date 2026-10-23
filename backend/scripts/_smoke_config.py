@@ -37,6 +37,12 @@ if str(_HERE) not in sys.path:
 try:
     from _env import ENVIRONMENTS  # type: ignore[import-not-found]
     from _env import SMOKE_IDENTITY as _DEPLOYMENT_IDENTITY  # type: ignore[import-not-found]
+
+    try:
+        from _env import CUSTOMER_TENANT_DOMAIN as _CUSTOMER_TENANT_DOMAIN  # type: ignore[import-not-found]
+    except ImportError:
+        # A deployment whose `_env.py` predates CUSTOMER_TENANT_DOMAIN.
+        _CUSTOMER_TENANT_DOMAIN = "energy.example"
 except ImportError:  # pragma: no cover - exercised only in a template fork
     ENVIRONMENTS: dict[str, dict[str, str]] = {}
     # Neutral defaults for a fork. `.test` is RFC 2606 reserved.
@@ -44,6 +50,7 @@ except ImportError:  # pragma: no cover - exercised only in a template fork
         "email": "whoami-test@platform.test",
         "group_tags": ["platform-admin-test"],
     }
+    _CUSTOMER_TENANT_DOMAIN = "energy.example"
 
 HAVE_NAMED_ENVS = bool(ENVIRONMENTS)
 
@@ -226,3 +233,16 @@ def test_identity(email: str | None = None, group_tags: list[str] | None = None)
         raw = os.environ.get("SMOKE_GROUP_TAGS")
         tags = [t.strip() for t in raw.split(",") if t.strip()] if raw else list(_DEPLOYMENT_IDENTITY["group_tags"])  # type: ignore[arg-type]
     return resolved, domain, tags
+
+
+def customer_tenant_domain() -> str:
+    """The customer tenant domain the seed scripts address.
+
+    Deployment-private (``_env.CUSTOMER_TENANT_DOMAIN``) with the template's
+    neutral placeholder as the fallback. Hardcoding it in a seed script means
+    the placeholder merges DOWNSTREAM on an upstream sync and the script then
+    seeds a tenant that does not exist — silently, because writing a Firestore
+    doc for an unknown domain succeeds. Overridable per-invocation with
+    ``CUSTOMER_TENANT_DOMAIN`` in the environment.
+    """
+    return os.environ.get("CUSTOMER_TENANT_DOMAIN") or _CUSTOMER_TENANT_DOMAIN

@@ -51,14 +51,14 @@ def nonadmin_client() -> TestClient:
 
 def test_list_tool_permissions(admin_client: TestClient) -> None:
     docs = [
-        {"__id": "alice@one.com", "type": "user", "tools": ["search"]},
+        {"__id": "alice@customer.example", "type": "user", "tools": ["search"]},
         {"__id": "*", "type": "wildcard", "tools": ["*"]},
     ]
     with patch("admin.tool_permissions_routes.query_documents", return_value=docs):
         resp = admin_client.get("/api/admin/tool-permissions")
     assert resp.status_code == 200
     body = resp.json()
-    assert {d["doc_id"] for d in body} == {"alice@one.com", "*"}
+    assert {d["doc_id"] for d in body} == {"alice@customer.example", "*"}
 
 
 def test_get_tool_permission_404(admin_client: TestClient) -> None:
@@ -69,9 +69,9 @@ def test_get_tool_permission_404(admin_client: TestClient) -> None:
 
 def test_get_tool_permission_ok(admin_client: TestClient) -> None:
     with patch("admin.tool_permissions_routes.get_document", return_value={"type": "user", "tools": ["search"]}):
-        resp = admin_client.get("/api/admin/tool-permissions/alice@one.com")
+        resp = admin_client.get("/api/admin/tool-permissions/alice@customer.example")
     assert resp.status_code == 200
-    assert resp.json()["doc_id"] == "alice@one.com"
+    assert resp.json()["doc_id"] == "alice@customer.example"
     assert resp.json()["tools"] == ["search"]
 
 
@@ -83,7 +83,7 @@ def test_upsert_tool_permission_flushes_cache_and_audits(admin_client: TestClien
         patch("admin.tool_permissions_routes.record_admin_action") as mock_audit,
     ):
         resp = admin_client.put(
-            "/api/admin/tool-permissions/alice@one.com",
+            "/api/admin/tool-permissions/alice@customer.example",
             json={"type": "user", "tools": ["search"], "denied": ["code_exec"]},
         )
     assert resp.status_code == 200
@@ -94,7 +94,7 @@ def test_upsert_tool_permission_flushes_cache_and_audits(admin_client: TestClien
 
 
 def test_upsert_tool_permission_bad_type_422(admin_client: TestClient) -> None:
-    resp = admin_client.put("/api/admin/tool-permissions/alice@one.com", json={"type": "bogus", "tools": []})
+    resp = admin_client.put("/api/admin/tool-permissions/alice@customer.example", json={"type": "bogus", "tools": []})
     assert resp.status_code == 422
 
 
@@ -105,7 +105,7 @@ def test_delete_tool_permission_flushes_cache_and_audits(admin_client: TestClien
         patch("admin.tool_permissions_routes.perms.clear_cache") as mock_clear,
         patch("admin.tool_permissions_routes.record_admin_action") as mock_audit,
     ):
-        resp = admin_client.delete("/api/admin/tool-permissions/alice@one.com")
+        resp = admin_client.delete("/api/admin/tool-permissions/alice@customer.example")
     assert resp.status_code == 200
     mock_del.assert_called_once()
     mock_clear.assert_called_once()

@@ -48,6 +48,48 @@ Then import the module for its side-effect registration in `agent.py`
 what gives a result **its own workbench tab + a row in the Workspace/Home
 index** — declare it and the tab appears for free.
 
+## The one exception: PROGRESS surfaces (v6.31.0 FANOUT M2)
+
+The golden rule above governs **results** — a transform from a typed tool result
+to a surface, emitted once when the tool returns. A *progress* surface is a
+different animal and does not fit the registry:
+
+- it is drawn **before any result exists**, and updated several times before the
+  tool returns, so there is no typed result to map and no single moment to map
+  it at;
+- its tool name is not known at import time. An `AgentTool` delegate
+  (`DelegateRule.invoke == "tool"`) is named after the delegate's slug, decided
+  per skill config — so a `register(tool_names=[...])` call would have to mutate
+  a module-global registry per request, on the hot path.
+
+`a2ui_fanout_render.py` + `make_fanout_board_emitter` are the sanctioned shape:
+a **closure** over the branch tool names, composed into the PARENT agent's
+before/after tool callbacks, emitting through `tracker.emit_a2ui_surface` —
+the same wire path a mapping ends up on (`A2UI_SURFACE` CUSTOM →
+`WorkspaceA2uiEventRouter` → `SurfaceRegistry`), same Basic catalog, no bespoke
+React. Copy that, not a new invention, for the next progress surface.
+
+Two things measured on 2026-09-07 that make it legal, both worth knowing before
+you assume trap 1 forbids this:
+
+- **The tracker ContextVar survives ADK's `asyncio.gather`.** `create_task`
+  copies the current context, so the binding the SSE handler made is still live
+  inside the tasks ADK creates for parallel function calls — 0 NULL-tracker hits
+  across 6 emissions from 3 concurrent branches. Trap 1 is about the *sub-agent's
+  own* callbacks (a separate `Runner`, unbound context), NOT the parent's.
+- **`stream_agui_events` drains on a 1s timer** (`AGUI_DRAIN_SECONDS`),
+  independent of ADK's event cadence, so an update queued mid-tool-call reaches
+  the wire immediately instead of waiting for ADK's next event. Before that fix
+  (2026-09-06, `92757af6`) every progress surface flushed in one burst at the
+  end, which from a browser is indistinguishable from no streaming at all.
+
+**Verify a progress surface by TIMING, not content.** A board that populates
+only when the last branch lands is byte-identical to one that streamed; only
+wall-clock separates them. `scripts/verify-fanout-board.sh` asserts the spread
+(and `scripts/verify-resident-story.sh` does the same for the resident story) —
+both fail when every emission lands within 2s of the others, naming
+`AGUI_DRAIN_SECONDS` as the thing to check.
+
 ## The traps (each has bitten; miss one → silent no-op, no error)
 
 1. **Emit only from the MAIN agent's `after_tool_callback`**
@@ -209,14 +251,14 @@ measured, 1 of 2 identical runs emitted an EMPTY turn, and the run that fired
 stopped after `list_documents` without ever calling the tool the task needed.
 If a skill's core journey chains tools, it needs `pro`+.
 
-**Acted on 2026-07-21:** the chaining specialists (one-ppa-expert,
-one-obligation-analysis, one-doc-compare, document-analyst, one-knowledge-search,
+**Acted on 2026-07-21:** the chaining specialists (demo-ppa-expert,
+demo-obligation-analysis, demo-doc-compare, document-analyst, demo-knowledge-search,
 web-researcher, code-assistant) are pinned to `pro`; only true front doors
-(one-assistant, general-assistant) and mechanical schema-fill (data-extractor)
+(demo-assistant, general-assistant) and mechanical schema-fill (data-extractor)
 sit on `lite`. Thinking depth is now a separate per-skill knob
 (`SkillMetadata.thinking`, see `config/thinking.py`) — front doors run `low`
 for TTFT, specialists `dynamic`. Do not read "single tool = light skill":
-one-knowledge-search declares one tool but does heavy synthesis, so it is `pro`.
+demo-knowledge-search declares one tool but does heavy synthesis, so it is `pro`.
 The right question is what happens AFTER the tool returns, not how many tools
 are declared. NOTE this ladder is validated on latency + this recorded finding,
 NOT yet on a capability eval — a pass-rate eval over the real journeys is owed.

@@ -33,10 +33,18 @@ async function maybeSignalDomainRejection(res: Response): Promise<void> {
   try {
     const body = (await res.json()) as { detail?: { code?: string; message?: string } };
     const detail = body?.detail;
-    if (detail && typeof detail === "object" && detail.code === "DOMAIN_NOT_PERMITTED") {
+    // EMAIL_NOT_VERIFIED (unverified-email gate) is the same dead end — every authed
+    // call 403s for this identity — so it reuses the gate, carrying its code.
+    if (
+      detail &&
+      typeof detail === "object" &&
+      (detail.code === "DOMAIN_NOT_PERMITTED" || detail.code === "EMAIL_NOT_VERIFIED")
+    ) {
       if (typeof window !== "undefined") {
         window.dispatchEvent(
-          new CustomEvent(DOMAIN_NOT_PERMITTED_EVENT, { detail: { message: detail.message } }),
+          new CustomEvent(DOMAIN_NOT_PERMITTED_EVENT, {
+            detail: { message: detail.message, code: detail.code },
+          }),
         );
       }
     }

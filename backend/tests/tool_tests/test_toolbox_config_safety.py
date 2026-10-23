@@ -1,7 +1,7 @@
 """Static safety gates on every shipped MCP Toolbox ``tools.yaml``.
 
 These tests encode the findings of the 2026-07-17 Toolbox spike (v1.7.0, run
-against ONE's real BigQuery datasets). They are STATIC — no Toolbox process, no
+against the tenant's real BigQuery datasets). They are STATIC — no Toolbox process, no
 BigQuery — so they run in CI on every push. The live behavioural proof lives in
 ``tests/integration/test_toolbox_live.py`` (marked ``integration``).
 
@@ -17,7 +17,7 @@ Why these exist (design doc: docs/design/v6.14.0/mcp-toolbox-database-gateway.md
     second line of defence behind a templateParameter.
   * The connecting identity's IAM is therefore the only backstop, and it is
     PROJECT-level ``bigquery.dataViewer`` on ``your-entsoe-project`` — i.e.
-    an injection reaches all six of ONE's datasets.
+    an injection reaches all six of the tenant's datasets.
 
 Conclusion: ``templateParameters`` is an un-mitigated SQL-injection vector in
 our configuration, so it is banned outright rather than used carefully. Column
@@ -143,7 +143,7 @@ _GENERIC_EXECUTORS = {
 
 @pytest.mark.parametrize("path", _shipped_config_paths(), ids=lambda p: p.parent.name)
 def test_generic_sql_executors_are_bound_to_a_scoped_source(path: Path) -> None:
-    """C3 **as amended by v6.23.0** (docs/design/v6.23.0/one-bigquery.md).
+    """C3 **as amended by v6.23.0** (docs/design/v6.23.0/demo-bigquery.md).
 
     The original C3 banned generic executors outright, citing Google's
     "not for production agents" note. That conflated two things, and the half
@@ -240,15 +240,30 @@ def test_cloudbuild_sets_the_toolbox_bigquery_project() -> None:
     """The other half of the test above: a default is only a safety net if the
     real value is actually supplied on the deploy path that establishes env config.
 
-    Promotion (`cloudbuild.promote.yaml`) deliberately sets NO env vars — it only
-    swaps images — so this must come from the branch deploy or Terraform.
+    This used to read cloudbuild.yaml and stop there, on the docstringed premise
+    that "promotion deliberately sets NO env vars — it only swaps images — so this
+    must come from the branch deploy or Terraform". That premise died in v6.44.0,
+    and it had been quietly wrong for prod long before: prod ships by promotion,
+    so under the old design NOTHING set TOOLBOX_BQ_PROJECT there — and indeed prod
+    had no toolbox container at all on 2026-09-04.
+
+    The spec now lives once, in scripts/deploy-run-service.sh, and BOTH pipelines
+    call it. So assert it there, and assert both callers — otherwise this passes
+    while a pipeline quietly stops deploying the toolbox.
     """
-    cloudbuild = (_REPO_ROOT / "cloudbuild.yaml").read_text()
-    assert "TOOLBOX_BQ_PROJECT=" in cloudbuild, (
-        "cloudbuild.yaml no longer sets TOOLBOX_BQ_PROJECT on the toolbox container. "
+    spec = (_REPO_ROOT / "scripts" / "deploy-run-service.sh").read_text()
+    assert "TOOLBOX_BQ_PROJECT=" in spec, (
+        "deploy-run-service.sh no longer sets TOOLBOX_BQ_PROJECT on the toolbox container. "
         "Without it every environment silently falls back to tools.yaml's dev default "
         "and bills BigQuery jobs to the wrong project — the exact drift v6.23.0 fixed."
     )
+    for pipeline in ("cloudbuild.yaml", "cloudbuild.promote.yaml"):
+        text = (_REPO_ROOT / pipeline).read_text()
+        assert "deploy-run-service.sh" in text, (
+            f"{pipeline} no longer calls deploy-run-service.sh, so whatever env it "
+            "deploys to gets no toolbox container and no env surface at all. That is "
+            "how prod sat on v6.34.1's spec through nine promotions."
+        )
 
 
 @pytest.mark.parametrize("path", _shipped_config_paths(), ids=lambda p: p.parent.name)

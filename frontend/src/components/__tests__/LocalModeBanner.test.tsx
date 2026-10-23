@@ -9,9 +9,13 @@ vi.mock("@/lib/localMode", async () => {
   const actual = await vi.importActual<typeof import("@/lib/localMode")>(
     "@/lib/localMode",
   );
+  const isLocalMode = vi.fn(() => false);
   return {
     ...actual,
-    isLocalMode: vi.fn(() => false),
+    isLocalMode,
+    // The real helper calls the module-internal isLocalMode, which the mock
+    // can't reach — delegate so the tests below keep driving one switch.
+    isLocalModeBannerEnabled: vi.fn(() => isLocalMode()),
   };
 });
 
@@ -110,5 +114,27 @@ describe("LocalModeBanner", () => {
         screen.getByText(/LOCAL_MODE — All data is in-memory and ephemeral/i),
       ).toBeInTheDocument();
     });
+  });
+
+  it("stays hidden in LOCAL_MODE when the deployment opts out", () => {
+    vi.mocked(localMode.isLocalMode).mockReturnValue(true);
+    vi.mocked(localMode.isLocalModeBannerEnabled).mockReturnValue(false);
+
+    const { container } = render(<LocalModeBanner />);
+
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("isLocalModeBannerEnabled", () => {
+  it("follows LOCAL_MODE unless NEXT_PUBLIC_LOCAL_MODE_BANNER turns it off", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/localMode")>("@/lib/localMode");
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_MODE", "");
+    expect(actual.isLocalModeBannerEnabled()).toBe(false);
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_MODE", "1");
+    expect(actual.isLocalModeBannerEnabled()).toBe(true);
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_MODE_BANNER", "0");
+    expect(actual.isLocalModeBannerEnabled()).toBe(false);
+    vi.unstubAllEnvs();
   });
 });

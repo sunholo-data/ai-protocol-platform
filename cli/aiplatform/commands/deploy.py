@@ -17,15 +17,17 @@ Requires the `gcloud` CLI on PATH, authenticated against the target project.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import click
-import yaml
 
-_CONFIG: dict[str, Any] = yaml.safe_load((Path(__file__).resolve().parent.parent / "config.yaml").read_text())
+from aiplatform.config import load_config
+
+_CONFIG: dict[str, Any] = load_config()
 _DEPLOY_CFG: dict[str, Any] = _CONFIG.get("deploy", {})
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -42,14 +44,50 @@ def _require_gcloud() -> None:
         raise click.ClickException("gcloud CLI not found on PATH. Install the Google Cloud SDK first.")
 
 
+# The template's placeholder project ids. A deployment that has not yet run
+# `make materialize-config` resolves every env to one of these, and the failure
+# surfaces as `PERMISSION_DENIED on your-project-id-test` — which reads as a
+# credentials problem and sends you to `gcloud auth`, the wrong place entirely.
+# Naming the placeholder turns that into a one-line diagnosis.
+#
+# Found 2026-09-01: `deploy status` — the command that PROVES a promotion copied
+# rather than rebuilt — reported placeholders from a laptop whose config.yaml was
+# correct. The cause there was NOT packaging (the real config.yaml packages
+# fine); it was `make cli-install` reusing a CACHED WHEEL, so both the code and
+# the config were months stale. Fixed in the Makefile; this guard covers the
+# genuine not-yet-configured case.
+_PLACEHOLDER_PREFIX = "your-project-id"
+
+
 def _project_for(env: str) -> str:
+    """Resolve the GCP project for `env`, honoring env-var overrides.
+
+    Mirrors `http.resolve_base_url`'s precedence so the two seams behave the
+    same: an explicit env var always wins over packaged config.
+    """
+    override = os.environ.get(f"AIPLATFORM_PROJECT_{env.upper()}")
+    if override:
+        return override
+
     projects = _DEPLOY_CFG.get("projects", {})
     project = projects.get(env)
     if not project:
         raise click.ClickException(
-            f"No project configured for env '{env}'. Set deploy.projects.{env} in cli/aiplatform/config.yaml."
+            f"No project configured for env '{env}'. Set deploy.projects.{env} in cli/aiplatform/config.yaml, "
+            f"or export AIPLATFORM_PROJECT_{env.upper()}."
         )
-    return str(project)
+    project = str(project)
+    if project.startswith(_PLACEHOLDER_PREFIX):
+        raise click.ClickException(
+            f"env '{env}' resolves to the template placeholder project {project!r}, so this would query "
+            f"nothing real.\n"
+            f"  This is configuration, not credentials.\n"
+            f"  Fix by any of:\n"
+            f"    - make materialize-config, then make cli-install\n"
+            f"    - export AIPLATFORM_PROJECT_{env.upper()}=<project-id>\n"
+            f"    - or run from the repo: uv run --project cli aiplatform deploy status --env {env}"
+        )
+    return project
 
 
 @click.group("deploy")

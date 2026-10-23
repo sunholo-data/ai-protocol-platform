@@ -10,7 +10,7 @@ Registers the first two result→A2UI mappings against the shared registry in
     round trip. Each diff row is a ``Card`` built once and referenced from the
     "All" tab and its severity tab, with ``block_id`` citations.
   * ``extract_ppa_clauses`` (typed ``PpaClauses``) → a clause-card surface so
-    extract-only skills (e.g. one-ppa-expert) get a workbench view too.
+    extract-only skills (e.g. demo-ppa-expert) get a workbench view too.
 
 Importing this module registers the mappings as a side effect (the
 composition root — ``adk.agent`` — imports it once at startup). Both tools keep

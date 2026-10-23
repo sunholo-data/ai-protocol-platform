@@ -69,42 +69,42 @@ def _fake_fb(uid="u1", tags=None):
 
 
 def test_get_user_groups(admin_client: TestClient) -> None:
-    fb, _ = _fake_fb(tags=["ONE"])
+    fb, _ = _fake_fb(tags=["example-team"])
     with patch("admin.users_routes._fb_auth", return_value=fb):
-        resp = admin_client.get("/api/admin/users/alice@one.com")
+        resp = admin_client.get("/api/admin/users/alice@customer.example")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["email"] == "alice@one.com"
+    assert body["email"] == "alice@customer.example"
     assert body["uid"] == "u1"
-    assert body["group_tags"] == ["ONE"]
+    assert body["group_tags"] == ["example-team"]
 
 
 def test_grant_group_is_idempotent_union(admin_client: TestClient) -> None:
-    fb, _rec = _fake_fb(tags=["ONE"])
+    fb, _rec = _fake_fb(tags=["example-team"])
     with patch("admin.users_routes._fb_auth", return_value=fb):
-        resp = admin_client.post("/api/admin/users/alice@one.com/groups", json={"tag": "aitana-admin"})
+        resp = admin_client.post("/api/admin/users/alice@customer.example/groups", json={"tag": "aitana-admin"})
     assert resp.status_code == 200
-    assert resp.json()["group_tags"] == ["ONE", "aitana-admin"]
+    assert resp.json()["group_tags"] == ["aitana-admin", "example-team"]
     # The claim was written with the union, preserving other claims.
     fb.set_custom_user_claims.assert_called_once()
     uid_arg, claims_arg = fb.set_custom_user_claims.call_args[0]
     assert uid_arg == "u1"
-    assert claims_arg["groupTags"] == ["ONE", "aitana-admin"]
+    assert claims_arg["groupTags"] == ["aitana-admin", "example-team"]
 
 
 def test_grant_empty_tag_400(admin_client: TestClient) -> None:
     fb, _ = _fake_fb()
     with patch("admin.users_routes._fb_auth", return_value=fb):
-        resp = admin_client.post("/api/admin/users/alice@one.com/groups", json={"tag": "  "})
+        resp = admin_client.post("/api/admin/users/alice@customer.example/groups", json={"tag": "  "})
     assert resp.status_code == 400
 
 
 def test_revoke_group(admin_client: TestClient) -> None:
-    fb, _ = _fake_fb(tags=["ONE", "aitana-admin"])
+    fb, _ = _fake_fb(tags=["aitana-admin", "example-team"])
     with patch("admin.users_routes._fb_auth", return_value=fb):
-        resp = admin_client.delete("/api/admin/users/alice@one.com/groups/aitana-admin")
+        resp = admin_client.delete("/api/admin/users/alice@customer.example/groups/aitana-admin")
     assert resp.status_code == 200
-    assert resp.json()["group_tags"] == ["ONE"]
+    assert resp.json()["group_tags"] == ["example-team"]
 
 
 def test_get_unknown_email_404(admin_client: TestClient) -> None:
@@ -116,7 +116,7 @@ def test_get_unknown_email_404(admin_client: TestClient) -> None:
 
 
 def test_grant_non_admin_403(nonadmin_client: TestClient) -> None:
-    resp = nonadmin_client.post("/api/admin/users/x@y.com/groups", json={"tag": "ONE"})
+    resp = nonadmin_client.post("/api/admin/users/x@y.com/groups", json={"tag": "example-team"})
     assert resp.status_code == 403
 
 

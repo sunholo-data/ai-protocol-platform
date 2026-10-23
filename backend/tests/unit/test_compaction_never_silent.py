@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import pytest
 from google.adk.events.event import Event
+from google.adk.models.llm_response import LlmResponse
 from google.genai import types
 
 from adk.compaction_summarizer import COMPACTION_EVENT_NAME, FidelityEventSummarizer
@@ -34,15 +35,20 @@ class _FakeTracker:
         self.events.append((name, value))
 
 
+# A real `LlmResponse`, not a duck-typed stand-in: since ADK 1.39 the base
+# summarizer reads `usage_metadata` off the response (and copies it onto the
+# compaction event), and every production model — `ResilientLlm` passes member
+# responses through untouched — yields `LlmResponse`, which always has it.
 class _StubLlm:
     model = "stub-model"
 
     async def generate_content_async(self, _req, stream=False):
-        yield type(
-            "R",
-            (),
-            {"content": types.Content(role="model", parts=[types.Part(text="SUMMARY BODY: strike price EUR 48.62")])},
-        )()
+        yield LlmResponse(
+            content=types.Content(role="model", parts=[types.Part(text="SUMMARY BODY: strike price EUR 48.62")]),
+            usage_metadata=types.GenerateContentResponseUsageMetadata(
+                prompt_token_count=120, candidates_token_count=30, total_token_count=150
+            ),
+        )
 
 
 def _events(n: int) -> list[Event]:
@@ -96,7 +102,7 @@ class TestStartNoticeComesFirst:
             model = "stub"
 
             async def generate_content_async(self, _req, stream=False):
-                yield type("R", (), {"content": None})()
+                yield LlmResponse(content=None)
 
         s = FidelityEventSummarizer(llm=_NoneLlm())
         await s.maybe_summarize_events(events=_events(4))
@@ -166,6 +172,21 @@ async def test_event_never_carries_summary_text(tracker):
     assert "SUMMARY BODY" not in blob, "compaction event leaked summary text onto the wire"
     assert "48.62" not in blob, "compaction event leaked customer content onto the wire"
     assert "turn 0" not in blob, "compaction event leaked raw conversation onto the wire"
+
+
+@pytest.mark.asyncio
+async def test_summary_usage_rides_the_compaction_event(tracker):
+    """ADK 1.39 copies the summariser call's `usage_metadata` onto the
+    compaction event. Our override must hand ADK's event back untouched, so the
+    summary's token cost stays on the session record. ADK's token-threshold
+    trigger also reads the newest event's `prompt_token_count`, which makes
+    this a seam we depend on."""
+    s = FidelityEventSummarizer(llm=_StubLlm())
+    event = await s.maybe_summarize_events(events=_events(3))
+    assert event is not None
+    assert event.usage_metadata is not None
+    assert event.usage_metadata.prompt_token_count == 120
+    assert event.usage_metadata.candidates_token_count == 30
 
 
 @pytest.mark.asyncio

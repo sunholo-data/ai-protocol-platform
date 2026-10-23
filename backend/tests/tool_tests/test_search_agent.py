@@ -358,12 +358,12 @@ class TestResolveSearchTools:
 
     def test_ai_search_falls_back_to_platform_default_env(self, monkeypatch):
         """A skill that lists ai_search with no datastore of its own picks up the
-        VERTEX_AI_SEARCH_DATASTORE_ID platform default (Aitana: aitana3)."""
+        VERTEX_AI_SEARCH_DATASTORE_ID platform default (Aitana: example-datastore)."""
         from adk.agent import _resolve_search_tools
 
         monkeypatch.setenv(
             "VERTEX_AI_SEARCH_DATASTORE_ID",
-            "projects/aitana-ai-search/locations/eu/collections/default_collection/dataStores/aitana3",
+            "projects/example-search-project/locations/eu/collections/default_collection/dataStores/example-datastore",
         )
         result = _resolve_search_tools(["ai_search"], {})
         assert len(result) == 1

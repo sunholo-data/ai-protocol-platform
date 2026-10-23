@@ -67,7 +67,7 @@ DETERMINISTIC_EXTENSIONS = {
 # 2026-06-11: the prior gate was DETERMINISTIC_EXTENSIONS, which made every
 # PDF return None → status="pending_ai_extraction" with empty blocks → no
 # document content ever reached the agent or workbench. PDFs are core to
-# the ONE demo (5 example PPAs, all PDFs).
+# the tenant demo (5 example PPAs, all PDFs).
 PARSEABLE_EXTENSIONS = set(DETERMINISTIC_EXTENSIONS) | {".pdf", ".jpg", ".jpeg", ".png", ".tex"}
 
 _formats_refreshed = False
@@ -301,29 +301,76 @@ def _download_gcs_to_tempfile(gs_url: str) -> str | None:
 # --- Sync parse calls (run inside asyncio.to_thread) ---
 
 
-def _flatten_block(d: dict) -> dict:
-    """Recursively fix nested arrays that Firestore rejects.
+# Firestore rejects an array whose elements are themselves arrays
+# ("Property array contains an invalid nested entity"), so every List[List[...]]
+# a Block can carry must be wrapped before it is stored.
+#
+# This used to name the fields one at a time (`rows`, then recurse `children`)
+# and MISSED `item_runs` — `List[List[InlineRun]]`, populated whenever a list
+# item carries inline formatting. A bulleted list with a **bold** word in it
+# therefore failed the Firestore write with a 400, taking the whole document
+# with it. Present since at least SDK 0.12.0, so it has been silently breaking
+# uploads of any .docx with a formatted bullet; document generation merely hit
+# it constantly, because a model writing markdown emphasises list items by
+# habit.
+#
+# So the walk is now STRUCTURAL rather than field-by-field: anything shaped like
+# a nested array gets wrapped, whatever it is called. The next field the parser
+# adds cannot reintroduce this.
+#
+# `rows` keeps its historical `{"cells": [...]}` wrapper because the frontend
+# reads `row.cells` (BlocksRenderer, StructuredDocPreview). Everything else gets
+# a neutral `{"items": [...]}`; nothing reads `item_runs` today, and a wrapped
+# value still round-trips its content.
+_NESTED_ARRAY_WRAPPER_KEYS = {"rows": "cells"}
+_DEFAULT_WRAPPER_KEY = "items"
 
-    Firestore does not allow arrays whose elements are themselves arrays.
-    Block.rows is List[List[Cell]] — wrap each inner row list in a dict.
-    Block.children is List[Block] — recurse so any nested rows are fixed too.
+
+def _unnest_arrays(value: Any, wrapper_key: str = _DEFAULT_WRAPPER_KEY) -> Any:
+    """Return *value* with every array-inside-an-array wrapped in a dict."""
+    if isinstance(value, dict):
+        return {k: _unnest_arrays(v, _NESTED_ARRAY_WRAPPER_KEYS.get(k, _DEFAULT_WRAPPER_KEY)) for k, v in value.items()}
+    if isinstance(value, list):
+        out = []
+        for item in value:
+            if isinstance(item, list):
+                # The offending shape: wrap the inner array, then keep walking it.
+                out.append({wrapper_key: _unnest_arrays(item, wrapper_key)})
+            else:
+                out.append(_unnest_arrays(item, wrapper_key))
+        return out
+    return value
+
+
+def _flatten_block(d: dict) -> dict:
+    """Make one parsed block safe to store in Firestore.
+
+    Firestore does not allow arrays whose elements are themselves arrays. See
+    the note above for why this is structural rather than a list of field names.
     """
-    if d.get("rows"):
-        d["rows"] = [{"cells": row} for row in d["rows"]]
-    if d.get("children"):
-        d["children"] = [_flatten_block(c) for c in d["children"]]
-    return d
+    result = _unnest_arrays(d)
+    return result if isinstance(result, dict) else d
 
 
 def _extract_content(result: ParseResult, output_format: str) -> str | list | None:
-    """Extract content from ParseResult based on requested output format."""
+    """Extract content from ParseResult based on requested output format.
+
+    ``.markdown`` is NOT populated for ``output_format="markdown"`` — the SDK puts
+    the rendered text on ``.text`` and leaves ``.markdown`` empty. Verified on both
+    0.8.0 and 0.12.0, so this is the shape rather than a regression. Reading only
+    ``.markdown`` therefore returns None for a perfectly good parse.
+
+    Latent today: every caller asks for ``"blocks"``. It is fixed anyway because a
+    silent empty is the exact failure this codebase keeps paying for — the next
+    caller to ask for markdown would get None and have nothing to debug from.
+    """
     if output_format in ("markdown", "markdown+metadata"):
-        return result.markdown or None
+        return result.markdown or getattr(result, "text", None) or None
     if output_format == "blocks":
         if not result.blocks:
             return None
         return [_flatten_block(_dc.asdict(b)) for b in result.blocks]
-    return result.markdown or None
+    return result.markdown or getattr(result, "text", None) or None
 
 
 def _make_error_outcome(exc: Exception, output_format: str) -> ParseOutcome:
@@ -457,3 +504,258 @@ async def parse_gcs_file(gs_url: str, output_format: str = "blocks") -> ParseOut
     finally:
         if tmp_path and os.path.exists(tmp_path):
             shutil.rmtree(os.path.dirname(tmp_path), ignore_errors=True)
+
+
+# =============================================================================
+# Conversion — markdown in, document bytes out (v6.32.0 document-creation)
+# =============================================================================
+#
+# The model authors CommonMark; this turns it into a real Office document. The
+# model is never asked to emit binary Office XML — that split is the whole point
+# (axiom 4: right model, right moment).
+#
+# Two facts about the SDK that are NOT obvious and were learned by running it:
+#
+#   1. `convert()` does NOT upload. It passes `filepath` to the server as a
+#      string (sample-id semantics), so a local path comes back as a server-side
+#      "File not found". `convert_file()` is the uploading variant. Use it.
+#   2. `ConvertResult.content` is ALWAYS decoded bytes — the SDK branches on the
+#      wire `encoding` (base64 for containers, utf-8 for html/md/qmd) so callers
+#      never have to. Do not re-decode it.
+#
+# Templating is `reference_doc`: a .docx whose styles, numbering, theme, embedded
+# fonts, headers, footers and page setup are applied to the generated document.
+# DOCX target only — anything else returns REFERENCE_DOC_NOT_APPLICABLE. The
+# template is passed **by upload from our backend**, never by `gcsRef`: gcsRef
+# would require granting the docparse service account read access on a
+# customer's tagged bucket, and that cross-org grant is the pattern that has
+# already bitten this deployment.
+
+
+@dataclass
+class ConvertOutcome:
+    """Result of a conversion attempt.
+
+    On failure `source_markdown` carries the authored content back to the caller
+    so a conversion error never destroys the model's work — the user gets the
+    source plus a visible reason, never an empty success (NEVER-SILENT #8).
+    """
+
+    content: bytes | None = None
+    filename: str = ""
+    content_type: str = ""
+    target: str = ""
+    reference_doc_applied: bool = False
+    template_parts_carried: int = 0
+    source_markdown: str = ""
+    error: str | None = None
+    error_code: str | None = None  # "auth" | "quota" | "disabled" | "api" | "unknown"
+
+    @property
+    def ok(self) -> bool:
+        return self.content is not None and self.error is None
+
+
+# Targets `POST /api/v1/convert` accepts. Anything else is rejected locally with
+# a clear message rather than round-tripping to an UNSUPPORTED_TARGET_FORMAT.
+CONVERT_TARGETS = {"docx", "pptx", "xlsx", "odt", "odp", "ods", "html", "md", "qmd"}
+
+# Only DOCX has a styling container, so only DOCX can carry a reference doc.
+REFERENCE_DOC_TARGETS = {"docx"}
+
+
+def _convert_sync(
+    markdown: str,
+    *,
+    target: str,
+    filename: str,
+    reference_doc_path: str = "",
+    reference_section: int | None = None,
+    table_style: str = "",
+) -> ConvertOutcome:
+    """Blocking conversion — always called via asyncio.to_thread."""
+    client = _get_client()
+    if client is None:
+        return ConvertOutcome(
+            source_markdown=markdown,
+            target=target,
+            error="Document conversion is unavailable: DOCPARSE_API_KEY is not set.",
+            error_code="disabled",
+        )
+
+    tmp_dir = tempfile.mkdtemp(prefix="docgen-")
+    try:
+        stem = PurePosixPath(filename).stem or "document"
+        src_path = os.path.join(tmp_dir, f"{stem}.md")
+        with open(src_path, "w", encoding="utf-8") as fh:
+            fh.write(markdown)
+
+        kwargs: dict[str, Any] = {"target": target}
+        if reference_doc_path:
+            kwargs["reference_doc"] = reference_doc_path
+            if reference_section is not None:
+                kwargs["reference_section"] = reference_section
+            if table_style:
+                kwargs["table_style"] = table_style
+
+        # convert_file, NOT convert — see the note above.
+        result = client.convert_file(src_path, **kwargs)
+
+        return ConvertOutcome(
+            content=result.content,
+            filename=result.filename or f"{stem}.{target}",
+            content_type=result.content_type,
+            target=result.target or target,
+            reference_doc_applied=bool(result.reference_doc_applied),
+            template_parts_carried=int(result.template_parts_carried or 0),
+            source_markdown=markdown,
+        )
+    except Exception as exc:
+        parse_error = _make_error_outcome(exc, "blocks")
+        return ConvertOutcome(
+            source_markdown=markdown,
+            target=target,
+            error=parse_error.error or f"{type(exc).__name__}: {exc}",
+            error_code=parse_error.error_code or "unknown",
+        )
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+async def convert_document_file(
+    file_path: str,
+    *,
+    target: str = "docx",
+    reference_doc_path: str = "",
+    reference_section: int | None = None,
+    table_style: str = "",
+) -> ConvertOutcome:
+    """Convert an EXISTING document file, optionally restyling it from a template.
+
+    The difference from `convert_markdown` is the input: this takes the document
+    itself rather than authored markdown, which is what makes **restyling an
+    UPLOADED document** possible. There is no authored source for an upload, but
+    there is a file, and `convert` parses-then-generates — so docx → docx with a
+    `referenceDoc` re-renders the same content in the template's styling.
+
+    Verified live 2026-09-01: `reference_doc_applied: True`, 12 template parts
+    carried, `theme1.xml` and `header1.xml` byte-identical to the template, and
+    the original document's content intact.
+    """
+    normalised = (target or "docx").lower().lstrip(".")
+    if normalised not in CONVERT_TARGETS:
+        return ConvertOutcome(
+            target=target,
+            error=f"Unsupported target {target!r}. Supported: {sorted(CONVERT_TARGETS)}.",
+            error_code="api",
+        )
+    if reference_doc_path and normalised not in REFERENCE_DOC_TARGETS:
+        return ConvertOutcome(
+            target=normalised,
+            error=(f"A template can only style a .docx — target {normalised!r} has no styling container."),
+            error_code="api",
+        )
+    if not os.path.exists(file_path):
+        return ConvertOutcome(target=normalised, error="The document file could not be read.", error_code="download")
+
+    def _run() -> ConvertOutcome:
+        client = _get_client()
+        if client is None:
+            return ConvertOutcome(
+                target=normalised,
+                error="Document conversion is unavailable: DOCPARSE_API_KEY is not set.",
+                error_code="disabled",
+            )
+        kwargs: dict[str, Any] = {"target": normalised}
+        if reference_doc_path:
+            kwargs["reference_doc"] = reference_doc_path
+            if reference_section is not None:
+                kwargs["reference_section"] = reference_section
+            if table_style:
+                kwargs["table_style"] = table_style
+        try:
+            result = client.convert_file(file_path, **kwargs)
+        except Exception as exc:
+            parse_error = _make_error_outcome(exc, "blocks")
+            return ConvertOutcome(
+                target=normalised,
+                error=parse_error.error or f"{type(exc).__name__}: {exc}",
+                error_code=parse_error.error_code or "unknown",
+            )
+        return ConvertOutcome(
+            content=result.content,
+            filename=result.filename or PurePosixPath(file_path).name,
+            content_type=result.content_type,
+            target=result.target or normalised,
+            reference_doc_applied=bool(result.reference_doc_applied),
+            template_parts_carried=int(result.template_parts_carried or 0),
+        )
+
+    return await asyncio.to_thread(_run)
+
+
+async def convert_markdown(
+    markdown: str,
+    *,
+    target: str = "docx",
+    filename: str = "document",
+    reference_doc_path: str = "",
+    reference_section: int | None = None,
+    table_style: str = "",
+) -> ConvertOutcome:
+    """Convert authored markdown into document bytes.
+
+    Args:
+        markdown: CommonMark source. Front matter, inline formatting, links,
+            images and tables all carry through.
+        target: One of CONVERT_TARGETS. Defaults to docx — the only format with
+            a templating story.
+        filename: Desired output filename (its stem names the temp source file).
+        reference_doc_path: Local path to a template .docx. DOCX target only.
+        reference_section: 1-based section of the template supplying page setup,
+            headers and footers. Omit for the template's last section.
+        table_style: Table style in the template to bind generated tables to.
+
+    Returns:
+        A ConvertOutcome. On failure `ok` is False and `source_markdown` still
+        holds the authored content.
+    """
+    if not markdown.strip():
+        return ConvertOutcome(
+            source_markdown=markdown,
+            target=target,
+            error="Nothing to convert: the document content was empty.",
+            error_code="empty",
+        )
+
+    normalised = target.lower().lstrip(".")
+    aliases = {"markdown": "md", "htm": "html", "quarto": "qmd", "word": "docx"}
+    normalised = aliases.get(normalised, normalised)
+    if normalised not in CONVERT_TARGETS:
+        return ConvertOutcome(
+            source_markdown=markdown,
+            target=target,
+            error=(f"Unsupported target {target!r}. Supported: {sorted(CONVERT_TARGETS)}."),
+            error_code="api",
+        )
+
+    if reference_doc_path and normalised not in REFERENCE_DOC_TARGETS:
+        return ConvertOutcome(
+            source_markdown=markdown,
+            target=normalised,
+            error=(
+                f"A template can only style a .docx — target {normalised!r} has no styling container. "
+                "Generate docx, or drop the template."
+            ),
+            error_code="api",
+        )
+
+    return await asyncio.to_thread(
+        _convert_sync,
+        markdown,
+        target=normalised,
+        filename=filename,
+        reference_doc_path=reference_doc_path,
+        reference_section=reference_section,
+        table_style=table_style,
+    )

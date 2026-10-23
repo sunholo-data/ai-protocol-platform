@@ -4,5 +4,31 @@
     "no-console": "off",
     "react/no-unescaped-entities": "off",
     "react-hooks/exhaustive-deps": "warn"
-  }
+  },
+  "overrides": [
+    // FRONTEND-OBS M3. A console.* call in application code is invisible in a
+    // deployed env — that is precisely why the client tier had no telemetry at
+    // all. Use `logger` from @/lib/logger instead: it mirrors to console in dev
+    // and ships to Cloud Logging in deployed envs.
+    //
+    // Warn rather than error, and `allow: ["error"]`, so the remaining ~35
+    // call sites don't block a build. The point is to stop NEW ones appearing
+    // unnoticed, not to force a big-bang migration.
+    {
+      "files": [
+        "src/lib/**/*.{ts,tsx}",
+        "src/hooks/**/*.{ts,tsx}",
+        "src/providers/**/*.{ts,tsx}",
+        "src/components/**/*.{ts,tsx}"
+      ],
+      "excludedFiles": [
+        "**/__tests__/**",
+        "**/*.test.{ts,tsx}",
+        "src/lib/logger.ts"
+      ],
+      "rules": {
+        "no-console": ["warn", { "allow": ["error"] }]
+      }
+    }
+  ]
 }

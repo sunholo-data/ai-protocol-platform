@@ -37,7 +37,7 @@ def _project_and_region() -> tuple[str, str]:
 
     Vertex AI Search datastores usually live in a **dedicated search-infra
     project** that is NOT the compute project ADK runs in (Aitana:
-    `aitana-ai-search` / `eu`, distinct from the `your-project-id-*` compute
+    `example-search-project` / `eu`, distinct from the `your-project-id-*` compute
     projects). So prefer the search-specific env vars and only fall back to the
     generic ADK `GOOGLE_CLOUD_*` vars for single-project setups:
 

@@ -19,13 +19,25 @@ afterEach(() => {
   mockUser = { email: "x@gmail.com" };
 });
 
-function fireDenied(message?: string) {
+function fireDenied(message?: string, code?: string) {
   act(() => {
-    window.dispatchEvent(new CustomEvent(DOMAIN_NOT_PERMITTED_EVENT, { detail: { message } }));
+    window.dispatchEvent(new CustomEvent(DOMAIN_NOT_PERMITTED_EVENT, { detail: { message, code } }));
   });
 }
 
 describe("AccessRestrictedGate", () => {
+  it("says the email is unverified, not the wrong domain, for EMAIL_NOT_VERIFIED (unverified-email gate)", () => {
+    render(
+      <AccessRestrictedGate>
+        <div>app content</div>
+      </AccessRestrictedGate>,
+    );
+    fireDenied("This account's email address hasn't been verified.", "EMAIL_NOT_VERIFIED");
+    expect(screen.queryByText("app content")).toBeNull();
+    expect(screen.getByText(/email address isn't verified/i)).toBeTruthy();
+    expect(screen.queryByText(/limited to your organization/i)).toBeNull();
+  });
+
   it("renders children until a domain-rejection event fires", () => {
     render(
       <AccessRestrictedGate>

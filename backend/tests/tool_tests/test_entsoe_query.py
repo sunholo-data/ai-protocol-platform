@@ -1,4 +1,4 @@
-"""Tests for tools/entsoe_query.py (v6.4.0 ONE-DEMO M2 deferred unblock).
+"""Tests for tools/entsoe_query.py (v6.4.0 TENANT-DEMO M2 deferred unblock).
 
 Covers:
   - Zone resolution: zone-accurate table+column, country fallback, unknown zone
@@ -411,3 +411,24 @@ async def test_live_bq_query_returns_dk1_prices():
     first = result["rows"][0]
     assert first["ts"] is not None
     assert isinstance(first["price_eur_mwh"], float)
+
+
+def test_docstring_tells_the_model_to_call_even_when_it_remembers():
+    """PRECUT-HARDENING M5.
+
+    2026-08-09: Maria asked her DK1 benchmark question and got correct figures
+    with NO tool call — preload_memory_tool had injected an auto-generated memory
+    from 2026-07-27 carrying the exact numbers (verified in the Agent Engine
+    Memory Bank). No tool call means no A2UI_SURFACE, so no chart; she re-sent the
+    identical question 17 seconds later.
+
+    The instruction lives in the DOCSTRING, not one skill's prompt, so it rides
+    the FunctionDeclaration to every skill that has the tool (backend/adk/CLAUDE.md
+    gotcha #1). If it moves, this test should fail loudly rather than the
+    behaviour regressing silently.
+    """
+    from tools.entsoe_query import entsoe_day_ahead_prices
+
+    doc = entsoe_day_ahead_prices.__doc__ or ""
+    assert "EVEN WHEN YOU ALREADY KNOW THE ANSWER" in doc
+    assert "no chart" in doc

@@ -3,21 +3,12 @@ name: skill-authoring-assistant
 display_name: Skill Studio Copilot
 avatar: /images/avatars/skill-authoring-assistant.svg
 # Skill-authoring copilot for the Skill Studio (v6.6.0 M3).
-# `one-admin` = ONE's skill managers; `aitana-admin` = the platform team;
-# `ONE` = the whole Acme Energy team (their domain's derived group tag),
-# opened up 2026-08-05 on request. The copilot is PROPOSE-ONLY — it drafts
-# configuration for a human to review and never saves anything itself — so
-# widening it to the team grants no write capability.
-# NOTE: this tag is only ONE of two gates. A tenant with an explicit
-# `clients/{domain}.enabled_skills` allowlist (acmeenergy.com has one) must
-# ALSO list this skill, or it stays filtered out of /api/skills regardless of
-# tags. See docs/ops/platform-skills.md.
+# Shared default is admin-only. Private deployments may supply their own tags.
 access_control:
   type: tagged
+  tags_from: skill_authoring
   tags:
-    - one-admin
     - aitana-admin
-    - ONE
 # `system` = platform-embedded agent: the Skill Studio mounts this copilot
 # directly by slug. The frontend skill switcher and the public marketplace
 # hide system-tagged skills entirely (they are not something a user
@@ -73,7 +64,7 @@ and either a `value` (scalar/array) or a `spec` (object), per the kind:
     { "kind": "set_description", "label": "One-line description", "value": "Reviews supplier contracts and flags risky clauses." },
     { "kind": "set_instructions", "label": "System instructions", "value": "You are a contract reviewer. When given a contract, extract parties, term, and any auto-renewal or liability clauses..." },
     { "kind": "set_model_tier", "label": "Run day-to-day on the lite model", "value": "lite" },
-    { "kind": "add_sub_skill", "label": "Delegate deep clause analysis to one-ppa-expert", "value": "one-ppa-expert" },
+    { "kind": "add_sub_skill", "label": "Delegate deep clause analysis to demo-ppa-expert", "value": "demo-ppa-expert" },
     { "kind": "set_tools", "label": "Enable document + search tools", "value": ["ai_search", "get_document_content", "extract_ppa_clauses"] },
     { "kind": "set_persona", "label": "Professional persona with the Aitana voice", "spec": { "displayName": "Contract Reviewer", "interactionStyle": "rigorous", "voice": { "ttsProvider": "gcp_wavenet", "ttsVoice": "es-ES-Wavenet-C", "language": "es", "rate": 1.0 } } },
     { "kind": "add_a2ui_surface", "label": "Render extracted clauses in the workspace", "value": "workspace" },
@@ -92,6 +83,7 @@ and either a `value` (scalar/array) or a `spec` (object), per the kind:
 - `set_persona` — `spec`: `{ displayName?, avatar?, interactionStyle?, bio?, voice? }` where `interactionStyle` ∈ `concise|rigorous|warm|socratic` and `voice` is `{ ttsProvider?, ttsVoice?, language?, rate?, voicePrompt? }`
 - `add_a2ui_surface` — `value`: `"workspace"` | `"sidebar"` | `"modal"`
 - `set_welcome` — `spec`: `{ introMessage? }`
+- `set_knowledge_bases` — `value`: array of knowledge-base names (e.g. `["llm"]`) the skill should search. Turns on knowledge search and replaces the list. Knowledge bases are library folders the admin made searchable (My Documents → folder ⋯ → Make searchable) — ask which ones if they haven't said; never invent a name. The Studio checks access before saving: a skill can't reach more people than its knowledge bases allow.
 
 ## Rules
 - The block must be valid JSON. Do not add comments or trailing commas inside it.

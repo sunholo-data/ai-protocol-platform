@@ -405,3 +405,114 @@ class TestPassthroughContentTypes:
 
 # Suppress noisy pytest warning about httpx mock handling
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
+
+
+# ---------------------------------------------------------------------------
+# `auth: google_id_token` servers — the frontend path never minted one
+# ---------------------------------------------------------------------------
+
+
+_IAM_SERVER = {
+    "url": "https://platform-browser-example-ew.a.run.app/mcp",
+    "auth": "google_id_token",
+    "gate": "browser_allowlist",
+    "headers": {},
+}
+
+
+class TestIamGatedUpstream:
+    """A Cloud Run service behind IAM needs a Google ID token, not the caller's.
+
+    `_filter_inbound_headers` strips `authorization` — correctly, the user's
+    Firebase JWT must never reach an upstream. But nothing put anything back,
+    and the proxy had no handling of `auth: "google_id_token"` at all. So every
+    request to an IAM-gated server arrived at Cloud Run's edge with no
+    credential and came back 403 ("Empty Authorization header value").
+
+    The agent's path (`tools/mcp/registry.py`) has always done this. The
+    frontend's path did not, which is why the browser worked for the agent and
+    403'd for the UI — seen on test, 2026-09-05, as the tail of the cascade
+    that ended with the model citing a screenshot of a different website.
+    """
+
+    @patch("protocols.mcp_proxy.get_id_token")
+    @patch("protocols.mcp_proxy.skill_config")
+    @patch("protocols.mcp_proxy.get_document")
+    @patch("protocols.mcp_proxy.httpx.AsyncClient")
+    def test_a_google_id_token_is_minted_for_the_upstream_audience(
+        self, mock_client_cls, mock_get_doc, mock_skill_module, mock_token
+    ):
+        mock_get_doc.return_value = _IAM_SERVER
+        mock_skill_module.list_skills.return_value = [_make_skill(server_ids=["browser"])]
+        mock_token.return_value = "id-token-abc"
+
+        upstream_resp = MagicMock(spec=httpx.Response)
+        upstream_resp.status_code = 200
+        upstream_resp.content = b"{}"
+        upstream_resp.headers = {"content-type": "application/json"}
+        mock_client = AsyncMock()
+        mock_client.request = AsyncMock(return_value=upstream_resp)
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        resp = _make_client("viewer").post("/mcp/browser", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+
+        assert resp.status_code == 200, resp.text
+        sent = {k.lower(): v for k, v in mock_client.request.call_args.kwargs["headers"].items()}
+        assert sent.get("authorization") == "Bearer id-token-abc"
+        # Audience is the SERVICE, not the /mcp path — same rule as the registry.
+        assert not mock_token.call_args.args[0].endswith("/mcp")
+
+    @patch("protocols.mcp_proxy.get_id_token")
+    @patch("protocols.mcp_proxy.skill_config")
+    @patch("protocols.mcp_proxy.get_document")
+    @patch("protocols.mcp_proxy.httpx.AsyncClient")
+    def test_the_caller_identity_travels_as_email_not_uid(
+        self, mock_client_cls, mock_get_doc, mock_skill_module, mock_token
+    ):
+        """The browser's allowlist is keyed on EMAIL.
+
+        `registry.py` says so in a comment earned the hard way: feeding it the
+        Firebase UID "can never match, which is exactly how the first deployed
+        attempt failed". The proxy sent no identity at all, so the service
+        refused with "could not tell which user this request is for".
+        """
+        mock_get_doc.return_value = _IAM_SERVER
+        mock_skill_module.list_skills.return_value = [_make_skill(server_ids=["browser"])]
+        mock_token.return_value = "id-token-abc"
+
+        upstream_resp = MagicMock(spec=httpx.Response)
+        upstream_resp.status_code = 200
+        upstream_resp.content = b"{}"
+        upstream_resp.headers = {"content-type": "application/json"}
+        mock_client = AsyncMock()
+        mock_client.request = AsyncMock(return_value=upstream_resp)
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        _make_client("viewer").post("/mcp/browser", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+
+        sent = {k.lower(): v for k, v in mock_client.request.call_args.kwargs["headers"].items()}
+        assert "@" in sent.get("x-aitana-user", ""), "the allowlist is keyed on email, not the Firebase UID"
+
+    @patch("protocols.mcp_proxy.skill_config")
+    @patch("protocols.mcp_proxy.get_document")
+    @patch("protocols.mcp_proxy.httpx.AsyncClient")
+    def test_a_server_without_that_auth_mode_is_unchanged(self, mock_client_cls, mock_get_doc, mock_skill_module):
+        """Loopback sidecars must not suddenly acquire a bearer token."""
+        mock_get_doc.return_value = _HAPPY_SERVER
+        mock_skill_module.list_skills.return_value = [_make_skill(server_ids=["map-server"])]
+
+        upstream_resp = MagicMock(spec=httpx.Response)
+        upstream_resp.status_code = 200
+        upstream_resp.content = b"{}"
+        upstream_resp.headers = {"content-type": "application/json"}
+        mock_client = AsyncMock()
+        mock_client.request = AsyncMock(return_value=upstream_resp)
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        _make_client("viewer").post("/mcp/map-server", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+
+        sent = {k.lower(): v for k, v in mock_client.request.call_args.kwargs["headers"].items()}
+        assert "authorization" not in sent

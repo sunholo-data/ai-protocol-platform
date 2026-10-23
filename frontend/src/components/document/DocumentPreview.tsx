@@ -4,8 +4,9 @@ import type { ReactNode } from "react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { FileText } from "lucide-react";
 import { useDocument } from "@/hooks/useDocument";
-import { DocumentThumbnail, type DocThumbnailSource } from "./DocumentThumbnail";
+import { DocumentThumbnail, isThumbnailableFormat, type DocThumbnailSource } from "./DocumentThumbnail";
 import { StructuredDocPreview } from "./StructuredDocPreview";
+import { FLOATING_SURFACE } from "@/lib/surfaces";
 
 interface DocumentPreviewProps {
   source: DocThumbnailSource;
@@ -16,8 +17,6 @@ interface DocumentPreviewProps {
   /** Side to open the preview on. Default "right". */
   side?: "top" | "right" | "bottom" | "left";
 }
-
-const IMAGE_OR_PDF = /^(pdf|png|jpe?g|gif|webp|bmp|tiff?)$/i;
 
 /** Common aspect-3/4 frame for whatever preview we render. */
 function Frame({ children }: { children: ReactNode }) {
@@ -41,13 +40,34 @@ function PreviewBody({ source }: { source: DocThumbnailSource }) {
       </Frame>
     );
   }
-  return <DocPreviewBody docId={source.docId} />;
+  // The caller already knows it's a PDF/image (a list row) → straight to the
+  // owner-checked thumbnail route; no need to load the full record + blocks.
+  if (isThumbnailableFormat(source.format)) {
+    return (
+      <Frame>
+        <DocumentThumbnail source={source} width={400} />
+      </Frame>
+    );
+  }
+  return <DocPreviewBody source={source} />;
 }
 
-function DocPreviewBody({ docId }: { docId: string }) {
-  const { doc } = useDocument(docId);
+function Unavailable() {
+  return (
+    <Frame>
+      <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted-foreground">
+        <FileText className="h-8 w-8" aria-hidden="true" />
+        <span className="text-[11px]">Preview unavailable</span>
+      </div>
+    </Frame>
+  );
+}
+
+function DocPreviewBody({ source }: { source: Extract<DocThumbnailSource, { kind: "doc" }> }) {
+  const { doc, error } = useDocument(source.docId);
   const fmt = (doc?.sourceFormat ?? "").toLowerCase();
 
+  if (!doc && error) return <Unavailable />;
   if (!doc) {
     return (
       <Frame>
@@ -55,10 +75,10 @@ function DocPreviewBody({ docId }: { docId: string }) {
       </Frame>
     );
   }
-  if (IMAGE_OR_PDF.test(fmt)) {
+  if (isThumbnailableFormat(fmt)) {
     return (
       <Frame>
-        <DocumentThumbnail source={{ kind: "doc", docId }} width={400} />
+        <DocumentThumbnail source={{ ...source, format: fmt }} width={400} />
       </Frame>
     );
   }
@@ -97,7 +117,11 @@ export function DocumentPreview({ source, label, children, side = "right" }: Doc
             side={side}
             sideOffset={8}
             collisionPadding={12}
-            className="z-50 w-56 origin-[var(--radix-tooltip-content-transform-origin)] rounded-lg border border-border bg-popover p-2 shadow-lg duration-150 data-[state=delayed-open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=delayed-open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=delayed-open]:zoom-in-95"
+            // Radix also renders the content into a visually-hidden a11y node;
+            // without an aria-label that copy re-mounts the preview body, so
+            // every hover fetched the thumbnail twice.
+            aria-label={label ? `Preview of ${label}` : "Document preview"}
+            className={`${FLOATING_SURFACE} w-56 origin-[var(--radix-tooltip-content-transform-origin)] p-2 duration-150 data-[state=delayed-open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=delayed-open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=delayed-open]:zoom-in-95`}
           >
             <PreviewBody source={source} />
             {label ? <p className="mt-1.5 truncate text-xs text-muted-foreground">{label}</p> : null}

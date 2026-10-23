@@ -4,7 +4,7 @@
 # secret. Idempotent — safe to re-run; existing NEXT_PUBLIC_BRAND_* lines are
 # replaced atomically with the new set, all other secret keys are preserved.
 #
-# v6.4.0 ONE-DEMO M1: per-deployment branding via build-time env vars
+# v6.4.0 TENANT-DEMO M1: per-deployment branding via build-time env vars
 # (see docs/design/v6.4.0/multi-tenant-demo-readiness.md).
 #
 # Usage:
@@ -42,32 +42,18 @@ SECRET="FIREBASE_ENV"
 TMP="$(mktemp -t firebase_env.XXXXXX)"
 trap 'rm -f "$TMP" "$TMP.merged"' EXIT
 
-# --- Aitana branding values (edit here to change product strings) ---
-# Forks: copy this file, edit BRAND_VARS, run for your env.
+# --- Example branding: customize for your deployment ---
 BRAND_VARS=$(cat <<'EOF'
-NEXT_PUBLIC_BRAND_APP_NAME=Aitana
-NEXT_PUBLIC_BRAND_TAGLINE=Contract intelligence for energy advisory
-NEXT_PUBLIC_BRAND_DESCRIPTION=Aitana reads contracts clause by clause — extracting every obligation as typed, source-cited terms and computing settlement, indexation and delay damages you can verify.
-NEXT_PUBLIC_BRAND_FAVICON=/images/logo/aitana-logo.svg
-# LOGO_HERO = the full animated wordmark logo, shown big on the welcome/landing
-# screen where it has room. LOGO_AVATAR = the tight, self-contained animated MARK
-# (salmon disc + blinking pixel squares + "ai") used top-left AND in every chat
-# avatar — one consistent identity that stays legible at 28px (the full hero
-# logo's internal margins rendered a tiny smudge at that size). Favicon stays the
-# static disc (tabs don't animate SVG reliably).
-NEXT_PUBLIC_BRAND_LOGO_HERO=/images/logo/animated-aitana-square.svg
-NEXT_PUBLIC_BRAND_LOGO_AVATAR=/images/logo/aitana-mark.svg
-NEXT_PUBLIC_BRAND_EMAIL=hello@yourcompany.com
-NEXT_PUBLIC_BRAND_GITHUB=
-NEXT_PUBLIC_BRAND_DEMO_HERO_EYEBROW=Contract intelligence
-NEXT_PUBLIC_BRAND_DEMO_HERO_LINE_A=Read every clause.
-NEXT_PUBLIC_BRAND_DEMO_HERO_LINE_B=Verify every number.
-NEXT_PUBLIC_BRAND_DEMO_HERO_BODY=Aitana turns your contracts into typed, source-cited obligations — then computes settlement, indexation and delay damages your quants can check to the euro and your counsel can trace to the clause.
-NEXT_PUBLIC_BRAND_DEMO_CTA_PRIMARY=Open the assistant
-NEXT_PUBLIC_BRAND_DEMO_CTA_SECONDARY=Compare two contracts
-NEXT_PUBLIC_BRAND_DEMO_CHAT_HREF=/chat/@aitana-platform/one-assistant
-NEXT_PUBLIC_BRAND_DEMO_CHAT_HREF_SECONDARY=/chat/@aitana-platform/one-doc-compare
-NEXT_PUBLIC_BRAND_DEMO_TECH_HREF=
+NEXT_PUBLIC_BRAND_APP_NAME=Sunholo
+NEXT_PUBLIC_BRAND_TAGLINE=AI Protocol Platform
+NEXT_PUBLIC_BRAND_DESCRIPTION=An open-source AI protocol platform built on Google ADK.
+NEXT_PUBLIC_BRAND_FAVICON=/images/logo/sunholo-logo.svg
+NEXT_PUBLIC_BRAND_LOGO_HERO=/images/logo/sunholo-logo.svg
+NEXT_PUBLIC_BRAND_LOGO_AVATAR=/images/logo/sunholo-logo.svg
+NEXT_PUBLIC_BRAND_EMAIL=hello@example.com
+NEXT_PUBLIC_BRAND_GITHUB=https://github.com/sunholo-data/ai-protocol-platform
+NEXT_PUBLIC_BRAND_DEMO_CHAT_HREF=/chat
+NEXT_PUBLIC_BRAND_DEMO_CHAT_HREF_SECONDARY=/marketplace
 EOF
 )
 

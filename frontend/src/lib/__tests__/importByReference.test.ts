@@ -24,7 +24,7 @@ describe("importByReference", () => {
           status: "parsed",
           originalFilename: "example-A-fixed-pap.pdf",
           blocksCount: 42,
-          storagePath: "aitana3/PPAs/longform/example-A-fixed-pap.pdf",
+          storagePath: "example-datastore/PPAs/longform/example-A-fixed-pap.pdf",
           folderId: null,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -33,8 +33,8 @@ describe("importByReference", () => {
 
     const result = await importByReference(
       "your-project-id-test-test-llmops-bucket",
-      "aitana3/PPAs/longform/example-A-fixed-pap.pdf",
-      "one-ppa-expert",
+      "example-datastore/PPAs/longform/example-A-fixed-pap.pdf",
+      "demo-ppa-expert",
     );
 
     // Wire shape — exactly what the backend expects.
@@ -44,8 +44,8 @@ describe("importByReference", () => {
     expect(init?.method).toBe("POST");
     expect(JSON.parse((init?.body as string) ?? "")).toEqual({
       bucket: "your-project-id-test-test-llmops-bucket",
-      object: "aitana3/PPAs/longform/example-A-fixed-pap.pdf",
-      skillId: "one-ppa-expert",
+      object: "example-datastore/PPAs/longform/example-A-fixed-pap.pdf",
+      skillId: "demo-ppa-expert",
     });
 
     // Response shape — what handleDocClick expects.

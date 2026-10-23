@@ -1,0 +1,9 @@
+{
+  "name": "user-guide-shots",
+  "private": true,
+  "type": "module",
+  "description": "Screenshot harness for docs/user-guide — make guide-shots",
+  "dependencies": {
+    "playwright-core": "1.48.2"
+  }
+}

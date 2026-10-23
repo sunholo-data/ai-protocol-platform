@@ -21,6 +21,7 @@
 
 "use client";
 
+import { withBasicCatalogAliases } from "@/components/protocols/basicCatalogAliases";
 import {
   createContext,
   type ReactNode,
@@ -32,6 +33,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
+import { findAuthImages, resolveAuthImages } from "@/lib/a2uiAuthImages";
 import {
   MessageProcessor,
   type A2uiMessage,
@@ -41,6 +43,9 @@ import {
   basicCatalog,
   type ReactComponentImplementation,
 } from "@a2ui/react/v0_9";
+import { logger } from "@/lib/logger";
+
+import { workbenchCatalog } from "@/components/protocols/workbenchCatalog";
 
 // ─── Public types ───────────────────────────────────────────────────────────
 
@@ -225,7 +230,10 @@ interface SurfaceEntry {
 }
 
 function makeProcessor(): MessageProcessor<ReactComponentImplementation> {
-  return new MessageProcessor<ReactComponentImplementation>([basicCatalog]);
+  // workbenchCatalog, not basicCatalog: same id, with a markdown `Text`
+  // (agents write markdown; Basic renders backticks and asterisks literally)
+  // and an accessible `Modal`.
+  return new MessageProcessor<ReactComponentImplementation>(withBasicCatalogAliases(workbenchCatalog));
 }
 
 class SurfaceStore {
@@ -292,10 +300,13 @@ class SurfaceStore {
   ): void {
     const entry = this.ensureEntry(surfaceId);
     if (entry.mountRef && entry.mountRef !== mountRef) {
-      console.error(
-        `[SurfaceRegistry] refusing to register surface "${surfaceId}" — ` +
-          `it's already mounted by a different ref. Two A2UISurfaceMount ` +
-          `components with the same surfaceId are not allowed.`,
+      logger.error(
+        new Error(
+          `[SurfaceRegistry] refusing to register surface "${surfaceId}" — ` +
+            `it's already mounted by a different ref. Two A2UISurfaceMount ` +
+            `components with the same surfaceId are not allowed.`,
+        ),
+        { event: "surface_duplicate_mount", surfaceId },
       );
       return;
     }
@@ -372,22 +383,29 @@ class SurfaceStore {
     // job is to keep the demo robust against LLM message-ordering drift.
     const firstHasCreate = "createSurface" in toProcess[0];
     if (!firstHasCreate && !surfaceExists) {
-      if (process.env.NODE_ENV !== "production") {
-        console.warn(
-          `[SurfaceRegistry] surface "${surfaceId}" received update without ` +
-            `prior createSurface — auto-creating with basicCatalog. ` +
-            `Skill prompt should emit createSurface first.`,
-        );
-      }
+      logger.warn("surface_autocreated_without_create", { surfaceId });
       processor.processMessages([
         {
           version: "v0.9",
           createSurface: {
             surfaceId,
-            catalogId: basicCatalog.id,
+            catalogId: workbenchCatalog.id,
           },
         } as A2uiMessage,
       ]);
+    }
+
+    // Authenticated images: an <img> carries no Bearer, so a backend-relative
+    // url renders as a broken picture. Resolve them to blob: urls and patch the
+    // surface when they land. Fire-and-forget on purpose — the pane must paint
+    // now, not wait on a download. See lib/a2uiAuthImages.ts.
+    if (findAuthImages(toProcess).length > 0) {
+      void resolveAuthImages(surfaceId, toProcess).then(({ patches }) => {
+        if (patches.length === 0) return;
+        // A DIFFERENT sourceToolCallId: appendMessages is idempotent on it, so
+        // reusing the original would make the patch a silent no-op.
+        this.appendMessages(surfaceId, patches as A2uiV09Message[], `${sourceToolCallId}:img`);
+      });
     }
 
     try {
@@ -395,12 +413,14 @@ class SurfaceStore {
       // boundary since our wire-format type is wider than the SDK's union.
       processor.processMessages(toProcess as unknown as A2uiMessage[]);
     } catch (err) {
-      if (process.env.NODE_ENV !== "production") {
-        console.error(
-          `[SurfaceRegistry] processMessages failed for surface "${surfaceId}":`,
-          err,
-        );
-      }
+      // NEVER SILENT (#8). This was gated behind NODE_ENV !== "production", so
+      // in a deployed env a malformed A2UI payload failed here and NOTHING was
+      // recorded anywhere — the agent narrates "I've updated the Workspace",
+      // the tab stays empty, and the only evidence is a console line no
+      // customer will ever read. It is the render half of the recurring
+      // A2UI-workspace bug class. Always report now; the logger mirrors to
+      // console in dev, so local behaviour is unchanged.
+      logger.error(err, { event: "surface_process_messages_failed", surfaceId });
       return;
     }
 

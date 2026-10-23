@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { VisualEvidenceControl } from "./VisualEvidenceControl";
 import * as Dialog from "@radix-ui/react-dialog";
 
 // Strip scripts, external references, and event handlers from agent-generated SVG.
@@ -115,7 +116,11 @@ export function SVGBlock({ svgString }: SVGBlockProps) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    setCleanSvg("");
+    setFailed(false);
     import("dompurify").then(({ default: DOMPurify }) => {
+      if (cancelled) return;
       const clean = DOMPurify.sanitize(svgString, PURIFY_CONFIG) as string;
       if (!clean) {
         setFailed(true);
@@ -124,7 +129,8 @@ export function SVGBlock({ svgString }: SVGBlockProps) {
         // the raw string — so the security pass is always what runs first.
         setCleanSvg(makeResponsive(clean));
       }
-    });
+    }).catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
   }, [svgString]);
 
   if (failed) return <CodeFallback code={svgString} />;
@@ -197,6 +203,7 @@ export function SVGBlock({ svgString }: SVGBlockProps) {
           </Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>
+      <VisualEvidenceControl source={svgString} cleanSvg={cleanSvg} />
     </Dialog.Root>
   );
 }

@@ -49,8 +49,9 @@ from google.adk.tools import ToolContext
 from pydantic import ValidationError
 
 from adk.elicitation import next_elicit_seq, read_submitted_values
+from tools.document_identity import identity_mismatch, resolve_filename
 from tools.documents.ailang_parse import parse_gcs_file
-from tools.documents.context import build_document_context
+from tools.documents.context import build_document_context, resolve_caller_uid
 from tools.extract_ppa_clauses import extract_ppa_clauses, normalize_doc_id
 from tools.resilient_genai import generate_content_resilient
 from tools.schemas.ppa_clauses import PpaClauses
@@ -327,9 +328,16 @@ async def map_ppa_obligations(
     effective_date: str | None = None,
     assumptions: str | None = None,
     refresh: bool = False,
+    expected_name: str = "",
     tool_context: ToolContext = None,
 ) -> str:
     """Map a PPA contract into the verified obligation engine's wire format.
+
+    ALWAYS pass `expected_name` when the user named the contract ("the Iron
+    Mountain PPA" -> expected_name="Brightfield PPA"). The tool confirms the id
+    you resolved IS that document and refuses otherwise, rather than reporting a
+    different contract's obligations under the name the user said. Never invent a
+    value; leave blank only when the user named no document.
 
     Use this tool when the user asks to "analyze obligations", "who owes
     what", "what happens if a deadline slips", "compute the settlement", or
@@ -406,6 +414,21 @@ async def map_ppa_obligations(
     if doc_id is not None:
         doc_id = normalize_doc_id(doc_id)
     identity = doc_id or gs_url
+
+    # Before any cache read or LLM spend: confirm this is the document the USER
+    # named. Ahead of the cache deliberately — the cache is keyed on the id alone,
+    # so a check after it would be skipped on every warm hit.
+    if expected_name and doc_id:
+        resolved_name = resolve_filename(doc_id)
+        mismatch = identity_mismatch(expected_name, resolved_name)
+        if mismatch:
+            log.warning(
+                "map_ppa_obligations: identity mismatch — expected %r, resolved %r (doc_id=%s)",
+                expected_name,
+                resolved_name,
+                doc_id,
+            )
+            return json.dumps({"error": mismatch, "doc_id": doc_id, "filename": resolved_name})
 
     # A caller-provided anchor must parse BEFORE any LLM spend -- and before
     # the cache read, since the key is variant-keyed on it.
@@ -519,7 +542,7 @@ async def map_ppa_obligations(
     # 2. Document blocks -- dates and amounts live in the full text, not only
     # in the 12-clause summary, so the mapping call gets both.
     try:
-        blocks = await _load_blocks(doc_id=doc_id, gs_url=gs_url)
+        blocks = await _load_blocks(doc_id=doc_id, gs_url=gs_url, tool_context=tool_context)
     except Exception as exc:
         log.warning("map_ppa_obligations: block load failed for %s: %s", identity, exc)
         return json.dumps({"error": f"Could not load document blocks: {exc}", "doc_id": identity})
@@ -671,11 +694,15 @@ async def _resolve_extraction(*, doc_id: str | None, gs_url: str | None, tool_co
     return await extract_ppa_clauses(doc_id=doc_id, gs_url=gs_url, tool_context=tool_context)
 
 
-async def _load_blocks(*, doc_id: str | None, gs_url: str | None) -> list[dict] | None:
+async def _load_blocks(
+    *, doc_id: str | None, gs_url: str | None, tool_context: ToolContext | None = None
+) -> list[dict] | None:
     """Load the parsed AILANG blocks for either identity mode (same duality
     as extract_ppa_clauses)."""
     if doc_id is not None:
-        _content, blocks = await asyncio.to_thread(build_document_context, doc_id, "blocks", None)
+        _content, blocks = await asyncio.to_thread(
+            build_document_context, doc_id, "blocks", None, caller_uid=resolve_caller_uid(tool_context)
+        )
         return blocks
     outcome = await parse_gcs_file(gs_url, "blocks")
     if outcome is None:

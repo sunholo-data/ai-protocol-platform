@@ -195,7 +195,9 @@ trap cleanup EXIT INT TERM
     --reload-exclude "$REPO_ROOT/backend/scripts" 2>&1 | tee "$BACKEND_LOG") &
 BACKEND_PID=$!
 
-(cd "$REPO_ROOT/frontend" && PORT=$FRONTEND_PORT npm run dev 2>&1 | tee "$FRONTEND_LOG") &
+# -H 127.0.0.1: `next dev` otherwise binds every interface, exposing a
+# LOCAL_MODE (stub-auth) app to the LAN. The backend already binds loopback.
+(cd "$REPO_ROOT/frontend" && PORT=$FRONTEND_PORT npm run dev -- -H 127.0.0.1 2>&1 | tee "$FRONTEND_LOG") &
 FRONTEND_PID=$!
 
 if [ -d "$SANDBOX_DIR/node_modules" ]; then

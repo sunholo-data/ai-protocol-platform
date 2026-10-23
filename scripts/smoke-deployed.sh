@@ -14,6 +14,7 @@
 #   ./scripts/smoke-deployed.sh dev sidecars # only the MCP sidecars (sandbox + ext-apps)
 #   ./scripts/smoke-deployed.sh dev channels # only channel webhook reachability
 #   ./scripts/smoke-deployed.sh dev all auth # also run the authenticated whoami probe
+#   ./scripts/smoke-deployed.sh dev client-logs # browser-telemetry route end to end (mints a token)
 #
 # Requires: gcloud auth (`gcloud auth login`) with invoker on platform-backend
 # for the `backend` check. `auth` additionally needs Firebase admin on the
@@ -50,6 +51,65 @@ smoke_frontend() {
   fi
   echo "URL: $url"
   local fail=0
+
+  # --- Container inventory --------------------------------------------------
+  # The service is multi-container: Next.js `main`, the FastAPI `sidecar`, and
+  # the MCP `toolbox`. Every HTTP probe below can pass with the toolbox MISSING,
+  # because /mcp/ hits the BACKEND's MCP mount on the sidecar, not the toolbox
+  # on 127.0.0.1:5000. So the toolbox has no HTTP surface of its own to probe
+  # from out here — its absence is only visible structurally.
+  #
+  # That gap is not hypothetical: on 2026-09-01 a terraform apply deployed prod
+  # revision 00009 with the toolbox deleted and the sidecar cut from 2cpu/4Gi to
+  # 1cpu/2Gi (the module models two containers, cloudbuild deploys three). Every
+  # MCP server seeded on that env addresses the toolbox over 127.0.0.1:5000, so
+  # all four were dead — and this suite reported green for a full day.
+  #
+  # Check the revision actually SERVING TRAFFIC, not spec.template. Those two
+  # diverge exactly when it matters most: a traffic rollback restores service
+  # while leaving the template broken, so reading the template reports an
+  # outage that is not happening. Asked the other way round, the template alone
+  # would also miss a bad revision that traffic had been shifted ONTO. The live
+  # question a smoke check answers is "are users broken right now", and that is
+  # the serving revision.
+  local serving
+  serving=$(gcloud run services describe "$svc" \
+    --project="$PROJECT" --region="$REGION" \
+    --format='value(status.traffic[0].revisionName)' 2>/dev/null || true)
+  if [[ -z "$serving" ]]; then
+    echo "FAIL could not resolve the serving revision for $svc"
+    fail=1
+  else
+    local containers
+    containers=$(gcloud run revisions describe "$serving" \
+      --project="$PROJECT" --region="$REGION" \
+      --format='value(spec.containers[].name)' 2>/dev/null | tr ';\t' ',,' || true)
+    for want in main sidecar toolbox; do
+      if [[ ",${containers}," == *",${want},"* ]]; then
+        echo "OK   container '${want}' present (serving ${serving})"
+      else
+        echo "FAIL container '${want}' MISSING from serving revision ${serving}"
+        echo "     (present: ${containers:-none}) — a redeploy from cloudbuild.yaml"
+        echo "     restores the full set; if this followed a terraform apply, see"
+        echo "     modules/run_multiple ignore_changes"
+        fail=1
+      fi
+    done
+
+    # Template drift is a SEPARATE, latent condition: service is fine now, but
+    # the next deploy-from-template regresses it. Warn, never fail — failing here
+    # would make a correctly-mitigated incident look like an ongoing one.
+    local template
+    template=$(gcloud run services describe "$svc" \
+      --project="$PROJECT" --region="$REGION" \
+      --format='value(spec.template.spec.containers[].name)' 2>/dev/null | tr ';\t' ',,' || true)
+    if [[ "$template" != "$containers" ]]; then
+      echo "WARN template containers differ from serving: template=[${template}] serving=[${containers}]"
+      echo "     service is healthy NOW, but the next deploy from this template"
+      echo "     will regress it. Redeploy from cloudbuild.yaml to realign."
+    fi
+  fi
+
   # Public endpoints — expect 200
   for path in "/" "/api/health" "/api/proxy/health" "/api/proxy/api/skills/marketplace"; do
     local code body
@@ -75,9 +135,44 @@ smoke_frontend() {
       fail=1
     fi
   done
+  # A browser write carries an Origin header. It must reach auth (401), not be
+  # refused by the sidecar's origin check (403): after the ADK 1.39 bump every
+  # browser write on test 403'd while GET-only and CLI checks stayed green
+  # (2026-10-20). The proxy now drops Origin before the sidecar.
+  code=$(curl -sS -o /tmp/smoke-body -w '%{http_code}' --max-time 20 -X POST \
+    -H "Origin: ${url}" -H 'Content-Type: application/json' -d '{}' \
+    "${url}/api/proxy/api/folders") || code=000
+  if [[ "$code" = "401" ]]; then
+    echo "OK   POST /api/proxy/api/folders (browser Origin, anon) -> 401"
+  else
+    echo "FAIL POST /api/proxy/api/folders (browser Origin, anon) -> ${code} (expected 401; 403 = origin check) body=$(head -c 200 /tmp/smoke-body)"
+    fail=1
+  fi
+  # v6.40.0 M5a: the resident agent's push webhook, reached the same way and
+  # for the same reason — the instance lives in another project and holds no
+  # credential for the IAM-protected backend service.
+  #
+  # 403 is the PASS. It proves the route is mounted AND that the per-task
+  # token gate is in front of it. A 404 means the receiver is unreachable at
+  # the URL the platform hands the peer, and that failure is otherwise
+  # INVISIBLE from this side: the instance logs "WARN push failed" in another
+  # project and the answer is simply never delivered. A 200 would be worse —
+  # an ungated receiver anyone on the internet can write into a user's
+  # conversation with.
+  local code body
+  code=$(curl -sS -o /tmp/smoke-body -w '%{http_code}' --max-time 20 \
+    -X POST -H 'Content-Type: application/json' \
+    -d '{"kind":"task","id":"smoke-probe","status":{"state":"completed"}}' \
+    "${url}/api/proxy/internal/resident/notify") || code=000
+  body=$(head -c 200 /tmp/smoke-body)
+  if [[ "$code" = "403" ]]; then
+    echo "OK   POST /api/proxy/internal/resident/notify -> 403 (receiver mounted, token gate in front)"
+  else
+    echo "FAIL POST /api/proxy/internal/resident/notify -> ${code} body=${body} (expected 403; 404 = receiver unreachable, 200 = UNGATED)"
+    fail=1
+  fi
   # A2A agent card is public discovery — reached via the frontend proxy
   # since the backend Cloud Run service is IAM-protected.
-  local code body
   code=$(curl -sS -o /tmp/smoke-body -w '%{http_code}' --max-time 20 \
     "${url}/api/proxy/.well-known/agent.json") || code=000
   body=$(head -c 200 /tmp/smoke-body)
@@ -363,6 +458,16 @@ print("\n".join(sorted(set(out))))
   return $fail
 }
 
+smoke_client_logs() {
+  echo ""
+  echo "-- browser telemetry ingest: POST /api/client-logs end to end (env=$ENV) --"
+  # FRONTEND-OBS: scripts/verify-client-logs.sh is the design's self-verification
+  # command — an authenticated ERROR probe must land in Cloud Logging AND Error
+  # Reporting, and the refusals (anonymous, forged uid, over-cap, INFO) must
+  # refuse. It mints its own token, so it runs wherever `auth` can.
+  "$REPO_ROOT/scripts/verify-client-logs.sh" "$ENV"
+}
+
 smoke_auth() {
   echo ""
   echo "-- authenticated whoami round-trip (env=$ENV) --"
@@ -394,11 +499,13 @@ case "$TARGET" in
   backend)  smoke_backend || overall=1 ;;
   sidecars) smoke_sidecars || overall=1 ;;
   channels) smoke_channels || overall=1 ;;
-  *) echo "Unknown target: $TARGET (use all|frontend|backend|sidecars|channels)"; exit 2 ;;
+  client-logs) smoke_client_logs || overall=1 ;;
+  *) echo "Unknown target: $TARGET (use all|frontend|backend|sidecars|channels|client-logs)"; exit 2 ;;
 esac
 
 if [[ "$WITH_AUTH" = "auth" ]]; then
   smoke_auth || overall=1
+  smoke_client_logs || overall=1
 fi
 
 echo ""

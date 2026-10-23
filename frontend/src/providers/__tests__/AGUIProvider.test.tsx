@@ -300,3 +300,37 @@ describe("AGUIProvider", () => {
     expect(httpAgentCtor.mock.calls.length).toBe(1); // still no rebuild
   });
 });
+
+// FRONTEND-OBS: the provider is the one place that knows the skill and the
+// thread/session id, so it is where every browser log line gets its join keys.
+describe("AGUIProvider — logger context", () => {
+  it("sets skillId and the session/thread id on the logger, and updates when they change", async () => {
+    const { logger } = await import("@/lib/logger");
+    const spy = vi.spyOn(logger, "setContext");
+    const { rerender } = render(
+      <AGUIProvider skillId="ppa-expert" sessionId="s-1">
+        <div />
+      </AGUIProvider>,
+    );
+    expect(spy).toHaveBeenCalledWith({ skillId: "ppa-expert", sessionId: "s-1", threadId: "s-1" });
+    rerender(
+      <AGUIProvider skillId="ppa-expert" sessionId="s-2">
+        <div />
+      </AGUIProvider>,
+    );
+    expect(spy).toHaveBeenLastCalledWith({ skillId: "ppa-expert", sessionId: "s-2", threadId: "s-2" });
+    spy.mockRestore();
+  });
+
+  it("leaves session and thread undefined for a fresh chat with no session yet", async () => {
+    const { logger } = await import("@/lib/logger");
+    const spy = vi.spyOn(logger, "setContext");
+    render(
+      <AGUIProvider skillId="ppa-expert">
+        <div />
+      </AGUIProvider>,
+    );
+    expect(spy).toHaveBeenCalledWith({ skillId: "ppa-expert", sessionId: undefined, threadId: undefined });
+    spy.mockRestore();
+  });
+});

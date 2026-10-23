@@ -21,6 +21,7 @@ import datetime as _dt
 import difflib
 import json as _json
 import sys as _sys
+import time as _time
 import uuid
 from pathlib import Path
 
@@ -83,6 +84,267 @@ def list_skills(ctx: click.Context, jobs_only: bool) -> None:
     for slug, name, model, badge in rows:
         tail = click.style(f"  [{badge}]", fg="cyan") if badge else ""
         click.echo(f"{slug:34} {name:30} {model}{tail}")
+
+
+@skill.command("doctor")
+@click.option("--project", required=True, help="Firestore project, e.g. example-platform-test.")
+@click.option("--slug", default=None, help="Check one skill by slug instead of all of them.")
+def doctor(project: str, slug: str | None) -> None:
+    """Say why a skill is missing from the dropdown.
+
+    A skill document that fails validation is SKIPPED by `list_skills` — one bad
+    document must never 500 the switcher for everyone (deploy-skill Trap 22), so
+    the read path logs it and moves on. That is the right behaviour, and it has a
+    cost: to the person looking at the dropdown the skill has not failed, it has
+    simply never existed. The warning is in the backend log they are not reading.
+
+    This is the missing half. It validates every document the way the read path
+    does and prints the ones that fail, with the field and the reason.
+
+    A skill written straight to Firestore is the usual way to get here: the API's
+    `update_skill` validates before persisting, and a direct write skips that.
+    """
+    try:
+        from google.cloud import firestore
+    except ImportError as exc:  # pragma: no cover - depends on the caller's env
+        raise click.ClickException("google-cloud-firestore is not installed in this interpreter") from exc
+
+    try:
+        from db.models import SkillConfig
+    except ImportError as exc:
+        raise click.ClickException(
+            "run this from the backend project so the SkillConfig model is importable:\n"
+            "  cd backend && uv run aiplatform skill doctor --project <p>"
+        ) from exc
+
+    client = firestore.Client(project=project)
+    query = client.collection("skills")
+    if slug:
+        query = query.where(filter=firestore.FieldFilter("slug", "==", slug))
+
+    ok, bad = 0, []
+    for doc in query.stream():
+        data = doc.to_dict() or {}
+        data.setdefault("skillId", doc.id)
+        try:
+            SkillConfig.model_validate(data)
+            ok += 1
+        except Exception as exc:
+            bad.append((data.get("slug") or doc.id, doc.id, exc))
+
+    click.echo(f"{ok} valid, {len(bad)} invalid in {project}")
+    if not bad:
+        if slug:
+            click.echo(f"\n{slug!r} parses cleanly. If it is still missing from the dropdown the")
+            click.echo("cause is visibility, not validity — check in this order:")
+            click.echo("  1. accessControl on the skill (public / owner / domain / specific / tagged)")
+            click.echo("  2. enabled_skills on clients/<domain> — a NARROWING list; if it is non-null")
+            click.echo("     and omits this skill, the skill is hidden however permissive its access")
+            click.echo("  3. the caller's group tags, for accessControl.type=tagged")
+        return
+
+    click.echo("\nThese are dropped by list_skills and will not appear in any dropdown:\n")
+    for slug_name, doc_id, exc in bad:
+        click.echo(f"  {slug_name}  ({doc_id})")
+        for line in str(exc).splitlines():
+            line = line.strip()
+            # Pydantic prints "field\n  Input should be ..." — keep both, drop the URLs.
+            if line and not line.startswith("For further information"):
+                click.echo(f"      {line}")
+        click.echo("")
+    raise SystemExit(1)
+
+
+@skill.command("chat")
+@click.argument("skill_id")
+@click.option("-m", "--message", required=True, help="The message to send.")
+@click.option("--session", default=None, help="Resume an existing thread id. Default: a fresh one.")
+@click.option(
+    "--project",
+    default="",
+    help="Run the turn inside this project (its id), as a chat started from the project's home does.",
+)
+@click.option(
+    "--doc",
+    "docs",
+    multiple=True,
+    help="Attach a document (its id) to the turn, as an open tab in the browser does. Repeatable.",
+)
+@click.option("--timeout", default=300.0, help="HTTP timeout for the streaming request, in seconds.")
+@click.option("--events", is_flag=True, help="Also print every AG-UI event type as it arrives.")
+@click.option(
+    "--surface-json",
+    "surface_json",
+    default="",
+    help=(
+        "Write every A2UI_SURFACE event to this file as JSONL, with its arrival position. "
+        "Without it only surface IDS are shown, which cannot answer 'did the right thing render' "
+        "— the question a verifier actually has to ask."
+    ),
+)
+@click.pass_context
+def chat(
+    ctx: click.Context,
+    skill_id: str,
+    message: str,
+    session: str | None,
+    project: str,
+    docs: tuple[str, ...],
+    timeout: float,
+    events: bool,
+    surface_json: str,
+) -> None:
+    """Run one real chat turn and show what actually happened.
+
+    `skill probe` answers "how fast", this answers "did it work" — the
+    assistant's reply, every tool the agent called with its arguments, and any
+    error. Without it the only way to verify a feature end-to-end is to open a
+    browser and log in as a human, which an agent cannot do; so a feature would
+    get shipped on unit tests, which this platform has repeatedly learned is not
+    the same as working (see the verify-with-a-live-stream rule).
+
+    Same endpoint and body as `probe`, reading the AG-UI stream rather than
+    just the LATENCY_REPORT at the end of it.
+    """
+    env = ctx.obj["env"]
+    base_url = resolve_base_url(env)
+    client = AIPlatformClient(env=env, base_url=base_url)
+    headers = client._auth_headers()  # noqa: SLF001  internal helper, intentional
+    headers["Accept"] = "text/event-stream"
+
+    thread_id = session or f"chat-{uuid.uuid4().hex[:12]}"
+    body = {
+        "threadId": thread_id,
+        "runId": f"run-chat-{uuid.uuid4().hex[:8]}",
+        "messages": [{"id": f"msg-{uuid.uuid4().hex[:8]}", "role": "user", "content": message}],
+        "state": {},
+        "tools": [],
+        "context": [],
+        "forwardedProps": {
+            **({"project_id": project} if project else {}),
+            **({"document_ids": list(docs)} if docs else {}),
+        },
+    }
+
+    text_parts: list[str] = []
+    tool_calls: list[tuple[str, str]] = []
+    errors: list[str] = []
+    surfaces: list[str] = []
+    seen: dict[str, int] = {}
+    pending_tool: dict[str, str] = {}
+    # Arrival POSITION, not just the fact of arrival. "A surface rendered" and
+    # "a surface rendered while the run was still going" are different claims,
+    # and only the second one is what a progressive surface promises.
+    surface_records: list[dict] = []
+    seq = 0
+    last_text_seq = 0
+    # WALL CLOCK, not just sequence. Nothing else emits while the agent is
+    # blocked inside one tool call, so consecutive sequence numbers are exactly
+    # what you get whether the updates trickled out over twelve seconds or were
+    # flushed in a single burst at the end. Only elapsed time tells those apart,
+    # and the difference between them is the whole claim of a progressive
+    # surface.
+    t0 = _time.monotonic()
+
+    url = f"{base_url}/api/skill/{skill_id}/stream"
+    try:
+        with httpx.stream("POST", url, headers=headers, json=body, timeout=timeout) as resp:
+            if resp.status_code >= 400:
+                detail = resp.read().decode("utf-8", errors="replace")
+                raise APIError(f"POST /api/skill/{skill_id}/stream returned {resp.status_code}: {detail[:400]}")
+            for line in resp.iter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                try:
+                    ev = _json.loads(line[5:].strip())
+                except _json.JSONDecodeError:
+                    continue
+
+                kind = ev.get("type") or ""
+                seen[kind] = seen.get(kind, 0) + 1
+                seq += 1
+                if events:
+                    click.echo(f"    · {kind}")
+
+                if kind == "TEXT_MESSAGE_CONTENT":
+                    text_parts.append(ev.get("delta") or "")
+                    last_text_seq = seq
+                elif kind == "TOOL_CALL_START":
+                    pending_tool[ev.get("toolCallId", "")] = ev.get("toolCallName", "?")
+                elif kind == "TOOL_CALL_ARGS":
+                    cid = ev.get("toolCallId", "")
+                    pending_tool[cid + ":args"] = pending_tool.get(cid + ":args", "") + (ev.get("delta") or "")
+                elif kind == "TOOL_CALL_END":
+                    cid = ev.get("toolCallId", "")
+                    tool_calls.append((pending_tool.get(cid, "?"), pending_tool.get(cid + ":args", "")))
+                elif kind == "RUN_ERROR":
+                    errors.append(ev.get("message") or _json.dumps(ev)[:200])
+                elif kind == "CUSTOM" and ev.get("name") == "A2UI_SURFACE":
+                    value = ev.get("value") or {}
+                    surfaces.append(str(value.get("surfaceId", "?")))
+                    if surface_json:
+                        surface_records.append(
+                            {
+                                "seq": seq,
+                                "t": round(_time.monotonic() - t0, 3),
+                                "surfaceId": value.get("surfaceId"),
+                                "sourceId": value.get("sourceId"),
+                                "artifact": value.get("artifact"),
+                                "messages": value.get("messages"),
+                            }
+                        )
+    except httpx.HTTPError as exc:
+        raise APIError(f"stream failed: {exc}") from exc
+
+    click.echo(f"\nthread {thread_id}")
+    click.echo("─" * 60)
+
+    if tool_calls:
+        click.echo(f"TOOL CALLS ({len(tool_calls)})")
+        for name, args in tool_calls:
+            click.echo(f"  {name}  {args[:140]}")
+    else:
+        # Loud, because "the agent had no tools" and "the agent chose not to
+        # use one" look identical in the reply text and mean very different
+        # things — the first is a wiring bug.
+        click.echo("TOOL CALLS: none — if the skill declares tools, that is the finding")
+    click.echo("")
+
+    reply = "".join(text_parts).strip()
+    click.echo("REPLY")
+    click.echo("  " + (reply.replace("\n", "\n  ") if reply else "(empty)"))
+
+    if surfaces:
+        click.echo(f"\nA2UI SURFACES: {', '.join(surfaces)}")
+    if surface_json:
+        with open(surface_json, "w", encoding="utf-8") as fh:
+            for rec in surface_records:
+                fh.write(_json.dumps(rec) + "\n")
+            # A trailer, so a reader can tell "arrived mid-run" from "arrived
+            # at the end" without having to guess the stream length. Written
+            # even with no surfaces, because an EMPTY file and a file that was
+            # never written mean different things.
+            fh.write(
+                _json.dumps(
+                    {
+                        "seq": seq,
+                        "type": "__end__",
+                        "lastTextSeq": last_text_seq,
+                        "t": round(_time.monotonic() - t0, 3),
+                    }
+                )
+                + "\n"
+            )
+        click.echo(f"\nwrote {len(surface_records)} A2UI surface event(s) to {surface_json}")
+    if errors:
+        click.echo("\nERRORS")
+        for e in errors:
+            click.echo(f"  {e}")
+
+    click.echo(f"\n{sum(seen.values())} events: " + ", ".join(f"{k}×{v}" for k, v in sorted(seen.items())))
+
+    if errors:
+        raise SystemExit(1)
 
 
 @skill.command("probe")

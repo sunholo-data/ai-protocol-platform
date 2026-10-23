@@ -26,9 +26,65 @@
 # ============================================================================
 #
 # Branch-based deployment: main -> dev, test -> test, prod -> production
-# Substitutions managed by Terraform (see multivac-aitana infrastructure repo).
+# Substitutions managed by Terraform (see deployment-infrastructure infrastructure repo).
 
 substitutions:
+  _VERTEX_AI_SEARCH_DATASTORE_ID: ''
+  _VERTEX_AI_SEARCH_PROJECT: ''
+  _VERTEX_AI_SEARCH_LOCATION: 'eu'
+  _A2A_AGENT_DOCUMENTS_BUCKET: ''
+  # v6.39.0: off unless the env sets it. Real values live in the
+  # trigger substitutions, per docs/ops/env-config-parity.md.
+  _BROWSER_SERVICE_ENABLED: 'false'
+  _BROWSER_SERVICE_URL: ''
+  # Same synthetic-only gates as the chat sidecar; never enabled by default.
+  _VISUAL_EVIDENCE_ENABLED: 'false'
+  _VISUAL_EVIDENCE_ALLOWED_UIDS: ''
+  _VISUAL_EVIDENCE_SYNTHETIC_SOURCE_DIGESTS: ''
+  _VISUAL_EVIDENCE_SYNTHETIC_CAPTURE_PAIRS: ''
+  _VISUAL_EVIDENCE_MODEL: ''
+  _VISUAL_EVIDENCE_APPROVED_MODEL_REGIONS: ''
+  # v6.40.0 RESIDENT-P1 M11: the resident agent's base URL. Empty by default,
+  # so `ask_assistant` refuses visibly ("no resident assistant is configured")
+  # rather than half-working. Real value belongs in the TRIGGER substitutions
+  # alongside _BROWSER_SERVICE_URL, per docs/ops/env-config-parity.md — it is
+  # Terraform-managed and not set from here.
+  _RESIDENT_AGENT_URL: ''
+  # v6.40.0 M4: where to ask for a stopped resident agent to be started.
+  # A stopped instance does NOT wake on a request — its URL 404s until
+  # something calls :start — so without this an idle-stopped agent is simply
+  # unreachable, and the user is told that plainly rather than shown a
+  # transport error. The coordinator hosts it because the AILANG estate is
+  # where the authority to operate those instances belongs (design P2).
+  _RESIDENT_START_ENDPOINT: ''
+  # v6.40.0 M12-M14: per-user resident instances. OFF by default, and an
+  # EXPLICIT mode rather than "resolve a record if one happens to exist" — a
+  # silent fallback from per-user to the shared instance is precisely how one
+  # user's question ends up answered on another user's box (design D11).
+  # Terraform-managed alongside the two above. Turning it ON means every
+  # eligible user needs a `resident_agents` record: without one they are told
+  # plainly that they have no assistant, which is the correct fail-closed
+  # answer and NOT a fallback to the shared instance.
+  _RESIDENT_AGENT_PER_USER: 'false'
+  # v6.40.0 M5a: where the resident should POST a task update when it finishes,
+  # so an answer that outlives its chat turn still reaches the user. This is
+  # the deployment's OWN public origin — the FRONTEND service, because the
+  # standalone backend is deployed --no-allow-unauthenticated and the instance
+  # holds no credential for it, while the frontend is public and its
+  # `/api/proxy/**` catch-all forwards Authorization untouched to the sidecar.
+  # Terraform-managed alongside the three above.
+  #
+  # INCLUDE THE `/api/proxy` SUFFIX when this is a frontend origin. Verified
+  # live 2026-09-04: POST <fe>/api/proxy/internal/tasks/recompact returns the
+  # backend's JSON 403, while POST <fe>/internal/tasks/recompact returns a Next
+  # 404 HTML page. Without it every webhook 404s and says so only in the
+  # instance's log, where nobody is looking — the /start vs /instances/start
+  # shape again (HANDOVER §3).
+  #
+  # EMPTY IS A WORKING STATE, not a broken one: no webhook is registered, and a
+  # slow question is reported as slow instead of promising a delivery nothing
+  # can make. That is what lets this code reach an env before its config does.
+  _RESIDENT_PUSH_BASE_URL: ''
   # MODEL-RELIABILITY M3: deployment residency gate for the STANDALONE
   # backend (A2A surface — it builds agents too). Same semantics as the
   # frontend/sidecar pipeline: dev = unrestricted, test/prod triggers
@@ -45,12 +101,19 @@ substitutions:
   # TEMPLATE-INVERT M4b left this neutral but WITHOUT the guard the root
   # pipeline got — and the very next deploy proved why that guard exists: it
   # stood up a brand-new `platform-backend` service beside the live
-  # `aitana-v6-backend`, which then failed because a fresh service gets the
+  # `platform-v6-backend`, which then failed because a fresh service gets the
   # default compute SA and cannot read the secrets. Exactly the silent
   # split-brain the guard was written for; it was simply not applied to the
   # SECOND pipeline. (Same shape as downstream #12: a rule enforced on some
   # files and not all of them.)
-  _SERVICE_NAME: platform-backend
+  # `terraform_managed`, not a plausible service name: the deploy guard
+  # below refuses this exact value, and TEST's real service IS called
+  # `platform-backend`. Guarding on a real name meant test could never
+  # deploy — it only worked on dev, whose services are `platform-v6-*`.
+  _SERVICE_NAME: terraform_managed
+  # Opt-in for the first deploy of a NEW env; otherwise a missing service means
+  # the substitution is wrong.
+  _ALLOW_NEW_SERVICE: "false"
   # Prefix for Terraform-created per-deploy resources. Mirrors the root
   # pipeline; must match this environment's real resource names.
   _RESOURCE_PREFIX: platform
@@ -89,6 +152,13 @@ options:
 logsBucket: '${_LOG_BUCKET}'
 
 steps:
+  # --- User guide → backend/bundled (the platform-guide KB source) ---
+  # The image builds from backend/ and can't read docs/; see cloudbuild.yaml.
+  - name: 'node:20-slim'
+    id: bundle-user-guide
+    entrypoint: 'node'
+    args: ['scripts/user-guide/bundle.mjs']
+
   # --- Build backend image ---
   - name: 'gcr.io/cloud-builders/docker'
     id: build-backend
@@ -154,10 +224,22 @@ steps:
         # happened on 2026-08-17 (a stray `platform-backend` with no ready
         # revision, because a fresh service gets the default compute SA and
         # cannot read the secrets). Same guard as the root pipeline.
-        if [ "${_SERVICE_NAME}" = "platform-backend" ]; then
+        if [ "${_SERVICE_NAME}" = "terraform_managed" ]; then
           echo "ERROR: _SERVICE_NAME is still the template placeholder."
           echo "Set it in this environment's Cloud Build trigger substitutions."
           exit 1
+        fi
+        # Guard the hazard, not the name: refuse to CREATE a service beside the
+        # live one. A wrong substitution is indistinguishable from a legitimate
+        # name, but it is always wrong to stand up a new service by accident.
+        if ! gcloud run services describe "${_SERVICE_NAME}" \
+             --project="${_PROJECT_ID}" --region="${_REGION}" >/dev/null 2>&1; then
+          if [ "${_ALLOW_NEW_SERVICE}" != "true" ]; then
+            echo "ERROR: service '${_SERVICE_NAME}' does not exist — deploying would CREATE it."
+            echo "Fix the trigger substitution, or set _ALLOW_NEW_SERVICE=true for a new env."
+            exit 1
+          fi
+          echo "NOTE: creating new service '${_SERVICE_NAME}' (_ALLOW_NEW_SERVICE=true)."
         fi
         IMAGE=$$(cat /workspace/image_backend)
         echo "Deploying backend=$${IMAGE}"
@@ -175,8 +257,12 @@ steps:
       - '--port=8080'
       - '--memory=4Gi'
       - '--cpu=2'
-      # Secrets
-      - '--set-secrets=GOOGLE_API_KEY=GOOGLE_API_KEY:latest'
+      # Secrets. No GOOGLE_API_KEY: this service runs GOOGLE_GENAI_USE_VERTEXAI=true
+      # and authenticates as its service account (ADC). google-genai prefers an
+      # API key over ADC when one is in the env, and Vertex Sessions/Memory
+      # reject key auth with 401 CREDENTIALS_MISSING — `config/gcp.py` pops the
+      # key at startup and logs an ERROR on every boot as long as it is mounted.
+      # Removed 2026-09-14 after prod showed that error at each cold start.
       - '--set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest'
       # OpenAI (multi-model): the OpenAI-tier skills (gpt-5.4 reasoner) need the
       # key; OPENAI_API_BASE routes to the configured endpoint. Unrestricted
@@ -209,14 +295,26 @@ steps:
       - '--set-env-vars=ADK_ARTIFACT_BUCKET=${_PROJECT_ID}-artifacts'
       - '--set-env-vars=LOGS_BUCKET_NAME=${_PROJECT_ID}-${_RESOURCE_PREFIX}-logs'
       - '--set-env-vars=ENTSOE_PROJECT=${_ENTSOE_PROJECT}'
-      # Vertex AI Search — platform-default `ai_search` datastore (aitana3) +
+      - '--set-env-vars=BROWSER_SERVICE_ENABLED=${_BROWSER_SERVICE_ENABLED}'
+      - '--set-env-vars=BROWSER_SERVICE_URL=${_BROWSER_SERVICE_URL}'
+      - '--set-env-vars=VISUAL_EVIDENCE_ENABLED=${_VISUAL_EVIDENCE_ENABLED}'
+      - '--set-env-vars=^|^VISUAL_EVIDENCE_ALLOWED_UIDS=${_VISUAL_EVIDENCE_ALLOWED_UIDS}'
+      - '--set-env-vars=^|^VISUAL_EVIDENCE_SYNTHETIC_SOURCE_DIGESTS=${_VISUAL_EVIDENCE_SYNTHETIC_SOURCE_DIGESTS}'
+      - '--set-env-vars=^|^VISUAL_EVIDENCE_SYNTHETIC_CAPTURE_PAIRS=${_VISUAL_EVIDENCE_SYNTHETIC_CAPTURE_PAIRS}'
+      - '--set-env-vars=VISUAL_EVIDENCE_MODEL=${_VISUAL_EVIDENCE_MODEL}'
+      - '--set-env-vars=^|^VISUAL_EVIDENCE_APPROVED_MODEL_REGIONS=${_VISUAL_EVIDENCE_APPROVED_MODEL_REGIONS}'
+      - '--set-env-vars=RESIDENT_AGENT_URL=${_RESIDENT_AGENT_URL}'
+      - '--set-env-vars=RESIDENT_START_ENDPOINT=${_RESIDENT_START_ENDPOINT}'
+      - '--set-env-vars=RESIDENT_AGENT_PER_USER=${_RESIDENT_AGENT_PER_USER}'
+      - '--set-env-vars=RESIDENT_PUSH_BASE_URL=${_RESIDENT_PUSH_BASE_URL}'
+      # Vertex AI Search — platform-default `ai_search` datastore (example-datastore) +
       # the search-infra project/location used to expand bare datastore ids.
-      # Lives in the dedicated aitana-ai-search project, NOT the compute project;
+      # Lives in the dedicated example-search-project project, NOT the compute project;
       # the runtime SA needs roles/discoveryengine.viewer there. No commas in
       # these values, so plain --set-env-vars is safe.
-      - '--set-env-vars=VERTEX_AI_SEARCH_DATASTORE_ID=projects/aitana-ai-search/locations/eu/collections/default_collection/dataStores/aitana3'
-      - '--set-env-vars=VERTEX_AI_SEARCH_PROJECT=aitana-ai-search'
-      - '--set-env-vars=VERTEX_AI_SEARCH_LOCATION=eu'
+      - '--set-env-vars=VERTEX_AI_SEARCH_DATASTORE_ID=${_VERTEX_AI_SEARCH_DATASTORE_ID}'
+      - '--set-env-vars=VERTEX_AI_SEARCH_PROJECT=${_VERTEX_AI_SEARCH_PROJECT}'
+      - '--set-env-vars=VERTEX_AI_SEARCH_LOCATION=${_VERTEX_AI_SEARCH_LOCATION}'
       # NB: AI_SEARCH_SOURCE_BUCKET_OVERRIDE (v6.15.0 gs://-source open/preview
       # remap) is set ONLY on the frontend service (root cloudbuild.yaml), which
       # serves the workbench Sources tab + import-by-reference. This standalone
@@ -295,7 +393,7 @@ steps:
   # it means a SKILL.md declares an MCP server this env's mcp_servers/
   # registry can't satisfy, and every such skill would hard-500 at agent
   # build (G42) the moment a user opens it — exactly how web-researcher
-  # broke for the ONE team on test (2026-07-21, issue #14). Fix with
+  # broke for the tenant team on test (2026-07-21, issue #14). Fix with
   # scripts/seed_mcp_servers.py --env <env> [--public-url …] or drop the
   # declaration. Docs: docs/ops/platform-skills.md
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'

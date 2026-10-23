@@ -48,7 +48,7 @@ class TestResolveCodeExecutor:
         assert tools == []
 
     def test_gemini_mixed_tools_gets_delegate_not_builtin(self):
-        """A Gemini skill that MIXES code with other tools (e.g. the ONE front
+        """A Gemini skill that MIXES code with other tools (e.g. the tenant front
         door) must use the code sub-agent DELEGATE, not the direct
         BuiltInCodeExecutor — Gemini rejects a builtin tool + any function tool
         (the live code-assistant 400, 2026-07-17)."""

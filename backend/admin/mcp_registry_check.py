@@ -6,7 +6,7 @@ the env's Firestore ``mcp_servers/`` registry can't satisfy. That is the right
 fail-loud behaviour at runtime — but the misconfiguration itself is SEED DRIFT
 (per-env Firestore state never promotes with code), and it has shipped silently
 more than once: test's registry was missing ``ext-apps-map`` entirely, so the
-first ONE-team request to web-researcher died with a 500 (2026-07-21, issue
+first tenant-team request to web-researcher died with a 500 (2026-07-21, issue
 #14).
 
 This module closes the gap at the two moments the drift can be caught early:
@@ -39,7 +39,24 @@ COLLECTION = "mcp_servers"
 # MUST stay in sync with the catalog in scripts/seed_mcp_servers.py — the
 # unit test pins template declarations to this set, and the seed script
 # references it as the source of truth for "what can I seed".
-KNOWN_SEEDABLE_SERVER_IDS = {"ext-apps-map", "toolbox", "toolbox-bq", "maps-grounding-lite"}
+_TEMPLATE_SEEDABLE_SERVER_IDS = {"ext-apps-map", "toolbox", "toolbox-bq", "maps-grounding-lite", "browser"}
+
+# Fork hook: a deployment that seeds its OWN mcp_servers rows (its own tooling,
+# not scripts/seed_mcp_servers.py) lists those ids, one per line (# comments
+# allowed), in this optional file. The fork ADDS the file; the template ships
+# none. Keeps "every declared server is seedable" true without a fork editing
+# this module.
+FORK_SEEDABLE_SERVERS_FILE = Path(__file__).resolve().parent.parent / "config" / "fork_mcp_servers.txt"
+
+
+def _fork_seedable_server_ids(path: Path = FORK_SEEDABLE_SERVERS_FILE) -> set[str]:
+    if not path.is_file():
+        return set()
+    ids = (line.split("#", 1)[0].strip() for line in path.read_text().splitlines())
+    return {i for i in ids if i}
+
+
+KNOWN_SEEDABLE_SERVER_IDS = _TEMPLATE_SEEDABLE_SERVER_IDS | _fork_seedable_server_ids()
 
 # Servers whose URL is loopback IN EVERY ENV by design (in-service sidecars
 # sharing the instance's network namespace). A loopback URL on any OTHER

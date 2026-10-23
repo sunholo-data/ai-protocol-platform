@@ -36,6 +36,7 @@ CODE_RATE_LIMITED = "MODEL_RATE_LIMITED"
 CODE_UNAVAILABLE = "MODEL_UNAVAILABLE"
 CODE_AUTH_FAILED = "MODEL_AUTH_FAILED"
 CODE_REQUEST_INVALID = "MODEL_REQUEST_INVALID"
+CODE_SILENT_STALL = "MODEL_SILENT_STALL"
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,24 @@ class ErrorClass:
     provider: str = "unknown"
     status: int | None = None
     message: str = ""
+
+
+class SilentStallError(Exception):
+    """The provider accepted a streamed request and sent NOTHING for the deadline.
+
+    No error, no 429, no chunk — the one failure shape the classifier could
+    not see, because nothing was ever raised. Thirty days of a deployed
+    fork's prod timing rows (2026-09-21) held six of these at 48-105 s to
+    first token, on requests logged as sent and then silent; the client had
+    abandoned the stream at 30 s. The turns either side ran in 1-3 s, so a
+    fresh request is the fix. Raised by ``ResilientLlm`` before any output,
+    which makes it retryable and fallbackable under the existing rule.
+    """
+
+    def __init__(self, deadline_s: float, model: str = "unknown") -> None:
+        super().__init__(f"no token from {model} within {deadline_s:.0f}s")
+        self.deadline_s = deadline_s
+        self.model = model
 
 
 class ModelTurnError(Exception):
@@ -174,6 +193,11 @@ def classify(exc: Exception) -> ErrorClass:
 
 def _classify_known(exc: Exception) -> ErrorClass | None:
     message = str(exc)[:500]
+
+    if isinstance(exc, SilentStallError):
+        # A stall is a bad draw, not a bad model: retry the same member once
+        # (bounded by max_retries), then fall back like any transient failure.
+        return ErrorClass(transient=True, fallbackable=True, code=CODE_SILENT_STALL, message=message)
 
     # --- google-genai (native Gemini path) ---------------------------------
     try:

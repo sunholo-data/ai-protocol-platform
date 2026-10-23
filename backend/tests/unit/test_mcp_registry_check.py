@@ -164,3 +164,17 @@ class TestVerifyMcpRegistry:
         assert result["ok"] is True
         assert result["mcp_missing"] == []
         assert any("cannot verify" in w for w in result["mcp_warnings"])
+
+
+class TestForkSeedableServersFile:
+    def test_absent_file_adds_nothing(self, tmp_path):
+        from admin.mcp_registry_check import _fork_seedable_server_ids
+
+        assert _fork_seedable_server_ids(tmp_path / "missing.txt") == set()
+
+    def test_reads_ids_and_ignores_comments(self, tmp_path):
+        from admin.mcp_registry_check import _fork_seedable_server_ids
+
+        f = tmp_path / "fork_mcp_servers.txt"
+        f.write_text("# header\nmy-db   # local toolbox\n\nmy-api\n")
+        assert _fork_seedable_server_ids(f) == {"my-db", "my-api"}

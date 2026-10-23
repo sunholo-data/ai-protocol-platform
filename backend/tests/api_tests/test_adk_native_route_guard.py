@@ -12,7 +12,7 @@ forwards any path and relies entirely on the backend to authenticate, so those
 routes were served to the public internet with no token. Behind them:
 
   - a session's full event list — every message, tool call and extracted clause
-    (ONE's contract content: exactly what CLAUDE.md's security rule governs)
+    (the tenant's contract content: exactly what CLAUDE.md's security rule governs)
   - session artifacts (parsed documents)
   - DELETE on a session, PATCH on user memory
   - /run and /run_sse, which EXECUTE the agent and bill for it
@@ -43,9 +43,9 @@ _ADMIN = User(
 )
 _PLAIN_USER = User(
     uid="user-uid",
-    email="alex@acmeenergy.com",
-    domain="acmeenergy.com",
-    group_tags=frozenset({"ONE"}),
+    email="alex@energy.example",
+    domain="energy.example",
+    group_tags=frozenset({"example-team"}),
 )
 
 # Every ADK-registered route family, sampled. Paths are what the guard sees, so
@@ -58,6 +58,8 @@ _ADK_NATIVE_PATHS = [
     "/apps/aitana_platform/app-info",
     "/apps/aitana_platform/eval_sets",
     "/list-apps",
+    "/agent-identity/finalize",
+    "/config/telemetry",
     "/run",
     "/run_sse",
     "/debug/trace/session/s1",

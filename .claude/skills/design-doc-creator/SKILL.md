@@ -113,7 +113,40 @@ Fill in all sections of the generated template. Key sections:
 - **API Changes**: New/modified endpoints
 - **Migration**: Database changes, feature flags, rollback plan
 - **Testing Strategy**: Frontend tests (Vitest), backend tests (pytest), E2E
+- **Self-Verification**: the one command that proves it (see step 5b — MANDATORY)
 - **Success Criteria**: Checkboxes for acceptance tests
+
+**5b. Fill the Self-Verification Section (MANDATORY)**
+
+Tests prove the code was right when it was written. Self-verification proves
+the **deployed** thing is right *now*. Both are required; neither substitutes
+for the other.
+
+The section must name a single command that:
+
+1. **Runs against the deployed system**, not a mock or an emulator.
+2. **Needs nothing else to be up.** If proving the agent works requires the
+   backend, Firestore and a CI runner, then a failure cannot be localised and
+   the command is a system test wearing a verification badge. Verify the unit
+   of deployment against its own dependencies only.
+3. **Is runnable by the agent that built it**, on the machine it was built on,
+   with the identity available there. A verification an agent cannot run is one
+   a human will be asked to run instead, which means it will not be run.
+4. **Asserts negatives, not just positives.** This is the part that gets
+   skipped and the part that pays. Ask: *what failure of this feature would
+   still look healthy?* Then assert that it is refused. Real examples from
+   v6.40.0 — a stale image served `/health` 200 to anonymous callers for 96
+   seconds; an unregistered model would have run silently at a fraction of its
+   context. Both looked fine. Both are now assertions.
+5. **States what a green run does not prove.** A verification that claims
+   everything is trusted for nothing.
+
+**Reject the section if** it is a list of test files, a `curl` recipe in prose
+rather than a committed command, or a set of steps a person is expected to
+perform by hand. The deliverable is something re-runnable, not a procedure.
+
+**A design doc without a working self-verification command is not finished**,
+regardless of how complete the rest of it is.
 
 **5a. Score Against Product Axioms (MANDATORY)**
 
@@ -178,6 +211,39 @@ The v6 platform ships a local-dev CLI (`aitana`, see [local-dev-cli.md](../../..
 - One-off bug fixes
 
 **The anti-pattern:** shipping a feature, then six weeks later writing a follow-up design doc to "add CLI support". By then, three other features have shipped without CLI support either, and the dev loop has decayed to "open three terminals and curl with Firebase tokens". Bake the command into the original doc.
+
+**5b-ter. Decide WHICH REPO each change lands in (MANDATORY when this repo has an upstream)**
+
+Skip only if `git remote` shows no upstream. Otherwise this is a design decision,
+and the design doc is the last cheap moment to make it — once code exists, the
+choice has already been made by default, and undoing it means moving commits
+between repos.
+
+For a repo that merges from an upstream (a template, a platform source), every
+change is one of two kinds:
+
+- **Platform** — belongs upstream, so every fork gets it. Fixes to shared tools,
+  callbacks, protocol handling, generic scripts.
+- **Deployment-specific** — belongs here. Your customer's skills, your ops docs,
+  your real config, anything naming your tenant.
+
+**Add a "Repo Routing" table to the design doc** listing each work item and its
+destination. Two things make this worth the two minutes:
+
+1. **A single feature routinely straddles both.** A guard in a shared tool plus
+   the prompt change in your own skill is *one* fix living in *two* repos. You
+   discover this while writing code unless you decide it while writing the doc.
+2. **Mis-routed platform work conflicts on the next upstream merge.** It is not
+   lost, just expensive — and the cost lands weeks later on whoever merges.
+
+**Prototyping platform code in the downstream repo is legitimate** and often
+unavoidable: you usually cannot reproduce a real bug without the customer's data
+or a live deployment. Say so in the doc — "prototype here, port up before
+merge" is a valid routing decision. The failure mode is silence, not location.
+
+If the repo ships a routing checker (e.g. `scripts/check-upstream-routing.sh`),
+name it in the doc's success criteria so the sprint cannot close without it
+having been run.
 
 **5c. Verify API and Technical Details Against Authoritative Sources (MANDATORY)**
 

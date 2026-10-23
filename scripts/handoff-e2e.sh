@@ -7,7 +7,7 @@
 #
 # Usage:  scripts/handoff-e2e.sh [dev|test]     (default dev)
 #
-# The dedicated whoami-test user has ONE access (aitana-admin group tag) AND full
+# The dedicated whoami-test user has tenant access (aitana-admin group tag) AND full
 # tool permissions (tool_permissions/{email} = ["*"]), so this exercises the FULL
 # journey on the deployed backend: the handoff MECHANISM (one clean native
 # transfer, no conflation/loop) AND the document pipeline (list_documents needs
@@ -38,11 +38,11 @@ if [ -z "${AIPLATFORM_ID_TOKEN:-}" ]; then
   echo "FATAL: token mint failed for ${PROJECT}" >&2; exit 1
 fi
 
-SKILL_ID="$(curl -s "${HOST}/api/proxy/api/skills/by-slug/aitana-platform/one-assistant" \
+SKILL_ID="$(curl -s "${HOST}/api/proxy/api/skills/by-slug/aitana-platform/demo-assistant" \
   -H "Authorization: Bearer ${AIPLATFORM_ID_TOKEN}" 2>/dev/null \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('skillId') or d.get('id') or '')" 2>/dev/null || true)"
-if [ -z "${SKILL_ID}" ]; then echo "FATAL: could not resolve one-assistant skillId on ${ENV}" >&2; exit 1; fi
-echo "one-assistant skillId = ${SKILL_ID}" >&2
+if [ -z "${SKILL_ID}" ]; then echo "FATAL: could not resolve demo-assistant skillId on ${ENV}" >&2; exit 1; fi
+echo "demo-assistant skillId = ${SKILL_ID}" >&2
 
 # Assertion engine as a standalone file so the SSE pipe is python's real stdin.
 # argv: 1=label  2=flow (auto|document)

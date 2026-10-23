@@ -148,7 +148,7 @@ describe("ChatMessageList", () => {
       <ChatMessageList messages={messages} {...baseProps} isLoading={true} />,
     );
     // TypingIndicator has three animate-bounce dots when no tool is running
-    expect(container.querySelectorAll(".animate-bounce")).toHaveLength(3);
+    expect(container.querySelectorAll("[class*=animate-bounce]")).toHaveLength(3);
   });
 
   it("shows tool name in TypingIndicator when a tool call is running", () => {
@@ -158,10 +158,10 @@ describe("ChatMessageList", () => {
         messages={messages}
         {...baseProps}
         isLoading={true}
-        toolCalls={[{ id: "tc1", name: "web_search", status: "running" }]}
+        toolCalls={[{ id: "tc1", name: "web_search_agent", status: "running" }]}
       />,
     );
-    expect(screen.getByText("web_search")).toBeInTheDocument();
+    expect(screen.getByText("Web search")).toBeInTheDocument();
   });
 
   it("shows StreamingBubble when last message is assistant and isLoading", () => {
@@ -173,7 +173,7 @@ describe("ChatMessageList", () => {
       <ChatMessageList messages={messages} {...baseProps} isLoading={true} />,
     );
     // StreamingBubble has the animate-pulse cursor
-    expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
+    expect(container.querySelector("[class*=animate-pulse]")).toBeInTheDocument();
   });
 
   it("shows ContextBanner when activeDocumentContext is provided", () => {
@@ -226,15 +226,15 @@ describe("ChatMessageList", () => {
         {...baseProps}
         toolCalls={[
           // No parentMessageId — this is the bug class.
-          { id: "tc-orphan", name: "web_search", status: "success" },
+          { id: "tc-orphan", name: "web_search_agent", status: "success" },
         ]}
       />,
     );
 
-    // ToolCallChip renders the tool name as visible text. Pre-fix this
-    // assertion fails because "web_search" appears in BOTH a1 and a2
+    // ToolCallChip renders the friendly tool label as visible text. Pre-fix this
+    // assertion fails because "Web search" appears in BOTH a1 and a2
     // bubbles (every non-keyed bubble falls back to __unparented__).
-    const occurrences = screen.queryAllByText("web_search");
+    const occurrences = screen.queryAllByText("Web search");
     expect(occurrences).toHaveLength(1);
   });
 });

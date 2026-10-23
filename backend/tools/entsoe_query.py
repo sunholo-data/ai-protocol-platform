@@ -336,6 +336,15 @@ async def entsoe_day_ahead_prices(
     compare_ppa_contracts results — "what would this price-formula
     difference cost at DK1 prices last month".
 
+    CALL THIS TOOL EVEN WHEN YOU ALREADY KNOW THE ANSWER. If you recognise this
+    question from an earlier conversation, or a remembered fact in your context
+    already carries the figures, you must STILL call the tool. Memory records what
+    was SAID; only the tool reports what the data IS. Reciting remembered numbers
+    also produces no chart — the price table the user is asking to LOOK at is
+    drawn from this tool's result, so an answer without a call renders as bare
+    prose and reads to the user as a broken feature. A user who asks the same
+    data question twice is asking for the data twice.
+
     CALL THIS TOOL EVEN WHEN YOU DON'T HAVE THE ZONE OR THE DATES. Pass whatever
     the user gave you and omit the rest: the tool shows the user a form asking
     for exactly the missing values, and the next turn picks their answer up
@@ -445,7 +454,7 @@ async def entsoe_day_ahead_prices(
     # input), so backtick-interpolation is safe; the date range is parameterised.
     # Time is stored as separate INT columns — filter on DATE(year, month, day)
     # and skip NULL prices (the current, not-yet-settled day carries NULLs).
-    # AVG + GROUP BY collapses to ONE price per hour: a no-op for the hourly zone
+    # AVG + GROUP BY collapses to the tenant price per hour: a no-op for the hourly zone
     # tables (1 row/hour), but essential for country tables like data_france that
     # store 4 sub-hourly (15-min) prices under the same `hour` with no minute
     # column — otherwise we'd emit 4 duplicate timestamps per hour.

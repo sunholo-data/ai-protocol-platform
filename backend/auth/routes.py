@@ -21,4 +21,6 @@ def whoami(user: User = Depends(get_current_user)) -> dict:  # noqa: B008
         "email": user.email,
         "domain": user.domain,
         "groupTags": sorted(user.group_tags),
+        # Omitted-as-null rather than "" so a client can `me.displayName ?? email`.
+        "displayName": user.display_name or None,
     }

@@ -30,7 +30,7 @@ vi.mock("@/components/chat/SignInRequired", () => ({
 function asPlatform() {
   Object.assign(scope, { state: "platform", domains: [], isAdmin: true, isPlatform: true });
 }
-function asTenant(domain = "one.com") {
+function asTenant(domain = "customer.example") {
   Object.assign(scope, { state: "tenant", domains: [domain], isAdmin: true, isPlatform: false });
 }
 
@@ -69,9 +69,9 @@ describe("AdminHub IA", () => {
   });
 
   it("tells a tenant admin their view is scoped, so a short list isn't confusing", () => {
-    asTenant("acmeenergy.com");
+    asTenant("energy.example");
     render(<AdminHub />);
-    expect(screen.getByText(/scoped to acmeenergy\.com/i)).toBeTruthy();
+    expect(screen.getByText(/scoped to energy\.example/i)).toBeTruthy();
   });
 
   it("keeps every existing admin route reachable", () => {

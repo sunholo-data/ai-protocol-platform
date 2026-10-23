@@ -58,7 +58,7 @@ def _delegate_with_grant(skill: Any, user: User, flag: str) -> Any | None:
     is then made against the DOOR's skill id. The grant lives on the delegate that
     produced the surface, not on the skill these gates inspect, so a door fronting
     correctly-opted-in specialists gets wrongly denied (live 2026-07-21: ONE
-    Assistant → one-ppa-expert's entsoe_day_ahead_prices form 403'd on Submit).
+    Assistant → demo-ppa-expert's entsoe_day_ahead_prices form 403'd on Submit).
 
     Deny-by-default is preserved:
       * the delegate set is the same access-filtered set ``create_agent`` builds,

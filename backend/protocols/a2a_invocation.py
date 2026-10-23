@@ -105,8 +105,8 @@ class A2AAuthMiddleware(BaseHTTPMiddleware):
 
     # Paths under the /a2a mount that stay unauthenticated. The A2A
     # discovery card is public per the spec; everything else requires a
-    # Bearer token. Paths here are relative to the mount root (not the
-    # full URL), because the middleware sees post-mount paths.
+    # Bearer token. Written as POST-MOUNT paths (relative to the mount
+    # root), which is what `scope["path"]` holds inside a mounted sub-app.
     _UNAUTH_PATHS = ("/.well-known/agent.json", "/.well-known/agent-card.json")
 
     async def dispatch(
@@ -118,7 +118,26 @@ class A2AAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Per-A2A-spec discovery paths stay public.
-        if request.url.path in self._UNAUTH_PATHS:
+        #
+        # Match on `scope["path"]`, NOT `request.url.path`. Starlette's Mount
+        # rewrites `scope["path"]` to the post-mount path before delegating to
+        # the sub-app, but `Request.url` reconstructs the FULL path as
+        # `root_path + path` — so under the `/a2a` mount `request.url.path` is
+        # "/a2a/.well-known/agent.json" and never equalled a post-mount
+        # constant. This exemption had therefore never fired.
+        #
+        # It went unnoticed because every environment ran with
+        # A2A_INVOCATION_REQUIRE_AUTH=false, which returns above before
+        # reaching here. Turning auth on for prod (2026-09-01) surfaced it
+        # immediately: /a2a/.well-known/agent.json started 401ing while test
+        # still served 200, breaking A2A discovery for any peer that reads the
+        # card from the mount rather than the root route.
+        #
+        # The suffix check is deliberate belt-and-braces: it keeps the
+        # exemption correct if this app is ever mounted at a different prefix,
+        # or served unmounted where scope["path"] is already the full path.
+        path = request.scope.get("path") or request.url.path
+        if path in self._UNAUTH_PATHS or path.endswith(self._UNAUTH_PATHS):
             return await call_next(request)
 
         # Lazy import: auth.__init__ pulls Firebase Admin SDK on first

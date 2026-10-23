@@ -88,6 +88,12 @@ How to use it:
     Sources tab", "shown on the workspace").
   - URIs, `gs://` paths and ids in here are internal addressing —
     never print them to the user. Refer to things by name or title.
+  - A surface's `Selected:` line is what the user has ticked there RIGHT
+    NOW. "These", "the ticked ones", "this one", "those" mean exactly that
+    selection — act on those items and no others. The user re-ticks
+    between turns: a selection mentioned earlier in the conversation is
+    stale, only this line counts. Nothing ticked and they say "these"? Ask
+    which they mean.
 ============================================================
 """.strip()
 
@@ -118,6 +124,31 @@ def _truncate_values(value: Any) -> Any:
     return value
 
 
+def _selection_line(payload: dict[str, Any]) -> str | None:
+    """The user's current selection on a list surface, in words.
+
+    Convention for every list surface (two-way workbench §4.2): the data model
+    keeps ``selected: {key: bool}`` (what each CheckBox binds) and
+    ``items: [{key, ref, title, …}]``. Rendered by ref and title — never by key
+    or id — so the model can't echo an internal id. A key with no matching item
+    is counted, not printed. None when the surface has no selection map.
+    """
+    dm = payload.get("dataModel")
+    if not isinstance(dm, dict) or not isinstance(dm.get("selected"), dict):
+        return None
+    keys = [str(k) for k, v in dm["selected"].items() if v is True]
+    if not keys:
+        return "Selected now: nothing ticked."
+    items = dm.get("items") if isinstance(dm.get("items"), list) else []
+    by_key = {str(i["key"]): i for i in items if isinstance(i, dict) and i.get("key") is not None}
+    named = [by_key[k] for k in keys if k in by_key]
+    labels = [" ".join(p for p in (str(i.get("ref") or ""), f"“{i.get('title') or ''}”") if p) for i in named]
+    unnamed = len(keys) - len(named)
+    if unnamed:
+        labels.append(f"{unnamed} more not on the current list")
+    return f"Selected now ({len(keys)}): " + "; ".join(labels)
+
+
 def _format_surface_entry(surface_id: str, payload: dict[str, Any]) -> str:
     """Render one surface's combined view (dataModel + lastAction) as a
     readable sub-block. The caller passes the already-merged payload."""
@@ -125,7 +156,9 @@ def _format_surface_entry(surface_id: str, payload: dict[str, Any]) -> str:
         rendered = json.dumps(_truncate_values(payload), indent=2, default=str, sort_keys=True)
     except (TypeError, ValueError):
         rendered = repr(payload)
-    return f"## {surface_id}\n{rendered}"
+    selection = _selection_line(payload)
+    head = f"## {surface_id}\n{selection}" if selection else f"## {surface_id}"
+    return f"{head}\n{rendered}"
 
 
 def _collect_surfaces(state: dict[str, Any]) -> dict[str, dict[str, Any]]:

@@ -38,20 +38,20 @@ def test_import_from_bucket_posts_expected_body() -> None:
             "docs",
             "import-from-bucket",
             "--bucket",
-            "multivac-acme-energy-bucket",
+            "example-customer-documents",
             "--object",
             "PPAs/longform/example-A.pdf",
             "--skill",
-            "one-ppa-expert",
+            "demo-ppa-expert",
         ],
     )
     assert result.exit_code == 0, result.output
     assert route.called
     sent = json.loads(route.calls.last.request.content)
     assert sent == {
-        "bucket": "multivac-acme-energy-bucket",
+        "bucket": "example-customer-documents",
         "object": "PPAs/longform/example-A.pdf",
-        "skillId": "one-ppa-expert",
+        "skillId": "demo-ppa-expert",
     }
     assert "parsed" in result.output
     assert "doc-123" in result.output

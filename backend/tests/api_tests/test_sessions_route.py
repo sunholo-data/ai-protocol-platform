@@ -651,13 +651,13 @@ class TestEventsToDelegations:
     def test_transfer_to_agent_is_auto_delegation_not_a_tool(self):
         from protocols.sessions_route import _events_to_delegations, _events_to_tool_activity
 
-        fc = SimpleNamespace(name="transfer_to_agent", args={"agent_name": "one_ppa_expert"}, id="t1")
+        fc = SimpleNamespace(name="transfer_to_agent", args={"agent_name": "demo_ppa_expert"}, id="t1")
         events = [_event([_part(fc=fc)], 1_700_000_000.0)]
         delegs = _events_to_delegations(events)
         assert len(delegs) == 1
         assert delegs[0].mode == "auto"
-        assert delegs[0].target == "one_ppa_expert"
-        assert delegs[0].targetDisplay == "One ppa expert"
+        assert delegs[0].target == "demo_ppa_expert"
+        assert delegs[0].targetDisplay == "Demo ppa expert"
         # And it must NOT show up as a tool call.
         assert _events_to_tool_activity(events) == []
 

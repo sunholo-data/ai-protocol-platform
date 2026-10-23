@@ -1,10 +1,10 @@
-"""Voice provider HTTP routes - read-aloud (TTS) synthesize + config.
+"""Voice provider HTTP routes - dictation (STT), read-aloud (TTS), and config.
 
-Three routes (mounted so the final paths are /api/voice/...):
+Four routes (mounted so the final paths are /api/voice/...):
 
-  GET  /api/voice/config?skill_id=...  - return {tts:{provider,voice,language},
-                                         capabilities} for this skill (or the
-                                         platform default).
+  GET  /api/voice/config?skill_id=...  - return TTS and STT configuration for
+                                       this skill (or the platform default).
+  POST /api/voice/stt/transcribe       - short WAV recording -> draft text.
   POST /api/voice/tts/synthesize       - text -> audio/mpeg (cache-first).
   GET  /api/voice/voices               - curated voice list for a picker.
 
@@ -14,7 +14,8 @@ no bearer returns 401.
 
 Security: synthesized audio is returned as bytes over this authenticated
 route. We NEVER produce or return a public GCS URL - the cache bucket is
-read/written by the backend SA only.
+read/written by the backend SA only. Dictation audio is processed inline
+and is never saved to the cache or artifact service.
 
 Voice precedence (most specific wins):
   1. skill.persona.voice (SkillVoiceConfig)
@@ -31,17 +32,18 @@ Ported from the AIPLA fork (voice-provider-abstraction), v6.6.0 M2.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict, Field
 
 from auth import User, get_current_user
 from db.models import SkillVoiceConfig
 from skills.skill_config import get_skill
-from voice import DEFAULT_VOICE, get_tts
+from voice import DEFAULT_VOICE, get_stt, get_tts
 from voice.cache import CacheKey, TTSCache
 from voice.cost import tts_cost_usd
 from voice.voices import SUPPORTED_LANGS, get_voices_for_lang
@@ -120,7 +122,7 @@ def resolve_voice(skill: object | None) -> ResolvedVoice:
     """Resolve the effective voice for a skill - the single source of truth.
 
     Precedence: skill.persona.voice fills any field it sets; the platform
-    DEFAULT_VOICE (Aitana) fills every remaining gap so a skill with no
+    deployment settings, then DEFAULT_VOICE, fill every remaining gap so a skill with no
     persona voice still speaks rather than going silent.
     """
     rv = ResolvedVoice()
@@ -132,10 +134,10 @@ def resolve_voice(skill: object | None) -> ResolvedVoice:
         rv.rate = sv.rate if sv.rate is not None else 1.0
         rv.enabled = sv.enabled
         rv.prompt = sv.voice_prompt
-    # Fill remaining gaps from the platform default (Aitana).
-    rv.provider = rv.provider or DEFAULT_VOICE["provider"]
-    rv.voice = rv.voice or DEFAULT_VOICE["voice"]
-    rv.lang = rv.lang or DEFAULT_VOICE["language"]
+    # A fork can select its own fallback without editing shared platform code.
+    rv.provider = rv.provider or os.getenv("VOICE_TTS_PROVIDER") or DEFAULT_VOICE["provider"]
+    rv.voice = rv.voice or os.getenv("VOICE_TTS_VOICE") or DEFAULT_VOICE["voice"]
+    rv.lang = rv.lang or os.getenv("VOICE_TTS_LANGUAGE") or DEFAULT_VOICE["language"]
     return rv
 
 
@@ -189,6 +191,7 @@ async def get_config(user: _CurrentUser, skill_id: str | None = None) -> dict[st
     skill = _resolve(skill_id) if skill_id else None
     rv = resolve_voice(skill)
     tts = get_tts(rv.provider)
+    stt = _dictation_provider(skill)
 
     logger.info(
         "voice/config skill_id=%r skill_found=%s tts.provider=%s tts.voice=%s tts.lang=%s",
@@ -200,6 +203,12 @@ async def get_config(user: _CurrentUser, skill_id: str | None = None) -> dict[st
     )
 
     return {
+        "stt": {
+            "provider": stt.name,
+            "enabled": stt.describe()["stt"],
+            "capabilities": stt.describe(),
+            "maxDurationSeconds": 60,
+        },
         "tts": {
             "provider": tts.name,
             "voice": rv.voice,
@@ -335,3 +344,60 @@ def _audio_response(audio: bytes, mime: str, provider_name: str, *, cache_hit: b
             "X-Voice-Cost-Usd": f"{cost:.6f}",
         },
     )
+
+
+def _dictation_provider(skill):
+    voice = getattr(getattr(skill, "persona", None), "voice", None)
+    if voice is not None and not voice.voice_input_enabled:
+        return get_stt("disabled")
+    return get_stt(getattr(voice, "stt_provider", None), getattr(voice, "stt_model", None))
+
+
+@router.post("/stt/transcribe")
+async def transcribe(
+    user: _CurrentUser,
+    audio: Annotated[UploadFile, File()],
+    lang: str = Form("auto", max_length=35),
+    skill_id: str | None = Form(None, alias="skillId", max_length=128),
+) -> dict[str, str]:
+    """Authenticated, bounded clip transcription; no platform audio storage."""
+    import io
+    import wave
+
+    from auth.access_context import build_access_context
+    from voice.providers.gemini_stt import MAX_AUDIO_BYTES, MAX_DURATION_SECONDS
+
+    skill = _resolve(skill_id) if skill_id else None
+    if skill_id and (skill is None or not build_access_context(user).can_access_skill(skill)):
+        raise HTTPException(status_code=404, detail="Skill not found")
+    provider = _dictation_provider(skill)
+    if not provider.describe()["stt"]:
+        raise HTTPException(status_code=503, detail="Speech-to-text is not enabled")
+    raw = await audio.read(MAX_AUDIO_BYTES + 1)
+    if len(raw) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Audio clip is too large")
+    # AIPLA's browser recorder emits WAV. Validate actual duration rather than
+    # trusting a client-provided duration field to enforce the cost bound.
+    try:
+        with wave.open(io.BytesIO(raw)) as clip:
+            if clip.getnchannels() != 1 or clip.getsampwidth() != 2:
+                raise ValueError("Expected mono 16-bit PCM WAV")
+            duration = clip.getnframes() / clip.getframerate()
+            if duration <= 0 or duration > MAX_DURATION_SECONDS + 1:
+                raise ValueError("Record between 0 and 60 seconds of audio")
+            if len(clip.readframes(clip.getnframes())) != clip.getnframes() * 2:
+                raise ValueError("Incomplete WAV audio")
+    except (wave.Error, EOFError, ValueError, ZeroDivisionError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid WAV clip or clip longer than 60 seconds") from exc
+    with _tracer.start_as_current_span("voice.transcribe") as span:
+        span.set_attribute("voice.provider", provider.name)
+        span.set_attribute("voice.lang", lang)
+        span.set_attribute("voice.duration_seconds", duration)
+        try:
+            text = await provider.transcribe(raw, "audio/wav", lang, None)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail="Transcription service unavailable") from exc
+        span.set_attribute("voice.transcript_chars", len(text))
+        return {"text": text}

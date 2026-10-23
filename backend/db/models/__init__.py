@@ -62,6 +62,21 @@ class DelegationMode(StrEnum):
 # (an A2UI confirm card in chat); "confirm_with_fields" = OK + collected inputs.
 DelegateFloor = Literal["auto", "confirm", "confirm_with_fields"]
 
+# How the parent REACHES a delegate — a different axis from `floor`, which is
+# how much user consent it needs first (v6.31.0 FANOUT M1).
+#   - ``transfer`` : the delegate is an ADK ``sub_agent``; the parent hands the
+#                    turn over via ``transfer_to_agent`` and does not get it
+#                    back. One-way, and the default — every existing skill.
+#   - ``tool``     : the delegate is wrapped in ``AgentTool`` and CALLED, in
+#                    process, returning its final text to the parent, which can
+#                    then call it again (concurrently — ADK gathers parallel
+#                    function calls) and merge. This is what fan-out needs, and
+#                    the reason it is call-and-return rather than a transfer.
+# ``tool`` is only meaningful with ``floor="auto"``: an AgentTool call is issued
+# by the model mid-turn and has no seam at which to ask the user first. The
+# combination is rejected at build time rather than silently dropping consent.
+DelegateInvoke = Literal["transfer", "tool"]
+
 
 class DelegateRule(BaseModel):
     """One ``delegation.allow`` entry with its confirmation floor. A bare string
@@ -70,6 +85,8 @@ class DelegateRule(BaseModel):
 
     skill: str = Field(min_length=1)
     floor: DelegateFloor = "auto"
+    # v6.31.0 FANOUT M1 — see DelegateInvoke. Defaults to today's behaviour.
+    invoke: DelegateInvoke = "transfer"
     # Optional default field specs collected for a confirm_with_fields handoff
     # (the agent may author its own at runtime; these are the fallback). Raw
     # dicts — validated when the handoff tool builds the elicitation envelope,
@@ -196,7 +213,7 @@ class SkillMetadata(BaseModel):
     job: bool = False
     job_floor: DelegateFloor = Field(default="confirm", alias="jobFloor")
     # v6.11.0 — dropdown grouping. Free-form so forks define their own taxonomy;
-    # the ONE tenant uses `assistant` (general front doors), `specialist`
+    # the example tenant uses `assistant` (general front doors), `specialist`
     # (domain experts — PPA, compare), `tool` (narrow utilities — researcher).
     # `None` falls into an "Other skills" bucket. This is a PRESENTATION hint
     # only (the skill dropdown groups by it); it never gates access — that stays
@@ -243,7 +260,7 @@ class ExampleDocument(BaseModel):
     ``bucket`` is OPTIONAL: when empty, the skills API fills it per-request from
     the caller's tenant ``documents_bucket`` (``resolve_documents_bucket``), so a
     shared SKILL.md points every env's library at that env's own llmops bucket
-    (which is what aitana3 indexes) — no hardcoded per-env bucket, no customer
+    (which is what example-datastore indexes) — no hardcoded per-env bucket, no customer
     project. See `_fill_welcome_buckets` in skills/routes.py."""
 
     bucket: str = ""
@@ -389,13 +406,13 @@ class SkillShell(BaseModel):
         return v
 
 
-# === v6.6.0 ONE-FORK-CONVERGENCE: per-skill persona (avatar + style + voice) ===
+# === v6.6.0 TENANT-FORK-CONVERGENCE: per-skill persona (avatar + style + voice) ===
 
 
 class SkillVoiceConfig(BaseModel):
     """Text-to-speech voice for a skill's read-aloud output. Consumed by the
     /api/voice/* routes (v6.6.0 M2). All fields optional; unset falls back to
-    the skill/env default. ONE's default is Aitana — a warm Spanish female
+    the skill/env default. the tenant's default is Aitana — a warm Spanish female
     professional voice on the premium tier (es-ES-Chirp3-HD-Aoede)."""
 
     # Read-aloud on/off for this skill. Default True so existing skills keep
@@ -407,6 +424,10 @@ class SkillVoiceConfig(BaseModel):
     language: str | None = None  # BCP-47 short, e.g. "es"
     rate: float = 1.0  # 0.25-4.0 (1.0 = natural)
     voice_prompt: str | None = Field(default=None, alias="voicePrompt")  # Gemini-TTS style direction
+    # Dictation is independent of read-aloud; provider defaults to disabled.
+    voice_input_enabled: bool = Field(default=True, alias="voiceInputEnabled")
+    stt_provider: str | None = Field(default=None, alias="sttProvider")
+    stt_model: str | None = Field(default=None, alias="sttModel")  # Gemini registry id / tier
 
     model_config = {"populate_by_name": True}
 
@@ -485,7 +506,7 @@ class SkillConfig(BaseModel):
     # v6.4.0 SHELL-MODES: per-skill page-level shell shape. None = chat-primary
     # (existing ChatShell). Optional / nullable / additive.
     shell: SkillShell | None = None
-    # v6.6.0 ONE-FORK-CONVERGENCE: per-skill persona (avatar + style + voice).
+    # v6.6.0 TENANT-FORK-CONVERGENCE: per-skill persona (avatar + style + voice).
     # Optional / nullable / additive. Legacy `avatar`-only records fold in below.
     persona: SkillPersona | None = None
 
@@ -525,8 +546,8 @@ class SkillConfig(BaseModel):
     @classmethod
     def _validate_instructions(cls, v: str) -> str:
         # 20K, not 10K: composed platform skills (SKILL.md body + standard
-        # tool-error/persona blocks) legitimately run ~10K — one-doc-compare
-        # is 9.4K, one-ppa-expert 10.3K. The old 10K cap turned normal edits
+        # tool-error/persona blocks) legitimately run ~10K — demo-doc-compare
+        # is 9.4K, demo-ppa-expert 10.3K. The old 10K cap turned normal edits
         # into corruption that blanked the SkillsBar (deploy Trap 22).
         if len(v) > 20_000:
             raise ValueError("instructions must be at most 20,000 characters")
@@ -576,6 +597,7 @@ class UserProfile(BaseModel):
     created_at: float = Field(default=0, alias="createdAt")
     last_active: float = Field(default=0, alias="lastActive")
     rag_corpus_name: str | None = Field(default=None, alias="ragCorpusName")
+    rag_parsed_text_corpus_name: str | None = Field(default=None, alias="ragParsedTextCorpusName")
 
     model_config = {"populate_by_name": True}
 

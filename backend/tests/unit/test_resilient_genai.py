@@ -105,35 +105,40 @@ async def test_fatal_error_raises_without_fallback():
 
 
 def test_chain_for_pro_has_eu_pin_and_legacy_model_fallback(monkeypatch):
-    # eu-strict (prod): pro is gemini-3.7-flash pinned to the "eu" jurisdictional
-    # multi-region endpoint (2026-08-13 — was 2.5-pro, which EOLs 2026-10-16). No
-    # same-model cross-region rung is possible (no second EU location for this
-    # endpoint type — see the gemini-3-7-flash-eu registry entry), so the chain
-    # leans on the legacy gemini-2-5-pro sibling until it retires.
+    # eu-strict (prod): pro is gemini-3.8-flash pinned to the "eu" jurisdictional
+    # multi-region endpoint (2026-09-03 — was 3.7-flash, itself replacing 2.5-pro,
+    # which EOLs 2026-10-16). No same-model cross-region rung is possible (no
+    # second EU location for this endpoint type — see the gemini-3-8-flash-eu
+    # registry entry), so the chain falls to the 3.7 EU sibling and then leans on
+    # the legacy gemini-2-5-pro sibling until it retires.
     monkeypatch.setenv("MODEL_RESIDENCY_POLICY", "eu-strict")
     chain = rg.gemini_chain_for("pro")
     labels = [r.label for r in chain]
-    assert chain[0].api_name == "gemini-3.7-flash"
+    assert chain[0].api_name == "gemini-3.8-flash"
     assert chain[0].location == "eu"
-    assert any("gemini-2.5-pro" in label for label in labels[1:])  # legacy model fallback rung
+    # 2.5 retires 2026-10-16, so the legacy 2.5-pro rung is
+    # gone — the chain must never fall to a retired model, and the last rung is a
+    # 3.x flash on a DIFFERENT EU endpoint (europe-west3) for real independence.
+    assert not any("gemini-2." in label for label in labels)
+    assert "gemini-3.5-flash@europe-west3" in labels[1:]
 
 
 def test_chain_for_pro_under_unrestricted_pins_global_and_has_model_fallback(monkeypatch):
-    # unrestricted (dev/test): pro is the faster global-endpoint 3.7-flash
-    # (2026-08-13 — was 3.6-flash). Rung 0 MUST pin location="global" — the
+    # unrestricted (dev/test): pro is the faster global-endpoint 3.8-flash
+    # (2026-09-03 — was 3.7-flash). Rung 0 MUST pin location="global" — the
     # global endpoint is where these models serve; the default region-pinned
     # client (europe-west1) 404s them (the live PPA-pipeline failure this fix
     # addresses). A cross-*region* rung is still impossible (global serves
-    # nowhere else), so the chain is SHORTER (2 rungs) and leans on the EU
-    # sibling model fallback at the default region.
+    # nowhere else), so the chain leans on model fallbacks. Since 2.5 retired
+    # (2026-10-16) the last rung is the EU 3.x entry, pinned to its own EU
+    # region (global -> EU narrows egress, so it is always legal).
     monkeypatch.setenv("MODEL_RESIDENCY_POLICY", "unrestricted")
     chain = rg.gemini_chain_for("pro")
     labels = [r.label for r in chain]
-    assert chain[0].api_name.startswith("gemini-3.7-flash")
+    assert chain[0].api_name.startswith("gemini-3.8-flash")
     assert chain[0].location == "global"  # pinned to the global endpoint, not europe-west1
-    assert not any("@europe-west" in label for label in labels)  # no cross-region rung possible
-    assert any("flash" in label for label in labels[1:])  # EU sibling model fallback survives
-    assert chain[-1].location is None  # EU fallback rides the default region-pinned client
+    assert not any("gemini-2." in label for label in labels)  # never a retired 2.x rung
+    assert chain[-1].location.startswith("europe-")  # EU 3.x fallback, its own region pin
 
 
 def test_chain_for_lite_under_unrestricted_pins_global(monkeypatch):
@@ -144,9 +149,9 @@ def test_chain_for_lite_under_unrestricted_pins_global(monkeypatch):
     chain = rg.gemini_chain_for("lite")
     assert chain[0].api_name == "gemini-3.5-flash-lite"
     assert chain[0].location == "global"
-    # Falls back to the EU sibling (gemini-2.5-flash-lite) at the default region.
-    assert chain[1].api_name == "gemini-2.5-flash-lite"
-    assert chain[1].location is None
+    # Falls back to the EU 3.x sibling on the "eu" multi-region (2.5 retired 2026-10-16).
+    assert chain[1].api_name == "gemini-3.5-flash-lite"
+    assert chain[1].location == "eu"
 
 
 def test_chain_for_lite_under_eu_strict_stays_eu_no_global(monkeypatch):

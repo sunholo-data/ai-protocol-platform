@@ -3,7 +3,7 @@
 // A compact pre-run config surface rendered INLINE in the CompareLauncher card
 // (workbench), NOT in chat. Design-doc Open Question 1 asked "pure A2UI in chat
 // vs bespoke React"; the resolution (recorded in the sprint) is bespoke React
-// in the workbench card, because `one-doc-compare` is a Model-B skill — the
+// in the workbench card, because `demo-doc-compare` is a Model-B skill — the
 // model cannot emit an A2UI form into the chat area, and the out-of-model A2UI
 // emitter is scoped to tool RESULTS, not pre-run input. So the config lives
 // beside the launcher and its output rides the same `start_compare`

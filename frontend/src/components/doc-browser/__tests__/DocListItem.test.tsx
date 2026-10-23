@@ -1,8 +1,44 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParsedDocument } from "@/hooks/useDocBrowser";
 import { DocListItem } from "../DocListItem";
+import { __clearThumbnailCache } from "@/components/document/DocumentThumbnail";
+
+vi.mock("@/lib/apiClient", () => ({ fetchWithAuth: vi.fn() }));
+import { fetchWithAuth } from "@/lib/apiClient";
+const mockFetch = vi.mocked(fetchWithAuth);
+
+// The non-image preview path loads the record via useDocument; stub it so the
+// hover tests only see the thumbnail route.
+vi.mock("@/hooks/useDocument", () => ({
+  useDocument: vi.fn(() => ({ doc: null, isLoading: true, error: null, retry: vi.fn() })),
+}));
+import { useDocument } from "@/hooks/useDocument";
+const mockUseDocument = vi.mocked(useDocument);
+
+beforeEach(() => {
+  __clearThumbnailCache();
+  mockFetch.mockReset();
+  mockFetch.mockResolvedValue({
+    ok: true,
+    blob: async () => new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" }),
+  } as unknown as Response);
+  mockUseDocument.mockClear();
+  if (!("createObjectURL" in URL)) {
+    // @ts-expect-error test shim
+    URL.createObjectURL = vi.fn(() => "blob:mock");
+    // @ts-expect-error test shim
+    URL.revokeObjectURL = vi.fn();
+  } else {
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  }
+});
+
+function thumbCalls(): string[] {
+  return mockFetch.mock.calls.map(([u]) => String(u)).filter((u) => u.includes("/thumbnail"));
+}
 
 function makeDoc(overrides: Partial<ParsedDocument> = {}): ParsedDocument {
   return {
@@ -80,5 +116,41 @@ describe("DocListItem", () => {
     expect(row).not.toBeNull();
     await userEvent.click(row!);
     expect(onClick).toHaveBeenCalledWith(doc);
+  });
+});
+
+describe("DocListItem — hover preview", () => {
+  it("fetches nothing until the row is hovered, then the owner-checked doc thumbnail route (pdf)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<DocListItem doc={makeDoc({ id: "p1", originalFilename: "a.pdf", sourceFormat: "pdf" })} onClick={vi.fn()} />);
+      expect(thumbCalls()).toEqual([]);
+      const trigger = screen.getByText("a.pdf").closest("[role=button]") as HTMLElement;
+      fireEvent.pointerMove(trigger, { pointerType: "mouse" });
+      // Still nothing inside the hover-intent delay.
+      expect(thumbCalls()).toEqual([]);
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+      await waitFor(() => expect(thumbCalls()).toEqual(["/api/proxy/api/documents/p1/thumbnail?width=400"]));
+      expect(mockUseDocument).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never calls the thumbnail route for a format the backend can't render (docx)", async () => {
+    render(<DocListItem doc={makeDoc({ id: "w1", originalFilename: "a.docx", sourceFormat: "docx" })} onClick={vi.fn()} />);
+    await userEvent.tab(); // Radix opens on focus without the hover delay
+    await waitFor(() => expect(mockUseDocument).toHaveBeenCalledWith("w1"));
+    expect(thumbCalls()).toEqual([]);
+  });
+
+  it("shows 'Preview unavailable' when the thumbnail fails", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 502 } as unknown as Response);
+    render(<DocListItem doc={makeDoc({ id: "bad1", originalFilename: "b.png", sourceFormat: "png" })} onClick={vi.fn()} />);
+    await userEvent.tab();
+    expect((await screen.findAllByText("Preview unavailable")).length).toBeGreaterThan(0);
+    expect(thumbCalls()).toEqual(["/api/proxy/api/documents/bad1/thumbnail?width=400"]);
   });
 });

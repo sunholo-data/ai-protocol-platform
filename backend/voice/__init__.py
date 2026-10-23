@@ -7,11 +7,11 @@ Public surface:
         override > env > default.
     `DEFAULT_VOICE` - the v6 platform default (Aitana, es-ES-Chirp3-HD-Aoede).
 
-Ported from the AIPLA fork; STT / recording / class layers stripped.
+Ported from AIPLA; lesson recording and classroom settings remain downstream.
 """
 
-from voice.base import TTSProvider, VoiceCapabilities
-from voice.registry import get_tts
+from voice.base import STTProvider, TTSProvider, VoiceCapabilities
+from voice.registry import get_stt, get_tts
 
 # The ONE / v6 platform default voice: Aitana, a warm Spanish female
 # professional voice on the premium Chirp3-HD tier (the best quality).
@@ -27,7 +27,9 @@ DEFAULT_VOICE = {
 
 __all__ = [
     "DEFAULT_VOICE",
+    "STTProvider",
     "TTSProvider",
     "VoiceCapabilities",
+    "get_stt",
     "get_tts",
 ]

@@ -47,7 +47,7 @@ async def test_document_loader_artifact_is_awaited_and_retrievable(monkeypatch):
     monkeypatch.setattr("adk.callbacks._RAG_DOCUMENTS_ENABLED", False, raising=False)
     monkeypatch.setattr(
         "tools.documents.context.build_document_context",
-        lambda doc_id, mode="blocks": ("", [{"id": "b1", "text": "hello"}]),
+        lambda doc_id, mode="blocks", caller_uid=None: ("", [{"id": "b1", "text": "hello"}]),
     )
 
     artifact_service = InMemoryArtifactService()

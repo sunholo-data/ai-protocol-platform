@@ -146,7 +146,7 @@ def _enforce_action_triggered_opt_in(skill_id: str, user: User) -> None:
     # the DOOR's skill id. The grant then sits on the delegate that produced the
     # form, not on the skill this gate checks, so a door with correctly-opted-in
     # specialists 403'd ("This action isn't permitted for this skill", live
-    # 2026-07-21 on ONE Assistant → one-ppa-expert's entsoe_day_ahead_prices).
+    # 2026-07-21 on Example Assistant → demo-ppa-expert's entsoe_day_ahead_prices).
     #
     # Accept when any ACCESS-FILTERED delegate is opted in, using the same
     # resolution `create_agent` uses — so the set considered here is exactly the

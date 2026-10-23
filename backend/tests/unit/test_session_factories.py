@@ -29,15 +29,21 @@ class TestGetSessionService:
         }
         with patch.dict("os.environ", env, clear=True):
             svc = session_mod.get_session_service()
-        # Assert the CONTRACT (a Vertex-backed service), not an exact class name:
-        # since 8dcbaf5 the factory returns ResilientVertexSessionService, which
-        # SUBCLASSES VertexAiSessionService to add write retry + loud failure
-        # (issue #30). isinstance still catches the regression that matters —
-        # silently falling back to InMemory, which loses every session.
+        # Assert the CONTRACT (a Vertex-backed service), not an exact class name.
+        # Since 8dcbaf5 the factory returns ResilientVertexSessionService (write
+        # retry + loud failure, issue #30); since the session memo it is wrapped
+        # in ReadMemoSessionService (one fetch per turn, no write on the
+        # critical path). The regression that matters is still the same one —
+        # silently falling back to InMemory, which loses every session — so
+        # unwrap and check the Vertex service is what is underneath.
         from google.adk.sessions import VertexAiSessionService
 
-        assert isinstance(svc, VertexAiSessionService)
-        assert type(svc).__name__ == "ResilientVertexSessionService"
+        from adk.session_memo import ReadMemoSessionService
+
+        assert isinstance(svc, ReadMemoSessionService)
+        inner = svc._inner
+        assert isinstance(inner, VertexAiSessionService)
+        assert type(inner).__name__ == "ResilientVertexSessionService"
 
 
 class TestGetMemoryService:

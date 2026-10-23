@@ -79,6 +79,22 @@ class TestChunkMessage:
         with pytest.raises(ValueError):
             chunk_message("hello", max_length=-5)
 
+    @pytest.mark.parametrize("angle", [False, True])
+    def test_preserves_whole_link_when_reply_crosses_message_boundary(self, angle: bool) -> None:
+        url = "https://github.com/example/repo/issues/new?body=" + "x" * 1550
+        link = f"[Create GitHub issue]({'<' + url + '>' if angle else url})"
+        prefix = "Proposal ready. " * 50
+        chunks = chunk_message(prefix + link + "\nReview before submitting.", max_length=2000, preserve_links=True)
+        assert all(len(chunk) <= 2000 for chunk in chunks)
+        assert sum(link in chunk for chunk in chunks) == 1
+        assert "".join(chunks) == prefix + link + "\nReview before submitting."
+
+    def test_keeps_link_label_intact_when_link_starts_the_message(self) -> None:
+        link = "[Create GitHub issue](<https://github.com/issues/new?body=hello>)"
+        chunks = chunk_message(link + "x" * 2000, max_length=2000, preserve_links=True)
+        assert chunks[0] == link
+        assert "".join(chunks) == link + "x" * 2000
+
     def test_chunks_strip_leading_whitespace(self) -> None:
         # Word-boundary split leaves a leading space on the next chunk;
         # we strip so users don't see ' continued' in the next message.

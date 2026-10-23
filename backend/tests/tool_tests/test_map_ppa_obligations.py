@@ -982,7 +982,7 @@ def test_synthetic_fixture_golden_settlement_lines():
 # ---------------------------------------------------------------------------
 # 7.8 M1 — structured elicitation + build-from-assumptions (the DEMO UNBLOCK)
 #
-# Correctness-critical: the ONE PPA corpus is template contracts (all `[●]`),
+# Correctness-critical: the Example PPA corpus is template contracts (all `[●]`),
 # so the mapper refuses. Elicitation lets the user supply the blanks and the
 # build RESOLVES the parsed formulas (delay-LD `penPerDay = 150 x capacity`)
 # deterministically in Python. A wrong resolved LD/settlement number is

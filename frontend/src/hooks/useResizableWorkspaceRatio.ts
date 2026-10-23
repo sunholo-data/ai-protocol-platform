@@ -14,9 +14,20 @@ export const RATIO_MAX = 1.0;
  *
  * Hardcoded for now — the `SkillConfig.uiHints.defaultWorkspaceRatio`
  * schema field is a future addition. */
-export const DEFAULT_RATIOS: Record<string, number> = {
-  "one-doc-compare": 0.6, // workbench centerpiece; gets more room
-};
+export function parseDefaultRatios(raw: string | undefined): Record<string, number> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter(([, value]) =>
+      typeof value === "number" && Number.isFinite(value) && value >= RATIO_MIN && value <= RATIO_MAX,
+    ));
+  } catch {
+    return {};
+  }
+}
+
+export const DEFAULT_RATIOS = parseDefaultRatios(process.env.NEXT_PUBLIC_WORKSPACE_DEFAULT_RATIOS);
 
 /** Half-and-half default when content arrives. Skills that want more or
  * less workspace room override via DEFAULT_RATIOS. */

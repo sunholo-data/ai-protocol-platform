@@ -31,9 +31,9 @@ import random
 import time
 from typing import Any
 
-from google.adk.models.base_llm import BaseLlm
+from google.adk.models.base_llm import BaseLlm, LlmCapabilities
 
-from adk.model_errors import ErrorClass, ModelTurnError, classify
+from adk.model_errors import ErrorClass, ModelTurnError, SilentStallError, classify
 from adk.schema_conformance import sanitize_function_declarations
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,33 @@ BACKOFF_CAP_SECONDS = 8.0
 # Question tracks a shared-store upgrade path).
 COOLDOWN_THRESHOLD = 3
 COOLDOWN_SECONDS = 120.0
+
+#: Seconds a STREAMED request may stay silent before it is abandoned and
+#: retried as a ``SilentStallError``. Env ``MODEL_FIRST_TOKEN_DEADLINE_S``
+#: overrides; ``0`` disables. 10 s is the measured gap in a bimodal tail
+#: (flash-lite on Vertex: 108/114 turns under 6.1 s, then 14.9 s and up),
+#: and leaves the retry room to land before a 30 s client hang-timeout.
+#: Non-streamed calls are never bounded: their single chunk IS the answer.
+FIRST_TOKEN_DEADLINE_ENV = "MODEL_FIRST_TOKEN_DEADLINE_S"
+FIRST_TOKEN_DEADLINE_S = 10.0
+
+#: That 10 s was measured on SMALL prompts, and prefill grows with the prompt.
+#: Probed 2026-10-21 (gemini-3.8-flash, global, dynamic thinking with
+#: include_thoughts, n=2 per size) — first chunk 2.9-3.5 s at 40K chars,
+#: 4.2-5.4 s at 400K, 9.6-15.4 s at 1.2M, 15.2-23.5 s at 2.4M. A flat 10 s
+#: killed a document-heavy specialist's turns on a deployed fork's prod whose
+#: long history put the first chunk
+#: at ~10-12 s, on EVERY member of the chain, three attempts each (2026-10-16
+#: and 10-21). So the deadline grows by this many seconds per million prompt
+#: characters...
+FIRST_TOKEN_DEADLINE_PER_MCHAR_S = 10.0
+#: ...doubles once after a stall in the same turn (a request that needs 11 s
+#: never fits in 10 s however often it is re-sent, and the size estimate can't
+#: see everything)...
+FIRST_TOKEN_STALL_ESCALATION = 2.0
+#: ...and never exceeds this. Genuine stalls ran 48-105 s, and the AG-UI
+#: heartbeat keeps the client stream alive meanwhile.
+FIRST_TOKEN_DEADLINE_MAX_S = 60.0
 
 MODEL_RETRY_EVENT = "MODEL_RETRY"
 MODEL_FALLBACK_EVENT = "MODEL_FALLBACK"
@@ -101,6 +128,79 @@ def _provider_of(model: Any) -> str:
     if model_name.startswith("gemini"):
         return "gemini"
     return type(model).__name__.lower()
+
+
+def first_token_deadline() -> float | None:
+    """The configured first-token deadline in seconds, or ``None`` when disabled."""
+    raw = (os.environ.get(FIRST_TOKEN_DEADLINE_ENV) or "").strip()
+    if not raw:
+        return FIRST_TOKEN_DEADLINE_S
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("%s=%r is not a number — using %.0fs", FIRST_TOKEN_DEADLINE_ENV, raw, FIRST_TOKEN_DEADLINE_S)
+        return FIRST_TOKEN_DEADLINE_S
+    return value if value > 0 else None
+
+
+def _prompt_chars(llm_request: Any) -> int:
+    """Rough size of what the model must read before it can say anything: the
+    system instruction plus every text, tool call and tool result in the
+    history. Never raises — a wrong estimate only moves a deadline."""
+    total = 0
+    try:
+        instruction = getattr(getattr(llm_request, "config", None), "system_instruction", None)
+        if isinstance(instruction, str):
+            total += len(instruction)
+        elif instruction is not None:
+            total += sum(len(getattr(p, "text", None) or "") for p in getattr(instruction, "parts", None) or [])
+        for content in getattr(llm_request, "contents", None) or []:
+            for part in getattr(content, "parts", None) or []:
+                total += len(getattr(part, "text", None) or "")
+                call = getattr(part, "function_call", None)
+                if call is not None:
+                    total += len(str(getattr(call, "args", None) or ""))
+                result = getattr(part, "function_response", None)
+                if result is not None:
+                    total += len(str(getattr(result, "response", None) or ""))
+    except Exception as exc:
+        logger.debug("first-token: prompt size estimate failed (%r) — using what was counted", exc)
+    return total
+
+
+def first_token_deadline_for(prompt_chars: int, stalls: int = 0) -> float | None:
+    """The first-token deadline for one attempt: the configured base, grown with
+    the prompt and once more after a stall, capped. ``None`` when disabled."""
+    base = first_token_deadline()
+    if base is None:
+        return None
+    deadline = base + FIRST_TOKEN_DEADLINE_PER_MCHAR_S * prompt_chars / 1_000_000
+    if stalls:
+        deadline *= FIRST_TOKEN_STALL_ESCALATION
+    return min(deadline, max(base, FIRST_TOKEN_DEADLINE_MAX_S))
+
+
+async def _stream_with_first_token_deadline(stream: Any, deadline_s: float, model: str):
+    """Yield from ``stream``; if its FIRST item takes longer than ``deadline_s``,
+    close it and raise ``SilentStallError``. Once anything has arrived the
+    stream runs to completion however long the rest takes — a slow tail is
+    not a stall."""
+    iterator = stream.__aiter__()
+    try:
+        first = await asyncio.wait_for(iterator.__anext__(), timeout=deadline_s)
+    except StopAsyncIteration:
+        return
+    except TimeoutError:
+        aclose = getattr(iterator, "aclose", None)
+        if aclose is not None:
+            try:
+                await aclose()
+            except BaseException as exc:  # a dead stream may object to closing; irrelevant now
+                logger.debug("first-token: aclose after timeout raised %r (ignored)", exc)
+        raise SilentStallError(deadline_s, model) from None
+    yield first
+    async for item in iterator:
+        yield item
 
 
 def _backoff_delay(attempt: int) -> float:
@@ -273,6 +373,18 @@ class ResilientLlm(BaseLlm):
             **kwargs,
         )
 
+    @property
+    def capabilities(self) -> LlmCapabilities:
+        # ADK builds the request before retry/fallback chooses a member. Only
+        # advertise schema+tools when EVERY possible recipient supports it;
+        # a union (or the primary alone) can send an invalid request to fallback.
+        return LlmCapabilities(
+            output_schema_and_tools=all(
+                getattr(getattr(member, "capabilities", None), "output_schema_and_tools", False)
+                for member in self.chain
+            )
+        )
+
     # -- events ---------------------------------------------------------------
 
     def _emit(self, name: str, value: dict) -> None:
@@ -300,6 +412,10 @@ class ResilientLlm(BaseLlm):
         last_class: ErrorClass | None = None
         last_model = self.model
         last_exc: Exception | None = None
+        # Every member is sent the same request, so size it once; stalls count
+        # across the whole chain for the same reason.
+        prompt_chars = _prompt_chars(llm_request) if stream else 0
+        stalls = 0
 
         for idx, member in enumerate(self.chain):
             provider = _provider_of(member)
@@ -354,7 +470,11 @@ class ResilientLlm(BaseLlm):
                         except Exception:  # best effort — never break the turn on this
                             pass
                     _maybe_inject_fault(provider)
-                    async for response in member.generate_content_async(llm_request, stream):
+                    upstream = member.generate_content_async(llm_request, stream)
+                    deadline = first_token_deadline_for(prompt_chars, stalls) if stream else None
+                    if deadline is not None:
+                        upstream = _stream_with_first_token_deadline(upstream, deadline, member_model or "unknown")
+                    async for response in upstream:
                         if not visible and _has_visible_output(response):
                             visible = True
                         yield response
@@ -363,6 +483,8 @@ class ResilientLlm(BaseLlm):
                 except Exception as exc:
                     error_class = classify(exc)
                     last_class, last_model, last_exc = error_class, getattr(member, "model", "unknown"), exc
+                    if isinstance(exc, SilentStallError):
+                        stalls += 1
 
                     if visible:
                         # Answer content already reached the user — a retry or

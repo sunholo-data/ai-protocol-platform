@@ -47,10 +47,10 @@ describe("SourcesArtefactTab (6.11)", () => {
     setSources([
       {
         title: "Report 2024.pdf",
-        uri: "gs://dev-bucket/aitana3/cases/x/Report 2024.pdf",
+        uri: "gs://dev-bucket/example-datastore/cases/x/Report 2024.pdf",
         kind: "gcs",
         bucket: "dev-bucket",
-        object: "aitana3/cases/x/Report 2024.pdf",
+        object: "example-datastore/cases/x/Report 2024.pdf",
         filename: "Report 2024.pdf",
       },
     ]);
@@ -63,7 +63,7 @@ describe("SourcesArtefactTab (6.11)", () => {
 
     fireEvent.click(btn);
     await waitFor(() =>
-      expect(onOpenSource).toHaveBeenCalledWith("dev-bucket", "aitana3/cases/x/Report 2024.pdf"),
+      expect(onOpenSource).toHaveBeenCalledWith("dev-bucket", "example-datastore/cases/x/Report 2024.pdf"),
     );
   });
 

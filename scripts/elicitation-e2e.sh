@@ -11,9 +11,9 @@
 #
 # Usage:  scripts/elicitation-e2e.sh [dev|test]     (default dev)
 #
-# Streams against a SPECIALIST (one-ppa-expert), NOT the front door — the fast
+# Streams against a SPECIALIST (demo-ppa-expert), NOT the front door — the fast
 # front door opts out (`enableConfirmation:false`) for TTFT, so it has no
-# request_confirmation tool. The whoami-test user has ONE access + full tool
+# request_confirmation tool. The whoami-test user has tenant access + full tool
 # perms, so this exercises the real deployed backend.
 #
 # Scope: asserts the AI authors + the form EMITS on the wire (placement:"chat").
@@ -46,13 +46,13 @@ fi
 # Stream to a skill that carries request_confirmation (the front door opts out).
 # Default to a pure-GEMINI skill so the test is independent of Anthropic billing
 # (a Claude-tier skill RUN_ERRORs when the org hits its Anthropic usage cap —
-# env, not a render bug). Override with SKILL_SLUG=one-ppa-expert etc.
+# env, not a render bug). Override with SKILL_SLUG=demo-ppa-expert etc.
 SKILL_SLUG="${SKILL_SLUG:-general-assistant}"
 SKILL_ID="$(curl -s "${HOST}/api/proxy/api/skills/by-slug/aitana-platform/${SKILL_SLUG}" \
   -H "Authorization: Bearer ${AIPLATFORM_ID_TOKEN}" 2>/dev/null \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('skillId') or d.get('id') or '')" 2>/dev/null || true)"
-if [ -z "${SKILL_ID}" ]; then echo "FATAL: could not resolve one-ppa-expert skillId on ${ENV}" >&2; exit 1; fi
-echo "one-ppa-expert skillId = ${SKILL_ID}" >&2
+if [ -z "${SKILL_ID}" ]; then echo "FATAL: could not resolve demo-ppa-expert skillId on ${ENV}" >&2; exit 1; fi
+echo "demo-ppa-expert skillId = ${SKILL_ID}" >&2
 
 # Assertion engine as a standalone file so the SSE pipe is python's real stdin.
 cat > "$ASSERT_PY" <<'PY'

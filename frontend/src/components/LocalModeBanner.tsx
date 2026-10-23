@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { isLocalMode } from "@/lib/localMode";
+import { isLocalModeBannerEnabled } from "@/lib/localMode";
 
 /**
  * LocalModeBanner — soft-yellow strip mounted at the top of every page when
@@ -14,7 +14,8 @@ import { isLocalMode } from "@/lib/localMode";
  *  3. Safety — if anyone ever deploys a build with NEXT_PUBLIC_LOCAL_MODE=1
  *     by mistake, the banner is loud enough to catch before harm.
  *
- * Renders nothing when LOCAL_MODE is off. Fetches /api/local-mode-status to
+ * Renders nothing when LOCAL_MODE is off, or when the deployment opts out with
+ * `NEXT_PUBLIC_LOCAL_MODE_BANNER=0` (see `isLocalModeBannerEnabled`). Fetches /api/local-mode-status to
  * surface the exact list of stubbed GCP services (defensive: if the fetch
  * fails the banner still renders with a generic message).
  */
@@ -23,7 +24,7 @@ export function LocalModeBanner() {
   const [fetchError, setFetchError] = useState<boolean>(false);
 
   useEffect(() => {
-    if (!isLocalMode()) return;
+    if (!isLocalModeBannerEnabled()) return;
     // Public endpoint — no auth header required.
     fetch("/api/proxy/api/local-mode-status", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
@@ -33,7 +34,7 @@ export function LocalModeBanner() {
       .catch(() => setFetchError(true));
   }, []);
 
-  if (!isLocalMode()) return null;
+  if (!isLocalModeBannerEnabled()) return null;
 
   return (
     <div

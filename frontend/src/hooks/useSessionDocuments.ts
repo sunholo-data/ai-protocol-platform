@@ -7,6 +7,7 @@ import type { DocTabData } from "@/components/doc-browser/DocTab";
 interface SessionResponse {
   session: {
     document_ids?: string[];
+    project_id?: string | null;
   };
 }
 
@@ -19,6 +20,9 @@ interface DocumentMetaResponse {
 interface UseSessionDocumentsReturn {
   tabs: DocTabData[] | null;
   isLoading: boolean;
+  /** The session row's project (projects §6.3): a project id, null when the
+   * chat is in no project, undefined until the row has loaded (or failed). */
+  projectId: string | null | undefined;
 }
 
 /**
@@ -34,12 +38,14 @@ interface UseSessionDocumentsReturn {
 export function useSessionDocuments(sessionId: string | null): UseSessionDocumentsReturn {
   const [tabs, setTabs] = useState<DocTabData[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [projectId, setProjectId] = useState<string | null | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const lastSessionId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!sessionId) {
       setTabs(null);
+      setProjectId(undefined);
       lastSessionId.current = null;
       return;
     }
@@ -51,6 +57,7 @@ export function useSessionDocuments(sessionId: string | null): UseSessionDocumen
     abortRef.current = controller;
     setIsLoading(true);
     setTabs(null);
+    setProjectId(undefined);
 
     void (async () => {
       try {
@@ -62,6 +69,8 @@ export function useSessionDocuments(sessionId: string | null): UseSessionDocumen
         const sessionData = (await sessionRes.json()) as SessionResponse;
         const docIds = sessionData.session?.document_ids ?? [];
         if (controller.signal.aborted) return;
+        const pid = sessionData.session?.project_id;
+        setProjectId(typeof pid === "string" && pid ? pid : null);
         if (docIds.length === 0) {
           setTabs([]);
           return;
@@ -104,5 +113,5 @@ export function useSessionDocuments(sessionId: string | null): UseSessionDocumen
     return () => abortRef.current?.abort();
   }, [sessionId]);
 
-  return { tabs, isLoading };
+  return { tabs, isLoading, projectId };
 }

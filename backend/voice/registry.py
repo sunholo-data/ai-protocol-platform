@@ -1,4 +1,4 @@
-"""Voice provider registry (TTS only).
+"""Voice provider registry (TTS and one-shot STT).
 
 Resolution chain (highest precedence first):
     1. SkillVoiceConfig.tts_provider (via the resolver in voice_routes)
@@ -10,7 +10,7 @@ dispatch, no clever registration decorators, easy to grep for "which
 providers exist". When a new provider lands in `voice/providers/`, add
 one branch to `_build_tts`.
 
-STT was dropped in the v6 M2 port - read-aloud only.
+STT is opt-in: persona voice override > VOICE_STT_PROVIDER > disabled.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import os
 
-from voice.base import TTSProvider
+from voice.base import STTProvider, TTSProvider
 
 logger = logging.getLogger(__name__)
 
@@ -80,3 +80,17 @@ def _build_tts(name: str) -> TTSProvider:
 
         return GCPTTSProvider(tier=name.removeprefix("gcp_"))
     raise ValueError(f"Unknown TTS provider {name!r}. Known: browser, gcp_<tier>.")
+
+
+def get_stt(provider_override: str | None = None, model_ref: str | None = None) -> STTProvider:
+    """Resolve dictation independently of read-aloud. Disabled by default."""
+    name = _resolve_name(provider_override, "VOICE_STT_PROVIDER", "disabled")
+    if name in ("disabled", "null"):
+        from voice.providers.null import NullSTTProvider
+
+        return NullSTTProvider()
+    if name == "gemini":
+        from voice.providers.gemini_stt import GeminiSTTProvider
+
+        return GeminiSTTProvider(model_ref or os.getenv("VOICE_STT_MODEL", "lite"))
+    raise ValueError(f"Unknown STT provider {name!r}. Known: disabled, gemini.")

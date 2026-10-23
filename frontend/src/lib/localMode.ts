@@ -17,6 +17,18 @@ export function isLocalMode(): boolean {
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
+/**
+ * Whether to show the LOCAL_MODE banner. On by default whenever LOCAL_MODE is
+ * — it is the workshop's trust signal and its "graduate to GCP" funnel — but a
+ * deployment that runs LOCAL_MODE on purpose (a private, single-user host) can
+ * set `NEXT_PUBLIC_LOCAL_MODE_BANNER=0` to drop it.
+ */
+export function isLocalModeBannerEnabled(): boolean {
+  if (!isLocalMode()) return false;
+  const raw = (process.env.NEXT_PUBLIC_LOCAL_MODE_BANNER || "").trim().toLowerCase();
+  return !(raw === "0" || raw === "false" || raw === "no" || raw === "off");
+}
+
 /** Well-known stub token the backend's LOCAL_MODE auth dep recognises. */
 export const LOCAL_MODE_STUB_TOKEN = "local-mode-stub-token";
 

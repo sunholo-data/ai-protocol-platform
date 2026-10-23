@@ -40,6 +40,7 @@ function makeDoc(overrides: Partial<DocumentDetail> = {}): DocumentDetail {
     sourceUrl: "gs://bucket/path/test.pdf",
     folderId: null,
     parsedAt: null,
+    updatedAt: null,
     ...overrides,
   } as DocumentDetail;
 }
@@ -100,8 +101,11 @@ describe("DocumentViewer", () => {
     });
   });
 
-  it("renders BlocksRenderer for non-PDF formats (e.g. docx) so structure is preserved", () => {
-    render(<DocumentViewer doc={makeDoc({ sourceFormat: "docx" })} />);
+  // v6.34.0: a .docx defaults to the STYLED view, so the block renderer is one
+  // click away rather than immediate. Uses a blocks-only format to keep testing
+  // what this test is about — that non-PDF formats get block rendering at all.
+  it("renders BlocksRenderer for non-PDF formats so structure is preserved", () => {
+    render(<DocumentViewer doc={makeDoc({ sourceFormat: "csv" })} />);
     expect(screen.getByTestId("blocks-renderer")).toBeInTheDocument();
     expect(screen.queryByTitle("test.pdf")).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();

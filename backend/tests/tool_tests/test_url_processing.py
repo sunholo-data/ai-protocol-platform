@@ -67,13 +67,19 @@ class TestValidateUrl:
 
 
 @pytest.mark.asyncio
-async def test_url_processing_calls_load_web_page():
-    """Happy path: valid URL delegates to load_web_page."""
+async def test_url_processing_delegates_to_the_fetcher():
+    """Happy path: a valid URL reaches the fetch.
+
+    Retargeted 2026-09-04 from ADK's `load_web_page` to our own
+    `_fetch_and_extract`, which follows redirects and re-validates every hop.
+    The assertion is unchanged in meaning: a public URL gets fetched, and the
+    fetcher's output is what the tool returns.
+    """
     from tools.url_processing import url_processing
 
-    with patch("tools.url_processing.load_web_page", return_value="page content") as mock_lwp:
+    with patch("tools.url_processing._fetch_and_extract", return_value="page content") as mock_fetch:
         result = await url_processing("https://example.com")
-    mock_lwp.assert_called_once_with("https://example.com")
+    mock_fetch.assert_called_once_with("https://example.com")
     assert result == "page content"
 
 
@@ -98,10 +104,14 @@ async def test_url_processing_blocks_file_scheme():
 
 @pytest.mark.asyncio
 async def test_url_processing_handles_fetch_error():
-    """load_web_page failure returns error string (not exception)."""
+    """A transport failure returns an error string, never an exception.
+
+    The error text reaches the model, which is the point: it must know the
+    fetch failed rather than be handed nothing and answer from invention.
+    """
     from tools.url_processing import url_processing
 
-    with patch("tools.url_processing.load_web_page", side_effect=Exception("connection refused")):
+    with patch("tools.url_processing._fetch_and_extract", side_effect=Exception("connection refused")):
         result = await url_processing("https://example.com")
     assert "Failed to fetch" in result
     assert "connection refused" in result

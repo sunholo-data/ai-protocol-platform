@@ -335,7 +335,7 @@ describe("A2UISurfaceMount — triggerOnAction prop (ACTION-TRIGGER M2)", () => 
           <A2UISurfaceMount
             surfaceId="obligation_elicitation:leap"
             sessionId="sess-1"
-            skillId="one-ppa-expert"
+            skillId="demo-ppa-expert"
             triggerOnAction={true}
           />
         </>,
@@ -368,7 +368,7 @@ describe("A2UISurfaceMount — triggerOnAction prop (ACTION-TRIGGER M2)", () => 
           <A2UISurfaceMount
             surfaceId="launch:obligation:1"
             sessionId="sess-1"
-            skillId="one-assistant"
+            skillId="demo-assistant"
             triggerOnAction={true}
           />
         </>,
@@ -407,7 +407,7 @@ describe("A2UISurfaceMount — triggerOnAction prop (ACTION-TRIGGER M2)", () => 
           <A2UISurfaceMount
             surfaceId="elicit:confirm_delegation:1"
             sessionId="sess-1"
-            skillId="one-assistant"
+            skillId="demo-assistant"
             triggerOnAction={true}
           />
         </>,
@@ -445,7 +445,7 @@ describe("A2UISurfaceMount — triggerOnAction prop (ACTION-TRIGGER M2)", () => 
       wrap(
         <>
           <Capture />
-          <A2UISurfaceMount surfaceId={SID} sessionId="sess-1" skillId="one-ppa-expert" triggerOnAction />
+          <A2UISurfaceMount surfaceId={SID} sessionId="sess-1" skillId="demo-ppa-expert" triggerOnAction />
         </>,
       ),
     );
@@ -604,5 +604,102 @@ describe("A2UISurfaceMount — per-action run routing (7.3 M3)", () => {
     await waitFor(() => expect(onChatMessage).toHaveBeenCalledWith("Explain the Settlement Type difference."));
     expect(fetchWithAuthSpy).not.toHaveBeenCalled();
     expect(triggerActionSpy).not.toHaveBeenCalled();
+  });
+});
+
+// Wire fixture is produced by inbox_to_a2ui and validated with the Basic catalog.
+import inboxMessages from "./fixtures/inbox-board.json";
+describe("Inbox direct actions through the real SDK", () => {
+  let registry: ReturnType<typeof useSurfaceRegistry>;
+  function Capture() { registry = useSurfaceRegistry(); return null; }
+  function showInbox() {
+    render(wrap(<><Capture /><A2UISurfaceMount surfaceId="inbox_board" sessionId="inbox-thread" /></>));
+    act(() => registry.appendMessages("inbox_board", structuredClone(inboxMessages) as any, "listing-1", { kind: "inbox_board", title: "Inbox" }));
+  }
+
+  it("opens the original task thread and its skill through the real Basic catalog", async () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    showInbox();
+    expect(screen.getByText(/Messages to worker/)).toBeInTheDocument();
+    expect(screen.getByText(/Mailbox: unread/)).toBeInTheDocument();
+    fetchWithAuthSpy.mockResolvedValue(new Response(JSON.stringify({ status: "ok", message: "Opened #1.", messages: [] }), { status: 200 }));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open related thread" }));
+    expect(open).toHaveBeenLastCalledWith(new URL("/chat/web-researcher?session=thread-worker-abcdef", window.location.href).href, "_blank", "noopener,noreferrer");
+    fireEvent.click(screen.getByRole("button", { name: "Open skill in a new chat" }));
+    expect(open).toHaveBeenLastCalledWith(new URL("/chat/web-researcher", window.location.href).href, "_blank", "noopener,noreferrer");
+    expect(triggerActionSpy).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId("a2ui-surface-direct-status")).toHaveTextContent("Opened #1."));
+    open.mockRestore();
+  });
+
+  it("resolves checkbox selection, reports pending and updates the result without a model run", async () => {
+    let finish!: (response: Response) => void;
+    fetchWithAuthSpy.mockImplementation(() => new Promise<Response>(resolve => { finish = resolve; }));
+    showInbox();
+    fireEvent.click(screen.getByRole("checkbox", { name: "#1 Review plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark read" }));
+    await waitFor(() => expect(fetchWithAuthSpy).toHaveBeenCalledOnce());
+    const [url, init] = fetchWithAuthSpy.mock.calls[0];
+    expect(url).toContain("/inbox-thread/surface-action-direct");
+    expect(JSON.parse(init.body).action.context.selected).toEqual({ "m1": true });
+    expect(screen.getByTestId("a2ui-surface-running")).toBeInTheDocument();
+    const model = { items: [{ key: "m1", ref: "#1", title: "Review plan", status: "read" }], selected: { "m1": false } };
+    await act(async () => finish(new Response(JSON.stringify({
+      status: "ok", message: "1 message marked read.", messages: [{
+          version: "v0.9", updateDataModel: { surfaceId: "inbox_board", value: model },
+        }],
+    }), { status: 200 })));
+    expect(await screen.findByRole("status")).toHaveTextContent("1 message marked read.");
+    expect(registry.readA2uiSurfaceState().inbox_board.dataModel).toEqual(model);
+    expect(triggerActionSpy).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("a2ui-surface-running")).not.toBeInTheDocument();
+  });
+
+  it("shows server refusals and keeps the selected message available for retry", async () => {
+    fetchWithAuthSpy.mockResolvedValue(new Response(JSON.stringify({ detail: "This inbox is unavailable." }), { status: 403 }));
+    showInbox();
+    fireEvent.click(screen.getByRole("checkbox", { name: "#1 Review plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark read" }));
+    expect(await screen.findByTestId("a2ui-surface-direct-status")).toHaveTextContent("This inbox is unavailable.");
+    expect(screen.getByRole("checkbox", { name: "#1 Review plan" })).toBeChecked();
+    expect(triggerActionSpy).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("Inbox reader and selection feedback", () => {
+  it("renders safe Markdown in a dialog and leaves the list compact", async () => {
+    let registry!: ReturnType<typeof useSurfaceRegistry>;
+    function Capture() { registry = useSurfaceRegistry(); return null; }
+    fetchWithAuthSpy.mockResolvedValue(new Response(JSON.stringify({status: "ok", message: "Opened #1.", messages: [{
+      version: "v0.9", updateComponents: {surfaceId: "inbox_board", components: [{id: "ib-body-m1", component: "Text", variant: "body", text: "## Report\n\n- **Ready**\n- Review next\n\n```js\nconst done = true;\n```\n\n<img src='https://example.com/track'>\n\n![private image](https://example.com/track)"}]},
+    }]}), {status:200}));
+    render(wrap(<><Capture /><A2UISurfaceMount surfaceId="inbox_board" sessionId="inbox-thread" /></>));
+    act(() => registry.appendMessages("inbox_board", structuredClone(inboxMessages) as any, "inbox-fixture"));
+    fireEvent.click(screen.getByRole("button", {name:"Open"}));
+    expect(await screen.findByRole("heading", {name:"Report"})).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("Ready").tagName).toBe("STRONG");
+    expect(screen.getByText("const done = true;").tagName).toBe("CODE");
+    expect(document.querySelector("img")).toBeNull();
+    fireEvent.click(screen.getByRole("button", {name:"Close details"}));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText(/Plan ready for review/)).toBeInTheDocument();
+  });
+
+  it("guards empty AI actions and shows the current selection count", async () => {
+    let registry!: ReturnType<typeof useSurfaceRegistry>;
+    function Capture() { registry = useSurfaceRegistry(); return null; }
+    const send = vi.fn();
+    render(wrap(<><Capture /><A2UISurfaceMount surfaceId="inbox_board" sessionId="inbox-thread" onChatMessage={send} /></>));
+    act(() => registry.appendMessages("inbox_board", structuredClone(inboxMessages) as any, "inbox-fixture"));
+    fireEvent.click(screen.getByRole("button", {name:"Summarise these"}));
+    expect(await screen.findByText("Select one or more messages first.")).toBeInTheDocument();
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("checkbox", {name:"#1 Review plan"}));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name:"Summarise these"}));
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
   });
 });

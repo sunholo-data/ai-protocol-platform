@@ -110,7 +110,7 @@ def test_tenant_admin_can_onboard_own_domain() -> None:
 
 
 def test_onboard_rejects_unknown_skill_ref_before_write() -> None:
-    known = [_skill("one-assistant"), _skill("one-ppa-expert")]
+    known = [_skill("demo-assistant"), _skill("demo-ppa-expert")]
     with (
         patch("admin.tenants.skill_config.list_skills", return_value=known),
         patch("admin.tenants.get_document", return_value=None),
@@ -120,7 +120,7 @@ def test_onboard_rejects_unknown_skill_ref_before_write() -> None:
     ):
         resp = _client(_PLATFORM_ADMIN).post(
             "/api/admin/tenants",
-            json={"domain": "acme.com", "enabled_skills": ["one-assistant", "does-not-exist"]},
+            json={"domain": "acme.com", "enabled_skills": ["demo-assistant", "does-not-exist"]},
         )
     assert resp.status_code == 422
     assert "does-not-exist" in str(resp.json())
@@ -129,7 +129,7 @@ def test_onboard_rejects_unknown_skill_ref_before_write() -> None:
 
 
 def test_onboard_rejects_unknown_default_skill() -> None:
-    known = [_skill("one-assistant")]
+    known = [_skill("demo-assistant")]
     with (
         patch("admin.tenants.skill_config.list_skills", return_value=known),
         patch("admin.tenants.get_document", return_value=None),
@@ -171,7 +171,7 @@ def test_onboard_lenient_when_skill_set_unavailable() -> None:
 
 
 def test_onboard_writes_config_and_returns_verdicts() -> None:
-    known = [_skill("one-assistant"), _skill("one-ppa-expert")]
+    known = [_skill("demo-assistant"), _skill("demo-ppa-expert")]
     with (
         patch("admin.tenants.skill_config.list_skills", return_value=known),
         patch("admin.tenants.get_document", return_value=None),
@@ -186,8 +186,8 @@ def test_onboard_writes_config_and_returns_verdicts() -> None:
                 "domain": "acme.com",
                 "display_name": "Acme",
                 "documents_bucket": "acme-docs",
-                "enabled_skills": ["one-assistant", "one-ppa-expert"],
-                "default_skill": "one-assistant",
+                "enabled_skills": ["demo-assistant", "demo-ppa-expert"],
+                "default_skill": "demo-assistant",
             },
         )
     assert resp.status_code == 201
@@ -248,7 +248,7 @@ def test_bucket_verdict_exposes_only_name_and_booleans() -> None:
     assert bucket_check["level"] == "warning"
     assert resp.json()["validation"]["ok"] is True
     # Only the bucket NAME + booleans may be exposed — never object names/bytes.
-    assert set(bucket_check["details"].keys()) <= {"bucket", "exists", "readable"}
+    assert set(bucket_check["details"].keys()) <= {"bucket", "exists", "readable", "writable"}
     assert bucket_check["details"]["bucket"] == "acme-docs"
     assert isinstance(bucket_check["details"]["exists"], bool)
     assert isinstance(bucket_check["details"]["readable"], bool)
@@ -265,12 +265,12 @@ def test_validate_stored_tenant() -> None:
     stored = ClientConfig(
         domain="acme.com",
         documents_bucket="acme-docs",
-        enabled_skills=["one-assistant"],
-        default_skill="one-assistant",
+        enabled_skills=["demo-assistant"],
+        default_skill="demo-assistant",
     )
     with (
         patch("admin.tenants.get_client_sync", return_value=stored),
-        patch("admin.tenants.skill_config.list_skills", return_value=[_skill("one-assistant")]),
+        patch("admin.tenants.skill_config.list_skills", return_value=[_skill("demo-assistant")]),
         patch("admin.tenants.probe_bucket", return_value=_PROBE_OK),
     ):
         resp = _client(_PLATFORM_ADMIN).get("/api/admin/tenants/acme.com/validate")
@@ -300,11 +300,13 @@ def test_probe_bucket_returns_name_and_booleans_only() -> None:
     # A successful 1-object list ⇒ exists + readable. No bucket.exists() call.
     fake_client = MagicMock()
     fake_client.list_blobs.return_value = iter([MagicMock()])
+    fake_client.bucket.return_value.test_iam_permissions.return_value = ["storage.objects.create"]
 
     with patch.object(tenants, "_storage_client", return_value=fake_client):
         result = tenants.probe_bucket("acme-docs")
 
-    assert set(result.keys()) == {"bucket", "exists", "readable", "checked"}
+    assert set(result.keys()) == {"bucket", "exists", "readable", "writable", "checked"}
+    assert result["writable"] is True
     assert result["bucket"] == "acme-docs"
     assert result["exists"] is True
     assert result["readable"] is True
@@ -317,11 +319,12 @@ def test_probe_bucket_empty_but_present_is_reachable() -> None:
 
     fake_client = MagicMock()
     fake_client.list_blobs.return_value = iter([])
+    fake_client.bucket.return_value.test_iam_permissions.return_value = ["storage.objects.create"]
 
     with patch.object(tenants, "_storage_client", return_value=fake_client):
         result = tenants.probe_bucket("empty-but-real")
 
-    assert result == {"bucket": "empty-but-real", "exists": True, "readable": True, "checked": True}
+    assert result == {"bucket": "empty-but-real", "exists": True, "readable": True, "writable": True, "checked": True}
 
 
 def test_probe_bucket_object_level_only_no_bucket_metadata_call() -> None:
@@ -335,6 +338,7 @@ def test_probe_bucket_object_level_only_no_bucket_metadata_call() -> None:
 
     fake_bucket = MagicMock()
     fake_bucket.exists.side_effect = Forbidden("no storage.buckets.get")  # would 403 if called
+    fake_bucket.test_iam_permissions.return_value = ["storage.objects.create"]
     fake_client = MagicMock()
     fake_client.bucket.return_value = fake_bucket
     fake_client.list_blobs.return_value = iter([MagicMock()])  # objects.list works
@@ -343,7 +347,10 @@ def test_probe_bucket_object_level_only_no_bucket_metadata_call() -> None:
         result = tenants.probe_bucket("acme-docs")
 
     assert result["exists"] is True and result["readable"] is True and result["checked"] is True
-    fake_client.bucket.assert_not_called()  # never touched the metadata path
+    # Never touched the metadata path. (testIamPermissions is allowed: it needs
+    # no storage.buckets.get — it's how the write check works.)
+    fake_bucket.exists.assert_not_called()
+    fake_bucket.reload.assert_not_called()
 
 
 def test_probe_bucket_missing_bucket_404() -> None:
@@ -357,7 +364,7 @@ def test_probe_bucket_missing_bucket_404() -> None:
     with patch.object(tenants, "_storage_client", return_value=fake_client):
         result = tenants.probe_bucket("does-not-exist")
 
-    assert result == {"bucket": "does-not-exist", "exists": False, "readable": False, "checked": True}
+    assert result == {"bucket": "does-not-exist", "exists": False, "readable": False, "writable": None, "checked": True}
 
 
 def test_probe_bucket_forbidden_is_exists_but_unreadable() -> None:
@@ -393,4 +400,64 @@ def test_probe_bucket_live_gcs() -> None:
     import admin.tenants as tenants
 
     result = tenants.probe_bucket("aitana-documents-bucket")
-    assert set(result.keys()) == {"bucket", "exists", "readable", "checked"}
+    assert set(result.keys()) == {"bucket", "exists", "readable", "writable", "checked"}
+
+
+# ---------------------------------------------------------------------------
+# Upload readiness: write access, missing bucket, unsaved-draft validation
+# ---------------------------------------------------------------------------
+
+
+def test_probe_bucket_reports_read_only_grant_as_not_writable() -> None:
+    """A read-only grant used to pass validation and then fail every upload."""
+    import admin.tenants as tenants
+
+    fake_client = MagicMock()
+    fake_client.list_blobs.return_value = iter([])
+    fake_client.bucket.return_value.test_iam_permissions.return_value = []  # no objects.create
+
+    with patch.object(tenants, "_storage_client", return_value=fake_client):
+        result = tenants.probe_bucket("acme-docs")
+    assert result["readable"] is True and result["writable"] is False
+
+    with patch.object(tenants, "probe_bucket", return_value=result):
+        check = tenants._validate_bucket("acme-docs")
+    assert check.level == "warning" and "cannot WRITE" in check.message
+
+
+def test_missing_bucket_warns_when_uploads_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    import admin.tenants as tenants
+
+    monkeypatch.setenv("TENANT_FALLBACK_FAIL_CLOSED", "1")
+    check = tenants._validate_bucket(None)
+    assert check.level == "warning" and "can't upload" in check.message
+
+    monkeypatch.setenv("TENANT_FALLBACK_FAIL_CLOSED", "0")
+    assert tenants._validate_bucket(None).level == "skipped"
+
+
+def test_post_validate_checks_the_unsaved_draft() -> None:
+    """The editor's Validate must check what's IN THE FORM, not what's stored —
+    and must work before the tenant exists. It writes nothing."""
+    with (
+        patch("admin.tenants.skill_config.list_skills", return_value=[_skill("shepherd")]),
+        patch(
+            "admin.tenants.probe_bucket", return_value={**_PROBE_OK, "bucket": "draft-bucket", "writable": True}
+        ) as probe,
+        patch("admin.tenants.set_document") as write,
+        patch("admin.tenants.get_client_sync", return_value=None),
+    ):
+        resp = _client(_PLATFORM_ADMIN).post(
+            "/api/admin/tenants/acme.com/validate",
+            json={"documents_bucket": " draft-bucket ", "default_skill": "shepherd"},
+        )
+    assert resp.status_code == 200
+    probe.assert_called_once_with("draft-bucket")
+    write.assert_not_called()
+    bucket_check = next(c for c in resp.json()["checks"] if c["field"] == "documents_bucket")
+    assert bucket_check["level"] == "ok" and "writable" in bucket_check["message"]
+
+
+def test_post_validate_denied_for_other_tenant() -> None:
+    resp = _client(_ACME_ADMIN).post("/api/admin/tenants/other.com/validate", json={})
+    assert resp.status_code == 403

@@ -10,6 +10,7 @@ import {
   RATIO_MAX,
   RATIO_DEFAULT,
   DEFAULT_RATIOS,
+  parseDefaultRatios,
 } from "../useResizableWorkspaceRatio";
 
 beforeEach(() => {
@@ -18,8 +19,17 @@ beforeEach(() => {
 
 describe("useResizableWorkspaceRatio", () => {
   it("initialises with the per-skill default when no stored value", () => {
-    const { result } = renderHook(() => useResizableWorkspaceRatio("one-doc-compare"));
-    expect(result.current.ratio).toBe(DEFAULT_RATIOS["one-doc-compare"]);
+    DEFAULT_RATIOS["example-skill"] = 0.6;
+    const { result } = renderHook(() => useResizableWorkspaceRatio("example-skill"));
+    expect(result.current.ratio).toBe(0.6);
+    delete DEFAULT_RATIOS["example-skill"];
+  });
+
+  it("accepts only finite, in-range configured ratios", () => {
+    expect(parseDefaultRatios('{"valid":0.6,"small":0.2,"large":2,"text":"0.6"}')).toEqual({ valid: 0.6 });
+    for (const raw of [undefined, "", "broken", "null", "[]", "0.6"]) {
+      expect(parseDefaultRatios(raw)).toEqual({});
+    }
   });
 
   it("falls back to RATIO_DEFAULT for unlisted skillIds (slim chat-led default)", () => {

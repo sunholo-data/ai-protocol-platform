@@ -38,9 +38,7 @@ def test_render_mapping_shells_with_mapping_and_result(tmp_path: Path) -> None:
         patch("aiplatform.commands.a2ui._find_backend_dir", return_value=tmp_path),
         patch("aiplatform.commands.a2ui.subprocess.run", return_value=_ok()) as run,
     ):
-        result = CliRunner().invoke(
-            main, ["a2ui", "render", "ppa_comparison", "--result", "comparison.json"]
-        )
+        result = CliRunner().invoke(main, ["a2ui", "render", "ppa_comparison", "--result", "comparison.json"])
     assert result.exit_code == 0, result.output
     cmd = run.call_args.args[0]
     assert cmd[:6] == ["uv", "run", "python", "-m", "adk.a2ui_render_preview", "--mapping"]

@@ -3,7 +3,7 @@ name: code-assistant
 display_name: Code Assistant
 avatar: /images/avatars/skill-code-assistant.svg
 # 2026-06-11 demo-focus: developer-oriented skill; off-topic for the
-# Fri ONE customer demo (legal / energy audience). Hidden from the
+# Fri example customer demo (legal / energy audience). Hidden from the
 # public marketplace via tagged access — admins still see it, ONE
 # users don't.
 access_control:

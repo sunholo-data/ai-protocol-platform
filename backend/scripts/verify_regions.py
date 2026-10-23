@@ -52,7 +52,27 @@ def main() -> int:
             target = by_id.get(link.id)
             if target is None or target.provider != "google":
                 continue
-            location = link.location or DEFAULT_REGION
+            # Mirror adk.agent._resolve_link EXACTLY: an explicit per-link
+            # location wins, otherwise the link falls through to resolve_model,
+            # which honours the TARGET entry's own `location` (the "eu"
+            # jurisdictional multi-region entries) and routes global-residency
+            # entries to location="global". Only a target with neither rides
+            # the default region-pinned client.
+            #
+            # Probing `link.location or DEFAULT_REGION` here was wrong: it
+            # invented {model, region} pairs the runtime never builds, and
+            # failed the whole probe on them. It went unnoticed while every
+            # bare `-eu` rung happened to also serve in europe-west1; adding
+            # gemini-3-8-flash-eu -> gemini-3-7-flash-eu (an "eu"-only model)
+            # surfaced it as a false FAIL on 2026-09-03.
+            if link.location:
+                location = link.location
+            elif target.location:
+                location = target.location
+            elif target.residency == "global":
+                location = "global"
+            else:
+                location = DEFAULT_REGION
             pairs[(target.api_name, location)] = f"{entry.id} -> {link.id}@{location}"
 
     print(f"Probing {len(pairs)} {{model, region}} pairs on project {project}…")

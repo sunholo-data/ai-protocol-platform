@@ -16,13 +16,13 @@ metadata:
   version: "1.0"
   # v6.11.0 — skill-dropdown grouping (presentation only). See SkillSwitcher.
   category: specialist
-  # Pinned to Anthropic Claude Opus 4.8 (current flagship) for the multi-model
-  # comparison (this skill = Claude; openai-reasoner = GPT-5.6 Sol). Works on
+  # Pinned to Anthropic Claude Opus 5.5 (current flagship) for the multi-model
+  # comparison (this skill = Claude; openai-reasoner = GPT-6.1 Sol). Works on
   # unrestricted deploys (Aitana dev), where ANTHROPIC_API_KEY is mounted. Under
   # eu-strict a pinned non-EU model is rejected at resolve_model_chain (fail-loud)
   # — for a residency-portable deep skill use `model: smart` (Opus on unrestricted
   # / Gemini Pro on EU). Alt: `claude-fable-5` for max first-shot correctness (slower).
-  model: claude-opus-4-8
+  model: claude-opus-5-5
   tools:
     - google_search
     - url_processing

@@ -1,0 +1,120 @@
+# Full dependency scan; publish the report before enforcing failures.
+name: Security audit (weekly)
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  issues: write
+jobs:
+  audit:
+    name: Audit + update rolling issue
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Collect audit, reconciliation, and Dependabot results
+        id: scan
+        env:
+          # GITHUB_TOKEN cannot read Dependabot alerts. A fine-grained PAT
+          # needs Dependabot alerts read/write; missing access is a failure.
+          GH_TOKEN: ${{ secrets.DEPENDABOT_TOKEN || secrets.GITHUB_TOKEN }}
+          AUDIT_INCLUDE_DEV: "1"
+        run: |
+          mkdir -p security-report
+          set +e
+          scripts/security-check.sh > security-report/audit.txt 2>&1
+          AUDIT_EXIT=$?
+          scripts/reconcile-dependabot-alerts.sh --apply > security-report/reconcile.txt 2>&1
+          RECONCILE_EXIT=$?
+          gh api "repos/$GITHUB_REPOSITORY/dependabot/alerts" \
+            --paginate 2> security-report/dependabot-error.txt \
+            | jq --slurp '[.[][] | select(.state == "open") | {number, severity: .security_advisory.severity, package: .dependency.package.name, ghsa: .security_advisory.ghsa_id}]' \
+            > security-report/dependabot.json
+          DEPENDABOT_EXIT=$?
+          set -e
+          {
+            echo "audit_exit=$AUDIT_EXIT"
+            echo "reconcile_exit=$RECONCILE_EXIT"
+            echo "dependabot_exit=$DEPENDABOT_EXIT"
+          } >> "$GITHUB_OUTPUT"
+          cat security-report/audit.txt security-report/reconcile.txt security-report/dependabot-error.txt
+
+      - name: Build report
+        env:
+          AUDIT_EXIT: ${{ steps.scan.outputs.audit_exit }}
+          RECONCILE_EXIT: ${{ steps.scan.outputs.reconcile_exit }}
+          DEPENDABOT_EXIT: ${{ steps.scan.outputs.dependabot_exit }}
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          report = Path("security-report")
+          audit_ok = os.environ["AUDIT_EXIT"] == "0"
+          dependabot_ok = os.environ["DEPENDABOT_EXIT"] == "0"
+          if dependabot_ok:
+              alerts = json.loads((report / "dependabot.json").read_text())
+              alert_status = f"{len(alerts)} open"
+          else:
+              alert_status = "UNAVAILABLE — configure DEPENDABOT_TOKEN with Dependabot alerts access"
+          body = (
+              f"## Security status — {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}\n\n"
+              f"**Dependency gate (including npm dev dependencies):** {'PASS' if audit_ok else 'FAIL'}\n\n"
+              f"**Dependabot:** {alert_status}\n\n"
+              f"**Alert reconciliation exit:** {os.environ['RECONCILE_EXIT']}\n\n"
+          )
+          for title, filename in [("Dependency audits", "audit.txt"), ("Alert reconciliation", "reconcile.txt"),
+                                  ("Dependabot alerts", "dependabot.json"), ("Dependabot errors", "dependabot-error.txt")]:
+              body += f"### {title}\n\n```text\n{(report / filename).read_text()}\n```\n\n"
+          body += "Policy: UPGRADING.md#dependency-security\n"
+          (report / "body.md").write_text(body)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(body)
+          PYTHON
+
+      - name: Update rolling tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE_PREFIX="Security audit — week of"
+          THIS_WEEK="$TITLE_PREFIX $(date -u +%Y-%m-%d)"
+          EXISTING=$(gh issue list --state open --search "in:title \"$TITLE_PREFIX\"" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --title "$THIS_WEEK" --body-file security-report/body.md
+          else
+            gh issue create --title "$THIS_WEEK" --body-file security-report/body.md
+          fi
+
+      - name: Upload scan evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: security-report/
+
+      - name: Enforce scan results
+        if: always()
+        env:
+          AUDIT_EXIT: ${{ steps.scan.outputs.audit_exit }}
+          RECONCILE_EXIT: ${{ steps.scan.outputs.reconcile_exit }}
+          DEPENDABOT_EXIT: ${{ steps.scan.outputs.dependabot_exit }}
+        run: |
+          test "$AUDIT_EXIT" = "0"
+          test "$RECONCILE_EXIT" = "0"
+          test "$DEPENDABOT_EXIT" = "0"

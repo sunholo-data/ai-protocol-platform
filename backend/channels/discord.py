@@ -55,6 +55,7 @@ from nacl.exceptions import BadSignatureError
 from channels._a2ui_discord import surface_to_embed, surface_to_text
 from channels._agui_render import AGUIChannelRenderer, ChannelSink
 from channels._chunk import chunk_message
+from channels._discord_markdown import to_discord_markdown
 from channels.base import BaseChannel, InboundMessage, OutboundMessage
 from channels.identity import IdentityResolver
 from db.firestore import get_document, set_document
@@ -228,7 +229,8 @@ class DiscordChannel(BaseChannel):
         in the local cache — important for first-touch from a webhook
         where the gateway hasn't seen the channel yet.
         """
-        chunks = chunk_message(message.text, max_length=DISCORD_MAX_MESSAGE_LENGTH)
+        text = to_discord_markdown(message.text)
+        chunks = chunk_message(text, max_length=DISCORD_MAX_MESSAGE_LENGTH, preserve_links=True)
         if not chunks:
             return
 
@@ -578,6 +580,29 @@ def discord_ping_response() -> dict[str, int]:
     return {"type": 1}
 
 
+_PROGRESS_NAMES = {
+    "transfer_to_agent": "Handing over to a specialist",
+    "request_handoff": "Handing over to a specialist",
+}
+
+
+def _friendly_progress(label: str) -> str:
+    """Tool name -> what a person reads: the catalog label, never a raw id."""
+    if label in _PROGRESS_NAMES:
+        return _PROGRESS_NAMES[label]
+    try:
+        from adk.tools import TOOL_CATALOG
+
+        for entry in TOOL_CATALOG:
+            if entry.get("name") == label and entry.get("label"):
+                return f"Checking {entry['label']}"
+    except Exception:  # catalog unavailable — fall through to a readable form
+        logger.debug("friendly progress: catalog lookup failed", exc_info=True)
+    if "_" in label and " " not in label:
+        return label.replace("_", " ").capitalize()
+    return label  # already human (e.g. a STAGE_PROGRESS label)
+
+
 class _DiscordSink(ChannelSink):
     """Discord's native presentation primitives for the shared renderer.
 
@@ -590,17 +615,30 @@ class _DiscordSink(ChannelSink):
         self._adapter = adapter
         self._channel = channel
         self._placeholder: Any = None
+        self._has_text = False
 
     async def begin(self) -> None:
         """Post the placeholder the rest of the run edits in place."""
         self._placeholder = await self._channel.send("Thinking...")
 
     async def update_text(self, text: str) -> None:
-        await self._adapter._safe_edit(self._placeholder, text)
+        if text.strip():
+            self._has_text = True
+        await self._adapter._safe_edit(self._placeholder, to_discord_markdown(text))
 
     async def show_progress(self, label: str) -> str | None:
-        """Discord has no progress affordance — splice italic text inline."""
-        return f"\n_Working with {label}..._\n"
+        """A TRANSIENT status line on the placeholder, never part of the reply.
+
+        Splicing ``_Working with {label}..._`` into the reply text left it in
+        the final answer for good, and raw tool names (``transfer_to_agent``)
+        both broke Discord's ``_italic_`` markup and leaked internal ids
+        (repo rule #9, friendly names). Now: until the answer starts
+        streaming, the placeholder shows Discord subtext with a friendly
+        label; once text arrives the answer simply replaces it.
+        """
+        if not self._has_text and self._placeholder is not None:
+            await self._adapter._safe_edit(self._placeholder, f"-# ⏳ {_friendly_progress(label)}…")
+        return None
 
     async def render_surface(self, surface: Any) -> str | None:
         """Render an A2UI surface as a Discord embed.
@@ -637,8 +675,12 @@ class _DiscordSink(ChannelSink):
         await self._adapter._safe_edit(self._placeholder, text)
 
     async def finish(self, text: str) -> None:
-        """Final atomic edit; overflow past 2000 chars fans out as follow-ups."""
-        first_chunk, *rest = chunk_message(text, max_length=DISCORD_MAX_MESSAGE_LENGTH) or [text]
+        """Final atomic edit; overflow past 2000 chars fans out as follow-ups.
+
+        Markdown tables are rewritten first: Discord doesn't render them.
+        """
+        text = to_discord_markdown(text)
+        first_chunk, *rest = chunk_message(text, max_length=DISCORD_MAX_MESSAGE_LENGTH, preserve_links=True) or [text]
         await self._adapter._safe_edit(self._placeholder, first_chunk)
         for chunk in rest:
             await self._channel.send(chunk)

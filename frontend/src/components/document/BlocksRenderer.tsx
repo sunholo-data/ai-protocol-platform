@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { MathText } from "./MathText";
 
 export interface BlockCell {
   text?: string;
@@ -66,16 +67,16 @@ function renderText(b: Block): ReactNode {
   if (headingLevel) return renderHeading(headingLevel, text);
 
   if (b.style === "abstract") {
-    return <p className="my-2 italic text-sm text-muted-foreground border-l-2 border-muted pl-3">{text}</p>;
+    return <p className="my-2 italic text-sm text-muted-foreground border-l-2 border-muted pl-3"><MathText text={text} /></p>;
   }
   if (b.style === "bibitem") {
-    return <p className="my-1 text-xs text-muted-foreground pl-4 -indent-4">{text}</p>;
+    return <p className="my-1 text-xs text-muted-foreground pl-4 -indent-4"><MathText text={text} /></p>;
   }
   if (b.style === "equation" || b.style === "equation-display") {
     return <pre className="my-2 px-3 py-2 bg-muted/50 rounded text-xs font-mono whitespace-pre-wrap">{text}</pre>;
   }
   if (!text.trim()) return null;
-  return <p className="my-1 text-sm leading-relaxed">{text}</p>;
+  return <p className="my-1 text-sm leading-relaxed"><MathText text={text} /></p>;
 }
 
 function renderTable(b: Block): ReactNode {
@@ -167,7 +168,7 @@ function renderBlock(b: Block, key: number): ReactNode {
       if (b.children?.length) {
         return <div key={key}>{b.children.map((c, i) => renderBlock(c, i))}</div>;
       }
-      if (b.text) return <p key={key} className="my-1 text-sm">{b.text}</p>;
+      if (b.text) return <p key={key} className="my-1 text-sm"><MathText text={b.text} /></p>;
       return null;
   }
 }

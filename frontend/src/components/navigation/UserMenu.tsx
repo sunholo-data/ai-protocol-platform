@@ -11,12 +11,22 @@
  * modes, so this works across all auth modes without branching.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useAdminScope } from "@/hooks/useAdminScope";
 import { useAuth } from "@/contexts/AuthContext";
+import { headerControl } from "./headerControls";
+import { NotificationsToggle } from "./NotificationsToggle";
 
-export function UserMenu() {
+/** An action shown at the top of the menu on phone widths only — where the
+ * header has no room for its own buttons (SkillsBar's Configure / Create). */
+export interface UserMenuPhoneItem {
+  label: string;
+  icon: ReactNode;
+  onSelect: () => void;
+}
+
+export function UserMenu({ phoneItems = [] }: { phoneItems?: UserMenuPhoneItem[] } = {}) {
   const { user, loading, signIn, signOut } = useAuth();
   const [open, setOpen] = useState(false);
   // Admin discoverability: the /admin area was URL-only. Ask the backend for
@@ -44,7 +54,7 @@ export function UserMenu() {
   }, [open]);
 
   if (loading) {
-    return <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-muted" />;
+    return <div className="h-11 w-11 shrink-0 animate-pulse rounded-full bg-muted md:h-9 md:w-9" />;
   }
 
   if (!user) {
@@ -52,7 +62,7 @@ export function UserMenu() {
       <button
         type="button"
         onClick={() => void signIn()}
-        className="shrink-0 rounded-md border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
+        className={headerControl}
       >
         Sign in
       </button>
@@ -70,7 +80,7 @@ export function UserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Account menu"
-        className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-sm font-medium text-muted-foreground hover:ring-2 hover:ring-primary/30"
+        className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-sm font-medium text-muted-foreground hover:ring-2 hover:ring-primary/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring md:h-9 md:w-9"
       >
         {user.photoURL ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -83,7 +93,7 @@ export function UserMenu() {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-50 mt-2 w-56 rounded-md border bg-background p-1 shadow-md"
+          className="absolute right-0 top-full z-50 mt-2 w-60 rounded-[var(--radius)] border border-border bg-background p-1"
         >
           <div className="border-b px-3 py-2">
             <p className="truncate text-sm font-medium text-foreground">
@@ -93,12 +103,52 @@ export function UserMenu() {
               <p className="truncate text-xs text-muted-foreground">{user.email}</p>
             )}
           </div>
+          {phoneItems.length > 0 && (
+            <div className="border-b border-border py-1 sm:hidden">
+              {phoneItems.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    item.onSelect();
+                  }}
+                  className="flex min-h-[44px] w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted"
+                >
+                  <span className="text-muted-foreground" aria-hidden>
+                    {item.icon}
+                  </span>
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="mt-1">
+            <NotificationsToggle rowClassName="flex min-h-[44px] w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted md:min-h-[36px]" />
+          </div>
+          <Link
+            href="/settings/instructions"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="mt-1 flex min-h-[44px] w-full items-center rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted md:min-h-[36px]"
+          >
+            Your instructions
+          </Link>
+          <Link
+            href="/help"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="mt-1 flex min-h-[44px] w-full items-center rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted md:min-h-[36px]"
+          >
+            Help
+          </Link>
           {isAdmin && (
             <Link
               href="/admin"
               role="menuitem"
               onClick={() => setOpen(false)}
-              className="mt-1 block w-full rounded-sm px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
+              className="mt-1 flex min-h-[44px] w-full items-center rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted md:min-h-[36px]"
             >
               Admin
             </Link>
@@ -110,7 +160,7 @@ export function UserMenu() {
               setOpen(false);
               void signOut();
             }}
-            className="mt-1 w-full rounded-sm px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
+            className="mt-1 flex min-h-[44px] w-full items-center rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted md:min-h-[36px]"
           >
             Sign out
           </button>

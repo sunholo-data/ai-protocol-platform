@@ -6,7 +6,7 @@
 #
 # Branch-based deployment: dev -> your-project-id (only env this sprint;
 # test/prod follow the same shape when they're cut). Substitutions
-# managed by Terraform — see multivac-aitana infrastructure repo.
+# managed by Terraform — see deployment-infrastructure infrastructure repo.
 # TEMPLATE-INVERT M5 / downstream feedback #12: this pipeline used to build,
 # push AND deploy `:${BRANCH_NAME}`. BRANCH_NAME is EMPTY on a tag build, so the
 # reference rendered as `image:` and the step died with "invalid reference
@@ -21,6 +21,13 @@ substitutions:
   _REGION: terraform_managed
   _ARTIFACT_REGISTRY_REPO_URL_CLIENT: terraform_managed
   _PROJECT_ID: terraform_managed
+  # Derived from the project, exactly as mcp-sandbox and services/browser do.
+  # It used to be a hardcoded `gs://your-deploy-project-id-logging-bucket` — the
+  # TEMPLATE PLACEHOLDER — which no real service account can write to, so every
+  # build died before its first step with `invalid bucket`. Seven consecutive
+  # failures back to 2026-08-17; this pipeline had never once succeeded.
+  # Surfaced 2026-09-03 when the service was added to the release tag.
+  _LOG_BUCKET: 'gs://${_PROJECT_ID}-cloudbuild-logs'
 
 tags: ['${_PROJECT_ID}', '${_SERVICE_NAME}']
 
@@ -29,7 +36,7 @@ options:
   # Bun + node + git + npm install of the ext-apps monorepo is heavier than
   # a pure-Node build. E2_HIGHCPU_8 keeps the image build under ~5 minutes.
   machineType: E2_HIGHCPU_8
-logsBucket: gs://your-deploy-project-id-logging-bucket
+logsBucket: '${_LOG_BUCKET}'
 
 steps:
   # --- Build the map-server image (clones ext-apps at pinned commit) ---
@@ -50,6 +57,33 @@ steps:
     args:
       - 'push'
       - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/server:${SHORT_SHA}'
+
+  # --- Version tag, so a release can be promoted as a unit ---
+  #
+  # `:${SHORT_SHA}` is immutable and is what this build deploys, but a promotion
+  # asks for a VERSION: `crane copy <repo>:vX.Y.Z`. Without this step no such
+  # tag exists for this service, so `make promote … VERSION=vX.Y.Z` could not
+  # carry it and a release tag described only the frontend/backend/toolbox.
+  #
+  # No-op on branch builds: TAG_NAME is empty there (and BRANCH_NAME is empty on
+  # tag builds — that asymmetry is what broke this pipeline once already, see the
+  # header).
+  - name: 'gcr.io/cloud-builders/docker'
+    id: tag-version-mcp-ext-apps-map
+    waitFor: ['push-mcp-ext-apps-map']
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        REPO="${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/server"
+        if [ -z "${TAG_NAME}" ]; then
+          echo "not a tag build — no version tag to publish"
+          exit 0
+        fi
+        docker tag "$${REPO}:${SHORT_SHA}" "$${REPO}:${TAG_NAME}"
+        docker push "$${REPO}:${TAG_NAME}"
+        echo "published $${REPO}:${TAG_NAME}"
 
   # --- Deploy to Cloud Run (single container, public — used by both
   #     the agent's McpToolset on the backend AND the iframe in the browser

@@ -24,7 +24,7 @@ vi.mock("@a2ui/web_core/v0_9", () => {
     private surfaces = new Map<string, {
       id: string;
       catalog: { id: string };
-      dataModel: { lastValue: unknown };
+      dataModel: { lastValue: unknown; get: () => undefined; subscribe: () => { unsubscribe: () => void } };
       onAction: { subscribe: (h: ActionHandler) => { unsubscribe: () => void } };
       // Test-only escape hatch — sprint 2.10 mount subscribes to
       // surface.onAction; tests use this to fire a synthetic action
@@ -47,7 +47,7 @@ vi.mock("@a2ui/web_core/v0_9", () => {
           this.surfaces.set(p.surfaceId, {
             id: p.surfaceId,
             catalog: { id: p.catalogId },
-            dataModel: { lastValue: undefined },
+            dataModel: { lastValue: undefined, get: () => undefined, subscribe: () => ({ unsubscribe: () => {} }) },
             onAction: {
               subscribe: (h: ActionHandler) => {
                 handlers.add(h);
@@ -69,11 +69,22 @@ vi.mock("@a2ui/web_core/v0_9", () => {
   return { MessageProcessor: FakeProcessor };
 });
 
+vi.mock("@/components/protocols/workbenchCatalog", () => ({ workbenchCatalog: { id: "https://a2ui.org/specification/v0_9/basic_catalog.json" } }));
+
 vi.mock("@a2ui/react/v0_9", () => ({
   basicCatalog: { id: "https://a2ui.org/specification/v0_9/basic_catalog.json" },
   A2uiSurface: ({ surface }: { surface: { id: string } }) => (
     <div data-testid="a2ui-surface" data-surface-id={surface.id} />
   ),
+}));
+
+// The markdown catalog is Basic with one component swapped, built at module
+// load from `createReactComponent` + `basicCatalog.components`. These suites
+// stub the SDK to avoid rendering it, so the real builder would explode on the
+// stub — and it has nothing to do with what is under test here. Stubbed to the
+// only field this code path reads.
+vi.mock("@/components/protocols/a2uiMarkdownCatalog", () => ({
+  markdownCatalog: { id: "https://a2ui.org/specification/v0_9/basic_catalog.json" },
 }));
 
 // Sprint 2.10 — mount POSTs A2uiClientAction to the backend. Mock
@@ -282,5 +293,66 @@ describe("A2UISurfaceMount — onAction dispatch (sprint 2.10)", () => {
 
     expect(screen.getByTestId("a2ui-surface")).toBeInTheDocument();
     consoleWarn.mockRestore();
+  });
+});
+
+// Two-way workbench mode C — direct:<name> → POST surface-action-direct, then a
+// status bar pinned to the top of the surface (NEVER SILENT).
+describe("A2UISurfaceMount — direct actions", () => {
+  function setup() {
+    renderMount({ surfaceId: "workspace", sessionId: "sess-1" });
+    act(() => {
+      capturedRegistry!.appendMessages("workspace", [createMsg("workspace")], "tc-1");
+    });
+    const surface = capturedRegistry!.getState("workspace")?.surface as unknown as {
+      _fireAction: (a: unknown) => void;
+    };
+    return (action: unknown) =>
+      act(() => {
+        surface._fireAction(action);
+      });
+  }
+
+  beforeEach(() => fetchWithAuthMock.mockReset());
+
+  it("POSTs to surface-action-direct and shows the server's message", async () => {
+    fetchWithAuthMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "ok", message: "Marked 2 read (#1, #3).", messages: [] }),
+    });
+    const fire = setup();
+    fire({ name: "direct:mark_read", context: { selected: { m1: true, m3: true } } });
+    await act(async () => {});
+
+    const [url, init] = fetchWithAuthMock.mock.calls[0];
+    expect(url).toBe("/api/proxy/api/sessions/sess-1/surface-action-direct");
+    expect(JSON.parse(init.body as string).action.context).toEqual({ selected: { m1: true, m3: true } });
+    const bar = screen.getByTestId("a2ui-surface-direct-status");
+    expect(bar).toHaveAttribute("data-kind", "ok");
+    expect(bar).toHaveTextContent("Marked 2 read (#1, #3).");
+  });
+
+  it("shows a refusal or handler error as a visible alert", async () => {
+    fetchWithAuthMock.mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ detail: "This skill can't do that" }),
+    });
+    const fire = setup();
+    fire({ name: "direct:mark_read", context: {} });
+    await act(async () => {});
+    const bar = screen.getByTestId("a2ui-surface-direct-status");
+    expect(bar).toHaveAttribute("role", "alert");
+    expect(bar).toHaveTextContent("This skill can't do that");
+
+    fetchWithAuthMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "error", message: "Tick one or more messages first.", messages: [] }),
+    });
+    fire({ name: "direct:mark_read", context: {} });
+    await act(async () => {});
+    expect(screen.getByTestId("a2ui-surface-direct-status")).toHaveTextContent("Tick one or more");
   });
 });

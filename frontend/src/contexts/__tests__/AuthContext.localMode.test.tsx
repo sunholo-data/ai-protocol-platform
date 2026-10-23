@@ -1,7 +1,8 @@
 /**
  * LOCAL_MODE branch of AuthProvider — exposes a deterministic stub identity
  * without any Firebase init. This test pins the contract that:
- *   - useAuth() in LOCAL_MODE returns a user immediately (no loading flicker)
+ *   - useAuth() in LOCAL_MODE settles on the identity /whoami reports (a
+ *     tailnet-served host knows the real user), else the workshop stub
  *   - getIdToken() returns the well-known stub token
  *   - signIn / signOut are silent no-ops
  */
@@ -33,12 +34,26 @@ describe("AuthProvider — LOCAL_MODE branch", () => {
     vi.mocked(localMode.isLocalMode).mockReturnValue(true);
   });
 
-  it("exposes the workshop user immediately, no loading flicker", () => {
+  it("settles on the workshop user when /whoami fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("down"))));
     const { result } = renderHook(() => useAuth(), { wrapper });
-    expect(result.current.user).not.toBeNull();
+    await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.user?.uid).toBe("workshop-user");
     expect(result.current.user?.email).toBe("workshop@local");
-    expect(result.current.loading).toBe(false);
+  });
+
+  it("uses the identity the backend reports (tailnet-served host)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({ ok: true, json: () => Promise.resolve({ uid: "ada", email: "ada@example.com" }) }),
+      ),
+    );
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    expect(result.current.loading).toBe(true);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.user?.uid).toBe("ada");
+    expect(result.current.user?.email).toBe("ada@example.com");
   });
 
   it("getIdToken returns the well-known stub token", async () => {

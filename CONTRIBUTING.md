@@ -12,7 +12,10 @@ forks.
 
 - **First time here?** Start with [WORKSHOP.md](WORKSHOP.md) — clone,
   `LOCAL_MODE=1`, `make dev`, chat in under 30 minutes.
-- **Architecture:** [docs/design/v6.1.0/SEQUENCE.md](docs/design/v6.1.0/SEQUENCE.md)
+- **Architecture:** [CLAUDE.md](CLAUDE.md#architecture) — the protocol stack,
+  project layout, and the principles that are architectural rather than
+  advisory. (Per-version design docs are internal to the upstream deployment
+  and are not published with the template.)
 - **Protocol talk:** [docs/talks/ai-ui-protocol-stack.md](docs/talks/ai-ui-protocol-stack.md)
 
 ## Reporting bugs

@@ -15,8 +15,15 @@ const config = {
       }
     },
     extend: {
+      // FORKS: don't edit fonts or radii here — set them in your theme file
+      // (public/brand/<fork>/theme.css). If this merged with a conflict, take
+      // upstream's version; UPGRADING.md (2026-10-01) has the steps.
       fontFamily: {
-        sans: ['Euclid Circular A', 'system-ui', 'sans-serif'],
+        // Euclid Circular B — the customer's brand face, declared as @font-face
+        // in globals.css. Was 'Euclid Circular A': a different family, and one
+        // nothing ever loaded, so this stack silently resolved to system-ui on
+        // every render.
+        sans: ['Euclid Circular B', 'system-ui', 'sans-serif'],
         serif: ['Crimson Pro', 'Georgia', 'serif'],
       },
       colors: {
@@ -45,11 +52,29 @@ const config = {
           DEFAULT: 'hsl(var(--destructive))',
           foreground: 'hsl(var(--destructive-foreground))',
         },
+        // Floating surfaces (menus, popovers, hover cards) and cards. Without
+        // these, `bg-popover` / `bg-card` compiled to NOTHING and menus were
+        // transparent — the text underneath bled through (2026-10-02). They
+        // fall back to the page colours so a fork theme that never sets them
+        // still gets an opaque surface.
+        popover: {
+          DEFAULT: 'hsl(var(--popover, var(--background)))',
+          foreground: 'hsl(var(--popover-foreground, var(--foreground)))',
+        },
+        card: {
+          DEFAULT: 'hsl(var(--card, var(--background)))',
+          foreground: 'hsl(var(--card-foreground, var(--foreground)))',
+        },
       },
       borderRadius: {
+        // One corner radius for every surface (the theme's --radius), so a
+        // small radius like the default 3px never goes to zero or negative.
+        '2xl': 'var(--radius)',
+        xl: 'var(--radius)',
         lg: 'var(--radius)',
-        md: 'calc(var(--radius) - 2px)',
-        sm: 'calc(var(--radius) - 4px)',
+        md: 'var(--radius)',
+        sm: 'max(0px, calc(var(--radius) - 1px))',
+        DEFAULT: 'var(--radius)',
       },
     },
   },

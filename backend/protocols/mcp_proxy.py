@@ -51,6 +51,7 @@ from protocols.artefact_review import (
     get_registered_artefact_reviewer,
 )
 from skills import skill_config
+from tools.mcp.id_token_cache import IdTokenUnavailable, get_id_token
 
 log = logging.getLogger(__name__)
 
@@ -160,6 +161,37 @@ async def _forward(*, server_id: str, request: Request, user: User, method: str)
     server_headers = server_config.get("headers") or {}
     if isinstance(server_headers, dict):
         outbound_headers.update({str(k): str(v) for k, v in server_headers.items()})
+
+    # An IAM-gated Cloud Run upstream needs a GOOGLE ID token. We stripped the
+    # caller's Firebase JWT above (it must never leave this boundary) and until
+    # 2026-09-05 put nothing back, so every request to such a server reached
+    # Cloud Run's edge with no credential and returned 403 "Empty Authorization
+    # header value". The agent's path (tools/mcp/registry.py) has always minted
+    # one; this path is the frontend's, and did not — which is why the browser
+    # worked for the agent and 403'd for the UI.
+    if (server_config.get("auth") or "") == "google_id_token":
+        # Audience is the SERVICE, not the /mcp path — same rule as the registry.
+        audience = str(upstream_url)
+        if audience.endswith("/mcp"):
+            audience = audience[: -len("/mcp")]
+        audience = audience.rstrip("/")
+        try:
+            outbound_headers["Authorization"] = f"Bearer {get_id_token(audience)}"
+        except IdTokenUnavailable as exc:
+            # Loud, not an opaque upstream 403 (CLAUDE.md #8).
+            log.error("mcp_proxy: %s (server=%s)", exc, server_id)
+            raise HTTPException(
+                status_code=502,
+                detail="This tool's backing service could not be authenticated from here.",
+            ) from exc
+
+        # WHICH PERSON, by email. The gate on the far side is keyed on email and
+        # domain — `registry.py` records that feeding it the Firebase UID "can
+        # never match, which is exactly how the first deployed attempt failed".
+        # Sending nothing at all fails the same way, with the service answering
+        # "could not tell which user this request is for".
+        if user.email:
+            outbound_headers["X-Aitana-User"] = user.email
 
     body = await request.body() if method in {"POST", "DELETE"} else b""
 

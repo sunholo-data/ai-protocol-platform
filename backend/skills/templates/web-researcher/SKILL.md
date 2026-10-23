@@ -33,9 +33,9 @@ metadata:
       # docs/design/v6.1.0/mcp-app-integrations.md.
       # ext-apps-map DROPPED 2026-07-21 (issue #14): non-essential for research,
       # and G42 strict resolution hard-500s the WHOLE skill on any env whose
-      # mcp_servers/ registry lacks the doc (bit the ONE team on test, where the
+      # mcp_servers/ registry lacks the doc (bit the tenant team on test, where the
       # map Cloud Run service is still the terraform placeholder). Re-add only
-      # after the map service is provisioned via the multivac-aitana terraform
+      # after the map service is provisioned via the deployment-infrastructure terraform
       # repo on every env this skill ships to.
       servers: []
       # Per-server opt-in: which servers' iframes are allowed to push

@@ -73,7 +73,7 @@ def test_operator_domain_allowed_without_firestore(monkeypatch: pytest.MonkeyPat
 def test_mapped_tenant_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AUTH_OPERATOR_DOMAINS", "yourcompany.com")
     with patch("db.clients.get_client_cached", return_value=object()):
-        assert _domain_allowed(_user("acmeenergy.com")) is True
+        assert _domain_allowed(_user("energy.example")) is True
 
 
 def test_unmapped_domain_denied(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,7 +115,7 @@ def test_gate_on_mapped_tenant_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AUTH_REQUIRE_KNOWN_DOMAIN", "1")
     monkeypatch.setenv("AUTH_OPERATOR_DOMAINS", "yourcompany.com")
     with patch("db.clients.get_client_cached", return_value=object()), patch("auth.is_local_mode", return_value=False):
-        _enforce_domain_allowlist(_user("acmeenergy.com"))  # no raise
+        _enforce_domain_allowlist(_user("energy.example"))  # no raise
 
 
 def test_local_mode_exempt(monkeypatch: pytest.MonkeyPatch) -> None:

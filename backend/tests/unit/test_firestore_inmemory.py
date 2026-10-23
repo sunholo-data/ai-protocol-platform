@@ -7,7 +7,8 @@ The in-memory client must match ``google.cloud.firestore.Client`` for the
   Client       : .collection()
   Collection   : .document(), .where(filter=FieldFilter), .order_by(field,
                  direction=...), .limit(n), .stream(), .start_after(snap)
-  DocumentRef  : .get(), .set(data, merge=...), .update(data), .delete()
+  DocumentRef  : .get(), .set(data, merge=...), .update(data), .delete(),
+                 .collection(name)
   Snapshot     : .exists, .to_dict(), .id
   Sentinels    : Increment, ArrayUnion, ArrayRemove, SERVER_TIMESTAMP
   Constants    : Query.DESCENDING, Query.ASCENDING
@@ -416,3 +417,47 @@ def test_writes_from_threads_dont_lose_data(client):
 
     docs = list(client.collection("c").stream())
     assert len(docs) == 50
+
+
+# ---------------------------------------------------------------------------
+# Subcollections — DocumentRef.collection(name). Missing until 2026-10-19, so
+# GET /api/folders (users/{uid}/folders) 500'd in LOCAL_MODE.
+# ---------------------------------------------------------------------------
+
+
+def test_subcollection_round_trip_and_stream(client):
+    folders = client.collection("users").document("u1").collection("folders")
+    folders.document("f1").set({"name": "Contracts"})
+    folders.document("f2").set({"name": "Reports"})
+
+    assert folders.document("f1").get().to_dict() == {"name": "Contracts"}
+    assert sorted(s.id for s in folders.stream()) == ["f1", "f2"]
+    # The parent document need not exist (real Firestore semantics).
+    assert client.collection("users").document("u1").get().exists is False
+
+
+def test_subcollections_are_scoped_to_their_parent(client):
+    client.collection("users").document("u1").collection("folders").document("f1").set({"n": 1})
+    other = client.collection("users").document("u2").collection("folders")
+    assert list(other.stream()) == []
+    assert other.document("f1").get().exists is False
+
+
+def test_subcollection_supports_update_delete_and_queries(client):
+    from db.firestore_inmemory import FieldFilter, Increment
+
+    folders = client.collection("users").document("u1").collection("folders")
+    folders.document("f1").set({"name": "A", "docCount": 0})
+    folders.document("f1").update({"docCount": Increment(2)})
+    assert folders.document("f1").get().to_dict()["docCount"] == 2
+    hits = list(folders.where(filter=FieldFilter("name", "==", "A")).stream())
+    assert [h.id for h in hits] == ["f1"]
+    folders.document("f1").delete()
+    assert folders.document("f1").get().exists is False
+
+
+def test_nested_subcollections(client):
+    deep = client.collection("a").document("b").collection("c").document("d").collection("e")
+    deep.document("x").set({"v": 1})
+    assert deep.document("x").get().to_dict() == {"v": 1}
+    assert deep.document("x").path == "a/b/c/d/e/x"

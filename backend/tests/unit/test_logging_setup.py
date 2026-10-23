@@ -81,9 +81,9 @@ class TestStructuredShape:
         # Exactly what LatencyTracker.emit_log() does.
         logging.getLogger("observability.timing").info(
             "ttft skill=%s ttft_ms=%s",
-            "one-assistant",
+            "demo-assistant",
             812.5,
-            extra={"json_fields": {"event": "ttft", "first_model_token_ms": 812.5, "skill_id": "one-assistant"}},
+            extra={"json_fields": {"event": "ttft", "first_model_token_ms": 812.5, "skill_id": "demo-assistant"}},
         )
 
         line = capsys.readouterr().out.strip().splitlines()[-1]
@@ -91,8 +91,8 @@ class TestStructuredShape:
         assert payload["severity"] == "INFO"
         assert payload["event"] == "ttft", "jsonPayload.event='ttft' is the query we rely on"
         assert payload["first_model_token_ms"] == 812.5
-        assert payload["skill_id"] == "one-assistant"
-        assert "ttft skill=one-assistant" in payload["message"]
+        assert payload["skill_id"] == "demo-assistant"
+        assert "ttft skill=demo-assistant" in payload["message"]
 
     def test_plain_text_off_cloud_run(self, fresh_module, capsys):
         """Local dev keeps readable logs — JSON lines would make `make dev` unusable."""
@@ -127,3 +127,30 @@ class TestStructuredShape:
         payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
         assert payload["severity"] == "ERROR"
         assert "kaboom" in payload["exception"]
+
+
+class TestNoise:
+    """Prod 2026-09-13/14: 36% of backend log lines were ag_ui_adk's per-token
+    `[ADK_EVENT]` INFO line and ~10% were pydantic serializer warnings split
+    across multi-line stderr entries. The real errors were under that."""
+
+    def test_ag_ui_adk_is_capped_at_warning(self, fresh_module):
+        mod = fresh_module(on_cloud_run=True)
+        mod.setup_logging()
+        assert not logging.getLogger("ag_ui_adk.adk_agent").isEnabledFor(logging.INFO)
+        assert logging.getLogger("ag_ui_adk.adk_agent").isEnabledFor(logging.WARNING)
+        # our own modules are untouched
+        assert logging.getLogger("observability.timing").isEnabledFor(logging.INFO)
+
+    def test_library_warnings_are_filtered_and_the_rest_captured(self, fresh_module):
+        import warnings
+
+        mod = fresh_module(on_cloud_run=True)
+        mod.setup_logging()
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("default")
+            mod._quiet_third_party()  # re-apply inside the catch context
+            warnings.warn("Pydantic serializer warnings: blah", UserWarning, stacklevel=1)
+            warnings.warn("[EXPERIMENTAL] Foo: This feature is experimental", UserWarning, stacklevel=1)
+            warnings.warn("something we do want to see", UserWarning, stacklevel=1)
+        assert [str(w.message) for w in seen] == ["something we do want to see"]

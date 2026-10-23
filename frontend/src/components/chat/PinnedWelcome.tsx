@@ -67,11 +67,13 @@ export function PinnedWelcome({
     headerLabel ?? `How to get started${skillDisplayName ? ` with ${skillDisplayName}` : ""}`;
 
   return (
-    <div className="border-b bg-muted/30">
+    // A pale-ground panel with its own space below it (mb-2 on top of the
+    // transcript rhythm) so the first message never butts against it.
+    <div className="mb-2 rounded-[var(--radius)] bg-muted">
       <button
         type="button"
         onClick={toggle}
-        className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted"
+        className="flex min-h-[44px] w-full items-center gap-2 rounded-[var(--radius)] px-4 py-3 text-left text-sm font-medium text-foreground hover:bg-border/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         aria-expanded={!collapsed}
         aria-controls="pinned-welcome-body"
       >
@@ -84,7 +86,7 @@ export function PinnedWelcome({
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className={collapsed ? "" : "rotate-90"}
+          className={"shrink-0 text-muted-foreground " + (collapsed ? "" : "rotate-90")}
           aria-hidden="true"
         >
           <polyline points="4 2 8 6 4 10" />
@@ -92,7 +94,7 @@ export function PinnedWelcome({
         <span>{label}</span>
       </button>
       {!collapsed && (
-        <div id="pinned-welcome-body" className="px-4 pb-4 text-sm text-foreground">
+        <div id="pinned-welcome-body" className="max-w-[68ch] px-4 pb-4 text-[15px] leading-[1.7] text-foreground md:text-base">
           <ChatMarkdown content={content} navigateToBlock={() => {}} />
         </div>
       )}

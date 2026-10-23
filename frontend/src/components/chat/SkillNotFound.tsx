@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/apiClient";
 
 interface SkillNotFoundProps {
-  /** Slug from the URL (e.g. "one-ppa-expert") so the user can see what they tried to open. */
+  /** Slug from the URL (e.g. "demo-ppa-expert") so the user can see what they tried to open. */
   slug?: string;
 }
 

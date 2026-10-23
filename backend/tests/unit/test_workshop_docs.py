@@ -30,13 +30,12 @@ def test_index_loads_known_workshop_docs():
     assert "docs/workshop/protocol-gotchas.md" in paths
 
 
-def test_index_includes_v6_2_implemented_design_docs():
-    """Shipped sprint designs from v6.2.0 should be in the corpus."""
+def test_index_includes_public_protocol_design_docs():
+    """The same shared protocol guidance exists in source and public forks."""
     docs = workshop_docs._load_index()
     paths = {d["path"] for d in docs}
-    assert "docs/design/v6.2.0/implemented/a2ui-surface-context.md" in paths
-    assert "docs/design/v6.2.0/implemented/budget-enforcement.md" in paths
-    assert "docs/design/v6.2.0/implemented/anonymous-group-id-auth.md" in paths
+    assert "docs/design/template/template-adk-2-core-bump.md" in paths
+    assert not any("/private/" in path or "/ops/" in path or "/talks/" in path for path in paths)
 
 
 def test_index_includes_integration_howtos():
@@ -47,11 +46,11 @@ def test_index_includes_integration_howtos():
     assert "docs/integrations/tenant-attribution.md" in paths
 
 
-def test_index_includes_canonical_talk_doc():
-    """The living verification-log doc is the source of truth for gotchas."""
+def test_index_includes_public_user_guide():
+    """The workshop helper can use the published user instructions."""
     docs = workshop_docs._load_index()
     paths = {d["path"] for d in docs}
-    assert "docs/talks/ai-ui-protocol-stack.md" in paths
+    assert "docs/user-guide/sharing-and-access.md" in paths
 
 
 def test_index_is_memoised():
@@ -100,10 +99,10 @@ def test_search_finds_protocol_gotchas_for_targeted_query():
     assert "docs/workshop/protocol-gotchas.md" in result
 
 
-def test_search_finds_talk_doc_when_title_matches():
-    """The canonical talk doc surfaces on title-matched queries."""
-    result = workshop_docs.search_workshop_docs("ai protocol stack")
-    assert "docs/talks/ai-ui-protocol-stack.md" in result
+def test_search_finds_user_guide_when_title_matches():
+    """Public user instructions surface on title-matched queries."""
+    result = workshop_docs.search_workshop_docs("sharing access")
+    assert "docs/user-guide/sharing-and-access.md" in result
 
 
 def test_snippet_is_included_in_match():

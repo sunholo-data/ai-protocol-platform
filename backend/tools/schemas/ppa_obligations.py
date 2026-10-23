@@ -415,7 +415,7 @@ def apply_reviewed_settings(
 # Elicitation envelope + build-from-assumptions (v6.7.0 OBLIGATION-ELICITATION
 # 7.8 M1 — THE DEMO UNBLOCK).
 #
-# The ONE PPA corpus is TEMPLATE contracts: every price / date / amount is a
+# The Example PPA corpus is TEMPLATE contracts: every price / date / amount is a
 # ``[●]`` placeholder, so ``map_ppa_obligations`` correctly REFUSES to invent a
 # settlement (a wrong LD/settlement number is trust-ending). But the refusal's
 # ``unmapped`` list proves the AI extraction WORKED — it found the full

@@ -1,7 +1,7 @@
 """OIDC gate for /internal/tasks/* — only the Cloud Tasks queue gets in.
 
 Trust chain (dev infra live 2026-08-10, `compaction_tasks.tf` in
-multivac-aitana): the queue stamps each delivery with an ID token minted as
+deployment-infrastructure): the queue stamps each delivery with an ID token minted as
 `platform-tasks@…` — a dedicated SA with ZERO project roles whose only power
 is being impersonable by the backend runtime SA at enqueue time. So a
 Google-signed token with that email and this route's audience can only have

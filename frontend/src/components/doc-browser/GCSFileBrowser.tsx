@@ -99,6 +99,8 @@ export function GCSFileBrowser({ bucket, rootPath = "", onPick }: GCSFileBrowser
 
   return (
     <div className="flex flex-col gap-1 text-xs">
+      {/* Climbing above the configured root is allowed: the server filters what
+          the caller may see there (buckets/routes.py `_path_allowed`). */}
       {prefix && (
         <button
           type="button"

@@ -109,7 +109,7 @@ def _ts(v: Any) -> str:
 class SessionRow(BaseModel):
     session_id: str
     skill_id: str = ""
-    # Friendly skill name (CLAUDE.md #9) — admins pick sessions by "ONE PPA
+    # Friendly skill name (CLAUDE.md #9) — admins pick sessions by "Example PPA
     # Expert", never by UUID. Empty when the skill can't be resolved.
     skill_label: str = ""
     owner_uid: str = ""
@@ -740,7 +740,7 @@ async def mark_transcript_lost(
     The per-session views already say "transcript unavailable" once opened. This
     labels the LIST, so a user learns a conversation is empty *before* clicking
     into it. Measured on test 2026-08-10: 14 of the 100 most recent sessions, 6
-    of them ONE's — all casualties of the SessionManager sweep fixed on
+    of them the tenant's — all casualties of the SessionManager sweep fixed on
     2026-08-05, with none since.
 
     Only ever sets the flag, and only for rows that have turns but no canonical

@@ -62,26 +62,75 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
   }
 
-  // LOCAL_MODE: mount immediately with a deterministic stub identity.
-  // No Firebase listeners, no loading flicker, no sign-in screen.
   if (isLocalMode()) {
-    return (
-      <AuthContext.Provider
-        value={{
-          user: buildLocalModeStubUser(),
-          loading: false,
-          getIdToken: async () => LOCAL_MODE_STUB_TOKEN,
-          signIn: async () => {},
-          signInWithRedirect: async () => {},
-          signOut: async () => {},
-        }}
-      >
-        {children}
-      </AuthContext.Provider>
-    );
+    return <LocalModeAuthProvider>{children}</LocalModeAuthProvider>;
   }
 
   return <FirebaseAuthProvider>{children}</FirebaseAuthProvider>;
+}
+
+/** How long to wait for /whoami before settling on the stub identity. */
+const LOCAL_WHOAMI_TIMEOUT_MS = 2000;
+
+/**
+ * LOCAL_MODE auth — no Firebase, no sign-in screen. The stub token is the
+ * credential, but WHO the backend treats the caller as depends on the host:
+ * a bare workshop backend answers with the workshop user, while a
+ * tailnet-served deployment (AUTH_MODE=tailnet) answers with the real
+ * Tailscale login. Asking /api/auth/whoami once keeps the UI in step with
+ * the backend — the right name in the account menu, and the right uid for
+ * "Your skills" / your files — instead of every tailnet member seeing
+ * "workshop@local". Falls back to the stub if the call fails or is slow.
+ */
+function LocalModeAuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    let settled = false;
+    const settle = (u: User) => {
+      if (settled) return;
+      settled = true;
+      setUser(u);
+    };
+    const timer = setTimeout(() => settle(buildLocalModeStubUser()), LOCAL_WHOAMI_TIMEOUT_MS);
+    fetch("/api/proxy/api/auth/whoami", {
+      headers: { Authorization: `Bearer ${LOCAL_MODE_STUB_TOKEN}` },
+      cache: "no-store",
+    })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then((me: { uid?: string; email?: string; displayName?: string }) => {
+        if (!me.uid || me.uid === LOCAL_MODE_WORKSHOP_USER.uid) {
+          settle(buildLocalModeStubUser());
+          return;
+        }
+        settle({
+          uid: me.uid,
+          email: me.email || null,
+          displayName: me.displayName || null,
+          photoURL: null,
+        } as unknown as User);
+      })
+      .catch(() => settle(buildLocalModeStubUser()));
+    return () => {
+      settled = true;
+      clearTimeout(timer);
+    };
+  }, []);
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        loading: user === null,
+        getIdToken: async () => LOCAL_MODE_STUB_TOKEN,
+        signIn: async () => {},
+        signInWithRedirect: async () => {},
+        signOut: async () => {},
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 /** Bridge AnonymousGroupAuth state to the main AuthContext shape so

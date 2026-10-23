@@ -16,6 +16,7 @@ resource-access-control.md §Open questions.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -77,6 +78,81 @@ def _authorize_bucket_read(user: User, access: AccessContext, name: str) -> None
         status_code=403,
         detail={
             "code": "BUCKET_NOT_AUTHORIZED",
+            "message": "You don't have access to these documents.",
+        },
+    )
+
+
+# Operator areas of a shared bucket: the multivac pipeline loads its service
+# config from `config/` (mounted as /gcs_config/config). Never tenant-visible.
+_ADMIN_ONLY_ROOTS = frozenset({"config"})
+
+_ISOLATION_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _per_user_isolation() -> bool:
+    """Wall off each user's and each domain's area inside a shared bucket?
+
+    Off by default: access policy is per client, per instance, so everyone a
+    deployment admits to its documents bucket is one client and colleagues may
+    see each other's uploads. Set ``BUCKET_PER_USER_ISOLATION=1`` on an instance
+    that maps SEVERAL clients to one bucket.
+    """
+    return os.environ.get("BUCKET_PER_USER_ISOLATION", "").strip().lower() in _ISOLATION_TRUTHY
+
+
+def _private_root_owner(path: str) -> tuple[str, str] | None:
+    """(root, owner) when ``path`` sits under a per-principal root, else None.
+
+    A tenant ``documents_bucket`` can be SHARED: several login domains may map to
+    the same bucket, and every user's uploads (``users/{uid}/``), chat artifacts
+    (``{APP_NAME}/{uid}/``) and each domain's brand assets (``brand/{domain}/``)
+    live beside the shared library. The bucket-level gate cannot tell those apart;
+    ``_path_allowed`` does, when ``BUCKET_PER_USER_ISOLATION`` is on.
+    """
+    from adk.agui import APP_NAME
+
+    parts = [p for p in path.split("/") if p]
+    if not parts:
+        return None
+    root = parts[0]
+    if root in ("users", APP_NAME, "brand"):
+        return root, (parts[1] if len(parts) > 1 else "")
+    if root in _ADMIN_ONLY_ROOTS:
+        return root, ""  # no owner: nobody but a platform admin
+    return None
+
+
+def _path_allowed(user: User, access: AccessContext, path: str) -> bool:
+    """May ``user`` see ``path`` (an object name or a list prefix) in a bucket the
+    bucket-level gate already let them into? Platform admins see everything."""
+    if access.is_platform_admin:
+        return True
+    if ".." in path.split("/"):
+        return False
+    hit = _private_root_owner(path)
+    if hit is None:
+        return True
+    root, owner = hit
+    if root in _ADMIN_ONLY_ROOTS:
+        return False
+    if not _per_user_isolation():
+        return True
+    if root == "brand":
+        domain = (user.email or "").rsplit("@", 1)[-1].lower()
+        return bool(owner) and owner.lower() == domain
+    return bool(owner) and owner == user.uid
+
+
+def _authorize_bucket_path(user: User, access: AccessContext, path: str) -> None:
+    """403 when ``path`` is another principal's private area (see ``_path_allowed``)."""
+    if _path_allowed(user, access, path):
+        return
+    logger.warning("bucket-authz DENY private path uid=%s path=%s", user.uid, path[:200])
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "BUCKET_PATH_NOT_AUTHORIZED",
             "message": "You don't have access to these documents.",
         },
     )
@@ -509,6 +585,8 @@ def list_bucket_objects(
     if not _BUCKET_NAME_PATTERN.match(name):
         raise HTTPException(status_code=400, detail="Invalid bucket name format")
     _authorize_bucket_read(user, request.state.access, name)
+    if "/" in prefix:
+        _authorize_bucket_path(user, request.state.access, prefix)
 
     client = _gcs_storage.Client()
     try:
@@ -531,10 +609,20 @@ def list_bucket_objects(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Bucket list failed: {e}") from e
 
-    entries: list[GCSBucketEntry] = [GCSBucketEntry(name=sub, is_prefix=True) for sub in subprefixes]
+    access = request.state.access
+    entries: list[GCSBucketEntry] = [
+        GCSBucketEntry(name=sub, is_prefix=True)
+        for sub in subprefixes
+        # Hide any folder the caller could not open (config/, and under
+        # BUCKET_PER_USER_ISOLATION a private root such as "users/" or another
+        # principal's folder), so the browser never offers a dead end.
+        if _path_allowed(user, access, sub)
+    ]
     for blob in blobs:
         if blob.name == prefix:
             continue  # The prefix itself sometimes appears as a zero-size blob.
+        if not _path_allowed(user, access, blob.name):
+            continue
         entries.append(
             GCSBucketEntry(
                 name=blob.name,
@@ -585,7 +673,7 @@ def preview_bucket_object(
     the SA's bucket whitelist is only defence-in-depth behind the app-layer gate.
 
     SECURITY: bytes are streamed through this authenticated route — NEVER a
-    public / signed URL — so previews of private content (e.g. ONE's PPA
+    public / signed URL — so previews of private content (e.g. the tenant's PPA
     contracts) stay behind the user's Firebase bearer. Do not add a public
     variant. See CLAUDE.md "Security Hard Rules".
     """
@@ -596,6 +684,7 @@ def preview_bucket_object(
     if not object_name or len(object_name) > 1024:
         raise HTTPException(status_code=400, detail="Invalid object name")
     _authorize_bucket_read(user, request.state.access, name)
+    _authorize_bucket_path(user, request.state.access, object_name)
 
     client = _gcs_storage.Client()
     try:
@@ -662,6 +751,7 @@ def thumbnail_bucket_object(
     if not is_thumbnailable(object_name):
         raise HTTPException(status_code=415, detail="Thumbnails are only rendered for PDFs and images")
     _authorize_bucket_read(user, request.state.access, name)
+    _authorize_bucket_path(user, request.state.access, object_name)
 
     cache_key = f"bucket:{name}:{object_name}:{width}"
     cached = cache_get(cache_key)

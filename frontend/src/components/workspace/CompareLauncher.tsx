@@ -4,9 +4,9 @@
 // document tabs + the skill's welcome example documents, then start work with
 // one click. The card offers TWO affordances, gated by capability + selection:
 //
-//   * "Compare contracts" (one-doc-compare) — needs exactly TWO selected;
+//   * "Compare contracts" (demo-doc-compare) — needs exactly TWO selected;
 //     fires a `start_compare` action.
-//   * "Analyze obligations" (one-ppa-expert) — needs exactly ONE selected;
+//   * "Analyze obligations" (demo-ppa-expert) — needs exactly ONE selected;
 //     fires a `start_obligation_analysis` action with `{doc}` (the mapper asks
 //     the user for an effective date via chat when the contract lacks one, so
 //     the launcher never has to collect it).
@@ -38,13 +38,14 @@
 import { useMemo, useState } from "react";
 import type { DocTabData } from "@/components/doc-browser/DocTab";
 import type { ExampleDocument } from "@/types/skill";
+import type { RecentDocument } from "@/hooks/useRecentDocuments";
 import { useActionDrivenAgent, type ActionRunActivitySink } from "@/hooks/useActionDrivenAgent";
 import { CompareConfigForm, type CompareConfig } from "./CompareConfigForm";
 import { cn } from "@/lib/utils";
 
 /** The workspace surface the launcher writes its action into (matches the
  * `a2ui_surface_context.workspace.lastAction` slot documented in the
- * one-doc-compare SKILL.md). */
+ * demo-doc-compare SKILL.md). */
 const WORKSPACE_SURFACE = "workspace";
 const MAX_SELECTED = 2;
 
@@ -79,6 +80,10 @@ export interface CompareLauncherProps {
   /** Skill welcome example documents (authed /api/skills payload) — gs_url
    * identities. */
   exampleDocuments: ExampleDocument[];
+  /** The user's own documents, most recently worked with first. When there are
+   * any, they are offered INSTEAD of the skill's shared `exampleDocuments` — the
+   * demos are the first-run fallback. */
+  recentDocuments?: RecentDocument[];
   /** Fallback send path used when `optedIn` is false. */
   onCompareViaChat: (text: string) => void;
   /** Whether the active skill can compare contracts (has
@@ -151,6 +156,7 @@ export function CompareLauncher({
   optedIn,
   docTabs,
   exampleDocuments,
+  recentDocuments,
   onCompareViaChat,
   onConfigure,
   allowCompare = true,
@@ -166,10 +172,12 @@ export function CompareLauncher({
   });
 
   // Build the candidate list: open doc tabs first (they're the "already in
-  // hand" contracts), then the skill's example library. Dedup an example that
-  // shares a basename with an open tab so the same file isn't offered twice.
+  // hand" contracts), then the user's recent documents — or, for a user with
+  // none yet, the skill's example library. Dedup by id and by basename so the
+  // same file isn't offered twice.
   const candidates = useMemo<CompareCandidate[]>(() => {
     const openNames = new Set(docTabs.map((t) => t.filename.toLowerCase()));
+    const openIds = new Set(docTabs.map((t) => t.id));
     const fromTabs: CompareCandidate[] = docTabs.map((t) => ({
       key: `doc:${t.id}`,
       label: t.filename,
@@ -177,6 +185,16 @@ export function CompareLauncher({
       identity: { doc_id: t.id },
       seedSelected: t.included,
     }));
+    const fromRecent: CompareCandidate[] = (recentDocuments ?? [])
+      .filter((d) => !openIds.has(d.id) && !openNames.has(d.originalFilename.toLowerCase()))
+      .map((d) => ({
+        key: `doc:${d.id}`,
+        label: d.originalFilename,
+        sublabel: d.sourceFormat ? d.sourceFormat.toUpperCase() : undefined,
+        identity: { doc_id: d.id },
+        seedSelected: false,
+      }));
+    if (recentDocuments && recentDocuments.length > 0) return [...fromTabs, ...fromRecent];
     const fromExamples: CompareCandidate[] = exampleDocuments
       .filter((e) => !openNames.has(basename(e.object).toLowerCase()))
       .map((e) => ({
@@ -187,7 +205,7 @@ export function CompareLauncher({
         seedSelected: false,
       }));
     return [...fromTabs, ...fromExamples];
-  }, [docTabs, exampleDocuments]);
+  }, [docTabs, exampleDocuments, recentDocuments]);
 
   // Seed from the doc-tabs bar: the `included` tabs are pre-checked (capped at
   // two). useState initializer runs once — the launcher only mounts in the
@@ -208,7 +226,7 @@ export function CompareLauncher({
   const [config, setConfig] = useState<CompareConfig>({});
 
   // Compare needs TWO contracts; obligation analysis needs exactly ONE. An
-  // obligations-only skill (one-ppa-expert — allowCompare false) is a
+  // obligations-only skill (demo-ppa-expert — allowCompare false) is a
   // single-select picker: cap 1, a "/1" counter, and picking another contract
   // REPLACES the current one (radio semantics). A compare-capable skill keeps
   // the two-select model (analyze, if also allowed, still fires at exactly 1).
@@ -282,7 +300,7 @@ export function CompareLauncher({
     setIsRunning(true);
     try {
       await triggerAction(WORKSPACE_SURFACE, {
-        // Fires the one-ppa-expert `start_obligation_analysis` action. Payload
+        // Fires the demo-ppa-expert `start_obligation_analysis` action. Payload
         // is just the doc identity — the mapper asks the user (via chat) for an
         // effective date when the contract lacks one, so the launcher never has
         // to guess or collect one (design-doc {doc, effective_date?}).
@@ -431,7 +449,7 @@ export function CompareLauncher({
           aria-expanded={showConfig}
           onClick={() => {
             // Toggle the inline scoping form in the launcher card (workbench),
-            // not a chat surface — one-doc-compare is Model-B, so the model
+            // not a chat surface — demo-doc-compare is Model-B, so the model
             // cannot emit an A2UI form in chat. Still notify the optional
             // onConfigure callback so a host can react if it wants.
             setShowConfig((v) => !v);

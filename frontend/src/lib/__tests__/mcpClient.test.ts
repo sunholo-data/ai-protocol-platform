@@ -23,14 +23,14 @@ const clientConnect = vi.fn(async () => undefined);
 const clientCtor = vi.fn();
 
 vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
-  StreamableHTTPClientTransport: vi.fn().mockImplementation((url, opts) => {
+  StreamableHTTPClientTransport: vi.fn().mockImplementation(function (url, opts) {
     transportCtor(url, opts);
     return { __isTransport: true, url, opts };
   }),
 }));
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
-  Client: vi.fn().mockImplementation((info, opts) => {
+  Client: vi.fn().mockImplementation(function (info, opts) {
     clientCtor(info, opts);
     return {
       __isClient: true,

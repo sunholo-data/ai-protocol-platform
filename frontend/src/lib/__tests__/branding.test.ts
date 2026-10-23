@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Per-deployment branding tests (v6.4.0 ONE-DEMO M1).
+ * Per-deployment branding tests (v6.4.0 TENANT-DEMO M1).
  *
  * branding.ts reads NEXT_PUBLIC_BRAND_* at module-load time with Sunholo
  * fallbacks. Tests use `vi.resetModules()` + `vi.stubEnv()` to verify both
@@ -65,7 +65,7 @@ describe("BRANDING — env-var driven per-deployment branding", () => {
     );
   });
 
-  it("uses NEXT_PUBLIC_BRAND_* overrides when a fork sets them (ONE example)", async () => {
+  it("uses NEXT_PUBLIC_BRAND_* overrides when a fork sets them (synthetic example)", async () => {
     vi.stubEnv("NEXT_PUBLIC_BRAND_APP_NAME", "Acme Energy");
     vi.stubEnv("NEXT_PUBLIC_BRAND_TAGLINE", "PPA & PtX intelligence");
     vi.stubEnv(
@@ -75,7 +75,7 @@ describe("BRANDING — env-var driven per-deployment branding", () => {
     vi.stubEnv("NEXT_PUBLIC_BRAND_FAVICON", "/images/logo/acmeenergy-logo.jpg");
     vi.stubEnv("NEXT_PUBLIC_BRAND_LOGO_HERO", "/images/logo/acmeenergy-logo.jpg");
     vi.stubEnv("NEXT_PUBLIC_BRAND_LOGO_AVATAR", "/images/logo/acmeenergy-logo.jpg");
-    vi.stubEnv("NEXT_PUBLIC_BRAND_EMAIL", "hello@acmeenergy.com");
+    vi.stubEnv("NEXT_PUBLIC_BRAND_EMAIL", "hello@energy.example");
     vi.stubEnv("NEXT_PUBLIC_BRAND_GITHUB", "");
 
     const BRANDING = await freshBranding();
@@ -87,7 +87,7 @@ describe("BRANDING — env-var driven per-deployment branding", () => {
     expect(BRANDING.logo.favicon).toBe("/images/logo/acmeenergy-logo.jpg");
     expect(BRANDING.logo.heroAnimated).toBe("/images/logo/acmeenergy-logo.jpg");
     expect(BRANDING.logo.chatAvatar).toBe("/images/logo/acmeenergy-logo.jpg");
-    expect(BRANDING.contact.email).toBe("hello@acmeenergy.com");
+    expect(BRANDING.contact.email).toBe("hello@energy.example");
     // Empty string falls back to upstream — forks that don't have a public
     // repo can leave NEXT_PUBLIC_BRAND_GITHUB unset.
     expect(BRANDING.contact.githubRepo).toBe(
@@ -119,7 +119,7 @@ describe("BRANDING — env-var driven per-deployment branding", () => {
     expect(BRANDING.tagline).toBe("AI Protocol Platform");
   });
 
-  // ── BRANDING.demo (v6.4.0 ONE-DEMO M3.5) ───────────────────────────────
+  // ── BRANDING.demo (v6.4.0 TENANT-DEMO M3.5) ───────────────────────────────
 
   it("BRANDING.demo falls back to vertical-neutral document-review defaults when env vars unset", async () => {
     clearAllBrandVars();
@@ -148,23 +148,23 @@ describe("BRANDING — env-var driven per-deployment branding", () => {
     ]);
   });
 
-  it("BRANDING.demo uses NEXT_PUBLIC_BRAND_DEMO_* overrides (ONE example)", async () => {
+  it("BRANDING.demo uses NEXT_PUBLIC_BRAND_DEMO_* overrides (synthetic example)", async () => {
     vi.stubEnv("NEXT_PUBLIC_BRAND_DEMO_HERO_EYEBROW", "Energy intelligence");
     vi.stubEnv("NEXT_PUBLIC_BRAND_DEMO_HERO_LINE_A", "Side-by-side");
     vi.stubEnv("NEXT_PUBLIC_BRAND_DEMO_HERO_LINE_B", "PPA contract comparison");
     vi.stubEnv(
       "NEXT_PUBLIC_BRAND_DEMO_HERO_BODY",
-      "Compare any two PPA contracts. AILANG-parsed blocks, structured clause extraction, ENTSO-E-grounded price valuation. Built for ONE consultants.",
+      "Compare any two PPA contracts. AILANG-parsed blocks, structured clause extraction, ENTSO-E-grounded price valuation. Built for example consultants.",
     );
     vi.stubEnv("NEXT_PUBLIC_BRAND_DEMO_CTA_PRIMARY", "Ask the PPA expert");
     vi.stubEnv("NEXT_PUBLIC_BRAND_DEMO_CTA_SECONDARY", "Compare contracts");
     vi.stubEnv(
       "NEXT_PUBLIC_BRAND_DEMO_CHAT_HREF",
-      "/chat/@aitana-platform/one-ppa-expert",
+      "/chat/@aitana-platform/demo-ppa-expert",
     );
     vi.stubEnv(
       "NEXT_PUBLIC_BRAND_DEMO_CHAT_HREF_SECONDARY",
-      "/chat/@aitana-platform/one-doc-compare",
+      "/chat/@aitana-platform/demo-doc-compare",
     );
 
     const BRANDING = await freshBranding();
@@ -175,10 +175,10 @@ describe("BRANDING — env-var driven per-deployment branding", () => {
     expect(BRANDING.demo.ctaPrimary).toBe("Ask the PPA expert");
     expect(BRANDING.demo.ctaSecondary).toBe("Compare contracts");
     expect(BRANDING.demo.chatHref).toBe(
-      "/chat/@aitana-platform/one-ppa-expert",
+      "/chat/@aitana-platform/demo-ppa-expert",
     );
     expect(BRANDING.demo.chatHrefSecondary).toBe(
-      "/chat/@aitana-platform/one-doc-compare",
+      "/chat/@aitana-platform/demo-doc-compare",
     );
   });
 

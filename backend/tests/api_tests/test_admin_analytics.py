@@ -32,7 +32,7 @@ _NON_ADMIN = User(
 _DOCS = [
     {
         "__id": "sess-old",
-        "skillId": "one-ppa-expert",
+        "skillId": "demo-ppa-expert",
         "ownerUid": "u1",
         "title": "PPA review",
         "turnCount": 3,
@@ -52,7 +52,7 @@ _DOCS = [
     },
     {
         "__id": "sess-mid",
-        "skillId": "one-ppa-expert",
+        "skillId": "demo-ppa-expert",
         "ownerUid": "u1",
         "title": "Clause check",
         "turnCount": 2,
@@ -64,7 +64,7 @@ _DOCS = [
     # ancestor (zero turns, never titled, no documents).
     {
         "__id": "sess-husk-provisional",
-        "skillId": "one-ppa-expert",
+        "skillId": "demo-ppa-expert",
         "ownerUid": "u3",
         "turnCount": 0,
         "provisional": True,
@@ -153,7 +153,7 @@ def test_list_sessions_q_filter(admin_client: TestClient) -> None:
 
 def test_list_sessions_skill_filter(admin_client: TestClient) -> None:
     with patch("admin.analytics_routes.query_documents", return_value=_DOCS):
-        resp = admin_client.get("/api/admin/analytics/sessions", params={"skill_id": "one-ppa-expert"})
+        resp = admin_client.get("/api/admin/analytics/sessions", params={"skill_id": "demo-ppa-expert"})
     assert resp.status_code == 200
     sessions = resp.json()["sessions"]
     assert [s["session_id"] for s in sessions] == ["sess-mid", "sess-old"]
@@ -180,8 +180,8 @@ def test_list_sessions_facets_cover_full_population_despite_filters(admin_client
     assert owners["u1"]["sessions"] == 2
     assert owners["u1"]["last_active"] == "2026-07-05T10:20:00+00:00"
     skills = {s["id"]: s for s in body["skills"]}
-    assert set(skills) == {"one-ppa-expert", "web-researcher"}
-    assert skills["one-ppa-expert"]["sessions"] == 2
+    assert set(skills) == {"demo-ppa-expert", "web-researcher"}
+    assert skills["demo-ppa-expert"]["sessions"] == 2
 
 
 def test_list_sessions_hides_never_used_husks(admin_client: TestClient) -> None:
@@ -214,7 +214,7 @@ def test_list_sessions_q_matches_friendly_skill_label(admin_client: TestClient) 
         patch("admin.analytics_routes.query_documents", return_value=_DOCS),
         patch(
             "admin.analytics_routes.resolve_skill_labels",
-            return_value={"one-ppa-expert": "Contract Expert"},
+            return_value={"demo-ppa-expert": "Contract Expert"},
         ),
     ):
         resp = admin_client.get("/api/admin/analytics/sessions", params={"q": "contract expert"})
@@ -273,7 +273,7 @@ def test_trace_known_session_reconstructs(admin_client: TestClient) -> None:
 
     class _Idx:
         owner_uid = "u1"
-        skill_id = "one-ppa-expert"
+        skill_id = "demo-ppa-expert"
         title = "PPA review"
         turn_count = 3
         document_ids: ClassVar[list[str]] = ["doc-a"]
@@ -298,7 +298,7 @@ def test_trace_known_session_reconstructs(admin_client: TestClient) -> None:
         patch("admin.analytics_routes._events_to_delegations", return_value=[]),
         patch(
             "admin.analytics_routes.resolve_skill_labels",
-            return_value={"one-ppa-expert": "Contract Expert"},
+            return_value={"demo-ppa-expert": "Contract Expert"},
         ),
         patch(
             "admin.analytics_routes.get_document",
@@ -309,7 +309,7 @@ def test_trace_known_session_reconstructs(admin_client: TestClient) -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["owner_uid"] == "u1"
-    assert body["skill_id"] == "one-ppa-expert"
+    assert body["skill_id"] == "demo-ppa-expert"
     assert body["skill_label"] == "Contract Expert"
     assert body["title"] == "PPA review"
     assert body["turn_count"] == 3
@@ -317,7 +317,16 @@ def test_trace_known_session_reconstructs(admin_client: TestClient) -> None:
     assert body["event_count"] == 2
     assert body["documents"] == [{"id": "doc-a", "name": "demo-leap.pdf"}]
     assert body["messages"] == [
-        {"role": "user", "content": "hi", "timestamp": 1.0, "avatar": None, "agent_label": None}
+        {
+            "role": "user",
+            "content": "hi",
+            "timestamp": 1.0,
+            "avatar": None,
+            "agent_label": None,
+            "id": None,
+            "author": None,
+            "turn_id": None,
+        }
     ]
 
 

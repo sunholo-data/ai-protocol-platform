@@ -1,6 +1,6 @@
 """The Skill Studio authoring copilot template must stay well-formed.
 
-v6.6.0 ONE-FORK-CONVERGENCE M3. The frontend AuthoringCopilot parses a fenced
+v6.6.0 TENANT-FORK-CONVERGENCE M3. The frontend AuthoringCopilot parses a fenced
 ```json proposals block whose `kind` values must match applyProposal.ts. This
 test pins the contract from the backend side so the two can't silently drift.
 """
@@ -24,6 +24,7 @@ EXPECTED_KINDS = {
     "set_persona",
     "add_a2ui_surface",
     "set_welcome",
+    "set_knowledge_bases",
 }
 
 
@@ -37,7 +38,7 @@ class TestAuthoringTemplate:
 
     def test_gated_to_admin_tags(self):
         body = _SKILL_MD.read_text()
-        assert "one-admin" in body
+        assert "aitana-admin" in body
         assert "type: tagged" in body
 
     def test_declares_all_proposal_kinds(self):
@@ -88,7 +89,7 @@ class TestSystemTag:
 class TestAuthoringTemplateAccess:
     """Who can reach the Skill Studio Copilot (2026-08-05).
 
-    Opened to the whole ONE team on request. Safe because the copilot is
+    Opened to the whole tenant team on request. Safe because the copilot is
     propose-only — it drafts config for a human to review and saves nothing —
     so team access grants no write capability.
     """
@@ -100,16 +101,11 @@ class TestAuthoringTemplateAccess:
         front = body.split("---")[1]
         return yaml.safe_load(front)["access_control"]["tags"]
 
-    def test_one_team_can_reach_it(self):
-        assert "ONE" in self._tags(), (
-            "the ONE team's derived group tag is 'ONE' (clients/acmeenergy.com"
-            ".derived_group_tags) — without it the tag gate rejects the team"
-        )
+    def test_public_default_is_admin_only(self):
+        assert self._tags() == ["aitana-admin"]
 
     def test_admins_keep_access(self):
-        tags = self._tags()
-        assert "aitana-admin" in tags
-        assert "one-admin" in tags
+        assert "aitana-admin" in self._tags()
 
     def test_stays_tag_gated_not_public(self):
         import yaml

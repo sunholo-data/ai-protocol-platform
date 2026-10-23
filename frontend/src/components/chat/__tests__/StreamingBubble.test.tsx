@@ -18,7 +18,7 @@ describe("StreamingBubble", () => {
     const { container } = render(
       <StreamingBubble message={makeMsg("typing...")} skillId="test-skill" />,
     );
-    expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
+    expect(container.querySelector("[class*=animate-pulse]")).toBeInTheDocument();
   });
 
   it("shows the skill name", () => {
@@ -31,10 +31,10 @@ describe("StreamingBubble", () => {
     expect(screen.getByRole("img", { name: BRANDING.appName })).toBeInTheDocument();
   });
 
-  it("applies orange left border class", () => {
+  it("uses theme tokens, not a hardcoded orange bar", () => {
     const { container } = render(
       <StreamingBubble message={makeMsg("hi")} skillId="s" />,
     );
-    expect(container.querySelector(".border-orange-400")).toBeInTheDocument();
+    expect(container.querySelector("[class*=orange]")).not.toBeInTheDocument();
   });
 });

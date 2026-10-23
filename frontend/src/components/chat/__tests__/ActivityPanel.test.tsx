@@ -33,13 +33,13 @@ describe("ActivityPanel", () => {
   it("renders tool calls and delegations together", () => {
     render(
       <ActivityPanel
-        toolCalls={[tool("t1", "web_search", "success", 10)]}
+        toolCalls={[tool("t1", "web_search_agent", "success", 10)]}
         delegations={[deleg("d1", "PPA Specialist", "auto", 20)]}
         isThinking={false}
         {...base}
       />,
     );
-    expect(screen.getByText("web_search")).toBeInTheDocument();
+    expect(screen.getByText("Web search")).toBeInTheDocument();
     expect(screen.getByText("PPA Specialist")).toBeInTheDocument();
     expect(screen.getByText(/Delegated to/i)).toBeInTheDocument();
   });
@@ -50,7 +50,7 @@ describe("ActivityPanel", () => {
         toolCalls={[
           tool("t1", "transfer_to_agent", "success", 10),
           tool("t2", "transfer_to_agent", "success", 11),
-          tool("t3", "web_search", "success", 12),
+          tool("t3", "web_search_agent", "success", 12),
         ]}
         delegations={[]}
         isThinking={false}
@@ -58,19 +58,19 @@ describe("ActivityPanel", () => {
       />,
     );
     // A useful tool shows; the internal hops are hidden behind a toggle.
-    expect(screen.getByText("web_search")).toBeInTheDocument();
-    expect(screen.queryByText("transfer_to_agent")).not.toBeInTheDocument();
+    expect(screen.getByText("Web search")).toBeInTheDocument();
+    expect(screen.queryByText("Hand over to another skill")).not.toBeInTheDocument();
     const toggle = screen.getByTestId("activity-internal-toggle");
     expect(toggle).toHaveTextContent("Show 2 internal steps");
     fireEvent.click(toggle);
-    expect(screen.getAllByText("transfer_to_agent")).toHaveLength(2);
+    expect(screen.getAllByText("Hand over to another skill")).toHaveLength(2);
     expect(toggle).toHaveTextContent("Hide 2 internal steps");
   });
 
   it("shows no internal-steps toggle when there is no plumbing", () => {
     render(
       <ActivityPanel
-        toolCalls={[tool("t1", "web_search", "success", 10)]}
+        toolCalls={[tool("t1", "web_search_agent", "success", 10)]}
         delegations={[]}
         isThinking={false}
         {...base}
@@ -87,7 +87,7 @@ describe("ActivityPanel", () => {
   it("shows a human-friendly relative timestamp", () => {
     render(
       <ActivityPanel
-        toolCalls={[tool("t1", "web_search", "running", Date.now())]}
+        toolCalls={[tool("t1", "web_search_agent", "running", Date.now())]}
         delegations={[]}
         isThinking={false}
         {...base}
@@ -99,7 +99,7 @@ describe("ActivityPanel", () => {
   it("expands a tool row to reveal what it was called with", () => {
     const tc: ToolCallState = {
       id: "t1",
-      name: "web_search",
+      name: "web_search_agent",
       status: "success",
       ts: Date.now(),
       argsJson: '{"query":"power purchase agreement"}',
@@ -108,7 +108,13 @@ describe("ActivityPanel", () => {
     render(<ActivityPanel toolCalls={[tc]} delegations={[]} isThinking={false} {...base} />);
     // Collapsed: args not shown yet.
     expect(screen.queryByText(/Called with/i)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /web_search/i }));
+    // CLAUDE.md #9 — the row shows the friendly label; the raw name is only
+    // the row tooltip until expanded.
+    const row = screen.getByRole("button", { name: /Web search/i });
+    expect(row).toHaveAttribute("title", "web_search_agent");
+    expect(screen.queryByText("web_search_agent")).toBeNull();
+    fireEvent.click(row);
+    expect(screen.getByTestId("activity-tool-raw-name")).toHaveTextContent("web_search_agent");
     expect(screen.getByText("Called with")).toBeInTheDocument();
     expect(screen.getByText(/power purchase agreement/i)).toBeInTheDocument();
     expect(screen.getByText("Result")).toBeInTheDocument();
@@ -124,7 +130,7 @@ describe("ActivityPanel", () => {
       argsJson: '{"left_doc_id":"abc-123","right_doc_id":"def-456"}',
     };
     render(<ActivityPanel toolCalls={[tc]} delegations={[]} isThinking={false} {...base} />);
-    fireEvent.click(screen.getByRole("button", { name: /compare_ppa_contracts/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Compare ppa contracts/i }));
     expect(screen.getByText("left_doc_id")).toBeInTheDocument();
     expect(screen.getByText("abc-123")).toBeInTheDocument();
     expect(screen.getByText("right_doc_id")).toBeInTheDocument();
@@ -139,7 +145,7 @@ describe("ActivityPanel", () => {
       resultContent: '{"result": "{\\"left\\":{\\"name\\":\\"EDP\\"}}"}',
     };
     render(<ActivityPanel toolCalls={[tc]} delegations={[]} isThinking={false} {...base} />);
-    fireEvent.click(screen.getByRole("button", { name: /compare_ppa_contracts/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Compare ppa contracts/i }));
     // Rendered as a structured tree: nested keys + clean, unescaped string value.
     expect(screen.getByText("left:")).toBeInTheDocument();
     expect(screen.getByText("name:")).toBeInTheDocument();
@@ -233,6 +239,17 @@ describe("ActivityPanel", () => {
     const items = screen.getAllByRole("listitem");
     // Newest (the delegation at ts=99) renders before the older tool.
     expect(items[0].textContent).toContain("Newer Specialist");
-    expect(items[1].textContent).toContain("older_tool");
+    expect(items[1].textContent).toContain("Older tool");
   });
+});
+
+
+it("keeps the clock visible on older activity and includes a full timestamp on hover", () => {
+  const ts = Date.now() - 3 * 86400_000;
+  render(<ActivityPanel toolCalls={[tool("older", "read_document", "success", ts)]} delegations={[]} isThinking={false} {...base} />);
+  const time = document.querySelector("time")!;
+  expect(time.textContent).toMatch(/\d{2}:\d{2}:\d{2}/);
+  expect(time.textContent).toContain(new Date(ts).toLocaleDateString());
+  expect(time.title).toBe(new Date(ts).toLocaleString(undefined, {timeZoneName:"short"}));
+  expect(time.dateTime).toBe(new Date(ts).toISOString());
 });

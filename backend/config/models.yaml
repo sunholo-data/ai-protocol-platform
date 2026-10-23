@@ -1,5 +1,4 @@
-# Aitana v6 Model Registry
-# Last updated: 2026-08-13
+# Last updated: 2026-09-03
 #
 # Canonical model IDs for the three supported providers.
 # Used by: skill creation UI, agent factory, compaction config.
@@ -20,15 +19,84 @@
 # every scattered raw hardcode that predates the tier system. Migrated
 # 2026-08-13 to the `-eu` entries (verified live EU multi-region endpoints
 # for Gemini 3.x — see each entry's comment); the 2.5 entries stay in the
-# registry as fallback rungs only, and MUST be deleted once Google actually
-# shuts them down (a live call will start failing loudly via ResilientLlm,
-# not silently — but don't wait for that, prune on/before 2026-10-16).
+# registry as fallback rungs until 2026-10-15, when they were DELETED and
+# every rung repointed at a live-probed 3.x model (global chains fall back to
+# the EU 3.x entries: global -> EU narrows egress, so it is always legal).
+# Don't re-add a 2.x entry: the only result is a fallback that 404s.
 
 models:
 
   # ─── Google Gemini ────────────────────────────────────────────────────────
   # Primary provider; ADK runs on Vertex AI (GOOGLE_GENAI_USE_VERTEXAI=True).
   # 1M token context window on all Gemini 3.x models.
+
+  gemini-3-8-flash:
+    api_name: "gemini-3.8-flash"
+    provider: google
+    tier: default
+    # GLOBAL-endpoint only for the non-EU path (verified 2026-09-03 via a live
+    # 1-token probe, same pattern as scripts/verify_regions.py: OK at "global",
+    # "eu" and "us"; 404s in europe-west1/2/3/4 AND us-central1). Identical
+    # endpoint shape to gemini-3-7-flash / gemini-3-7-flash-eu, so this swap
+    # needed no new routing mechanism. No region rungs possible.
+    #
+    # Released 2026-09-02. Google positions it as the flagship Flash for
+    # long-horizon software engineering and agentic/tool-execution work — the
+    # workload our `pro`-tier skills actually run. Pricing is UNCHANGED from
+    # 3.7 ($0.75/$3.75 per 1M in/out through 2026-12-31, then $1.50/$7.50), so
+    # this swap is cost-neutral.
+    #
+    # TTFT/total A/B (2026-09-03) vs gemini-3.7-flash: interleaved n=8 per arm
+    # at location="global", one realistic PPA-reasoning prompt, both arms under
+    # same caveat as 3.7's entry, this is NOT the optimistic thinking_level=low
+    # number), streamed, TTFT = first candidate chunk:
+    #   3.7-flash  TTFT median 2470ms  stdev 1077ms | total median 6879ms  max 13101ms
+    #   3.8-flash  TTFT median 2362ms  stdev  628ms | total median 5681ms  max  7493ms
+    # ~4% faster median TTFT, ~17% faster median total, and the tail roughly
+    # halves (13.1s -> 7.5s worst case) with stdev down 42%. Same shape of win
+    # as the 3.6 -> 3.7 bump, larger on completion.
+    #
+    # MIGRATION CAVEAT (live-probed 2026-09-03, do not re-derive): Google's
+    # migration notes say 3.8 REPLACES thinking_budget with the thinking_level
+    # enum (minimal unsupported) and drops temperature/top_p/top_k. Vertex in
+    # fact ACCEPTS all of them here — thinking_budget=-1, thinking_budget=0,
+    # thinking_level=LOW/HIGH, temperature and top_p each returned 200, not a
+    # 400 — so config.thinking's DYNAMIC path (thinking_budget=-1) is NOT
+    # broken by this swap. But an accept is not proof the budget is HONOURED,
+    # and it is a documented-removed param. Emitting thinking_level for 3.x on
+    # the DYNAMIC path is the pending fix already flagged under tier_defaults
+    # and is likely worth more latency than this swap was.
+    residency: global
+    fallbacks:
+      - gemini-3-7-flash            # proven predecessor, same endpoint shape
+      - gemini-3-5-flash-eu  # 2.5 retired 2026-10-16; live-probed EU 3.x rung (global -> EU narrows egress)
+    context_window: 1_000_000
+    max_output_tokens: 65_536
+    description: "Gemini 3.8 Flash — GA, flagship Flash for agentic/coding work; `pro` tier on dev/test"
+
+  gemini-3-8-flash-eu:
+    # EU-resident sibling of gemini-3-8-flash. Same mechanism as
+    # gemini-3-7-flash-eu: NO single-region EU availability (live-probed
+    # 2026-09-03 — europe-west1/2/3/4 all 404), the only EU path is Vertex's
+    # jurisdictional multi-region endpoint location="eu" (a LITERAL
+    # multi-region code, not a city-region), confirmed serving live. See the
+    # gemini-3-7-flash-eu entry for why the 2.x europe-west* pattern does not
+    # apply to Gemini 3+ — don't re-derive that dead end.
+    #
+    # No same-tier cross-region rung is possible (no second EU location), so
+    # the ladder falls to the 3.7 EU sibling, which is itself EU-resident and
+    # therefore survives the eu-strict residency filter.
+    api_name: "gemini-3.8-flash"
+    provider: google
+    tier: default
+    residency: eu
+    location: eu
+    fallbacks:
+      - gemini-3-7-flash-eu         # proven EU predecessor, same "eu" endpoint
+      - gemini-3-5-flash-eu  # live-probed EU 3.x rung (europe-west3: a different endpoint, so a real fallback; 2.5 retired 2026-10-16)
+    context_window: 1_000_000
+    max_output_tokens: 65_536
+    description: "Gemini 3.8 Flash, EU multi-region-pinned — eu-strict `pro`/`smart` variant"
 
   gemini-3-7-flash:
     api_name: "gemini-3.7-flash"
@@ -64,10 +132,10 @@ models:
     # CLAUDE.md's <1s first-token bar.
     residency: global
     fallbacks:
-      - gemini-2-5-flash            # verified EU sibling
+      - gemini-3-5-flash-eu  # 2.5 retired 2026-10-16; live-probed EU 3.x rung (global -> EU narrows egress)
     context_window: 1_000_000
     max_output_tokens: 65_536
-    description: "Gemini 3.7 Flash — GA, refinement of 3.6 (coding/agentic); `pro` tier on dev/test"
+    description: "Gemini 3.7 Flash — superseded by gemini-3-8-flash (kept as its first fallback rung)"
 
   gemini-3-6-flash:
     api_name: "gemini-3.6-flash"
@@ -89,7 +157,7 @@ models:
     # wiring this to any chat-default path (CLAUDE.md: first token <1s).
     residency: global
     fallbacks:
-      - gemini-2-5-flash            # verified EU sibling
+      - gemini-3-5-flash-eu  # 2.5 retired 2026-10-16; live-probed EU 3.x rung (global -> EU narrows egress)
     context_window: 1_000_000
     max_output_tokens: 65_536
     description: "Gemini 3.6 Flash — superseded by gemini-3-7-flash (kept for back-compat)"
@@ -101,22 +169,21 @@ models:
     # GLOBAL-endpoint only (verified 2026-07-10) — see gemini-3-6-flash note.
     residency: global
     fallbacks:
-      - gemini-2-5-flash            # verified EU sibling
+      - gemini-3-5-flash-eu  # 2.5 retired 2026-10-16; live-probed EU 3.x rung (global -> EU narrows egress)
     context_window: 1_000_000
     max_output_tokens: 65_536
     description: "Gemini 3 Flash (preview) — superseded by gemini-3-6-flash (kept for back-compat)"
 
   # Newest flash-lite (there is no 3.6 flash-lite). The `lite` tier's `default`
   # variant — i.e. what dev + test run day-to-day. Faster than the 2.5 lite on
-  # every axis measured (see tier_defaults.lite); global-endpoint only, so prod
-  # stays on gemini-flash-lite via the eu-strict variant.
+  # runs gemini-3-5-flash-lite-eu via the eu-strict variant.
   gemini-3-5-flash-lite:
     api_name: "gemini-3.5-flash-lite"
     provider: google
     tier: fast
     residency: global
     fallbacks:
-      - gemini-flash-lite           # verified EU sibling
+      - gemini-3-5-flash-lite-eu  # 2.5 retired 2026-10-16; live-probed EU 3.x rung (global -> EU narrows egress)
     context_window: 1_000_000
     max_output_tokens: 65_536
     description: "Gemini 3.5 Flash Lite — `lite` tier on dev/test; fastest measured, global-endpoint only"
@@ -128,14 +195,14 @@ models:
     # GLOBAL-endpoint only (verified 2026-07-10) — see gemini-3-flash note.
     residency: global
     fallbacks:
-      - gemini-2-5-pro              # verified EU sibling
+      - gemini-3-8-flash-eu  # 2.5 retired 2026-10-16; live-probed EU 3.x rung (global -> EU narrows egress)
     context_window: 1_000_000
     max_output_tokens: 65_536
     description: "Gemini 3.1 Pro — advanced reasoning, beats Opus 4.6 on 13/16 benchmarks"
 
   gemini-3-7-flash-eu:
     # EU-resident sibling of gemini-3-7-flash, for the eu-strict variants that
-    # currently sit on the soon-EOL gemini-2-5-pro (pro + smart tiers). NOT
+    # used to sit on gemini-2-5-pro (pro + smart tiers; 2.5 retired 2026-10-16). NOT
     # via a europe-west* single region -- 3.6/3.7-flash have NO single-region
     # EU availability at all (live-probed 2026-08-13 across europe-west1/2/3/
     # 4/8/9 + europe-central2: every one 404s). The only EU path is Vertex's
@@ -148,37 +215,26 @@ models:
     # be served using standard regional endpoints" -- i.e. 2.x's europe-west1/
     # west4 pattern doesn't apply to 3.x; this is the replacement pattern).
     # No same-tier cross-region rung is possible (no second EU location to
-    # fail over to) -- fallback is the 2.5-pro sibling until IT retires too.
+    # fail over to) -- fallback is 3.5-flash in europe-west3, a different endpoint.
     api_name: "gemini-3.7-flash"
     provider: google
     tier: default
     residency: eu
     location: eu
     fallbacks:
-      - gemini-2-5-pro              # legacy EU sibling -- PRUNE after 2026-10-16 (2.5 retirement)
+      - gemini-3-5-flash-eu  # live-probed EU 3.x rung (2.5 retired 2026-10-16)
     context_window: 1_000_000
     max_output_tokens: 65_536
-    description: "Gemini 3.7 Flash, EU multi-region-pinned — eu-strict replacement for gemini-2-5-pro"
-
-  gemini-2-5-flash:
-    api_name: "gemini-2.5-flash"
-    provider: google
-    tier: fast
-    residency: eu
-    fallbacks:
-      - {id: gemini-2-5-flash, location: europe-west4}   # tier 1a cross-region
-    context_window: 1_000_000
-    max_output_tokens: 65_536
-    description: "Gemini 2.5 Flash — stable fallback if 3.x preview unavailable"
+    description: "Gemini 3.7 Flash, EU multi-region-pinned — superseded by gemini-3-8-flash-eu (kept as its first fallback rung)"
 
   gemini-3-5-flash-eu:
     # Unlike 3.6/3.7-flash, gemini-3.5-flash DOES have genuine EU single-region
     # availability (live-probed 2026-08-13: OK at europe-west2 AND
-    # europe-west3, matching the classic 2.x pattern gemini-2-5-flash already
-    # uses -- 404 everywhere else tested including europe-west1/west4). No
+    # europe-west3, the classic 2.x single-region pattern
+    # -- 404 everywhere else tested including europe-west1/west4). No
     # code-level new mechanism needed here, just a region pin. Cross-region
-    # rung is the OTHER verified EU region (west3<->west2); legacy sibling is
-    # gemini-2-5-flash until it retires 2026-10-16.
+    # rung is the OTHER verified EU region (west3<->west2), then the "eu"
+    # multi-region (a third endpoint).
     api_name: "gemini-3.5-flash"
     provider: google
     tier: default
@@ -186,42 +242,10 @@ models:
     location: europe-west3
     fallbacks:
       - {id: gemini-3-5-flash-eu, location: europe-west2}   # tier 1a cross-region
-      - gemini-2-5-flash                                    # legacy EU sibling -- PRUNE after 2026-10-16
+      - {id: gemini-3-5-flash-eu, location: eu}  # live-probed EU 3.x rung (2.5 retired 2026-10-16)
     context_window: 1_000_000
     max_output_tokens: 65_536
-    description: "Gemini 3.5 Flash, EU-region-pinned (europe-west3) — eu-strict replacement for gemini-2-5-flash"
-
-  gemini-2-5-pro:
-    api_name: "gemini-2.5-pro"
-    provider: google
-    tier: smart
-    residency: eu
-    fallbacks:
-      - {id: gemini-2-5-pro, location: europe-west4}     # tier 1a cross-region
-      - gemini-2-5-flash                                 # tier 1b sibling
-    context_window: 1_000_000
-    max_output_tokens: 65_536
-    description: "Gemini 2.5 Pro — Gemini reasoning; literal JSON / A2UI emission"
-
-  gemini-flash-lite:
-    # Pinned to the concrete 2.5 version: the floating `gemini-flash-lite-latest`
-    # alias is GLOBAL-endpoint only and 404s on Vertex in europe-west1 (our
-    # EU-residency region). `gemini-2.5-flash-lite` IS served in europe-west1
-    # and is the fastest EU-resident model measured. The old "~400ms TTFT"
-    # figure (2026-07-08) was measured WITHOUT the planner — under the real
-    # skill config (thinking_budget=-1) a short chat turn is ~2.9s TTFT; only
-    # thinking=off gets back to ~0.6s (2026-07-21). This is the `lite` tier's
-    # eu-strict (prod) variant; dev/test run gemini-3-5-flash-lite.
-    api_name: "gemini-2.5-flash-lite"
-    provider: google
-    tier: fast
-    residency: eu
-    fallbacks:
-      - {id: gemini-flash-lite, location: europe-west4}
-      - gemini-2-5-flash
-    context_window: 1_000_000
-    max_output_tokens: 65_536
-    description: "Gemini 2.5 Flash Lite — fastest EU-resident (europe-west1) model; day-to-day default"
+    description: "Gemini 3.5 Flash, EU-region-pinned (europe-west3) — eu-strict replacement for the retired gemini-2-5-flash"
 
   gemini-3-5-flash-lite-eu:
     # No Gemini 3.x flash-lite has single-region EU availability (live-probed
@@ -229,19 +253,35 @@ models:
     # region 404s for gemini-3.5-flash-lite AND gemini-3.1-flash-lite). Only
     # the "eu" jurisdictional multi-region endpoint works, same mechanism as
     # gemini-3-7-flash-eu (see its comment for the validation detail). This is
-    # the `lite` tier's eu-strict replacement for gemini-flash-lite (2.5).
-    # No cross-region rung available (no second EU location); legacy sibling
-    # is gemini-flash-lite until 2.5 retires 2026-10-16.
+    # the `lite` tier's eu-strict replacement for the retired 2.5 flash-lite.
+    # No cross-region rung available (no second EU location); falls to
+    # 3.1-flash-lite@eu, then 3.5-flash in europe-west3.
     api_name: "gemini-3.5-flash-lite"
     provider: google
     tier: fast
     residency: eu
     location: eu
     fallbacks:
-      - gemini-flash-lite           # legacy EU sibling -- PRUNE after 2026-10-16
+      - gemini-3-1-flash-lite-eu  # live-probed EU 3.x rung (2.5 retired 2026-10-16)
+      - gemini-3-5-flash-eu         # then a full flash model in europe-west3
     context_window: 1_000_000
     max_output_tokens: 65_536
-    description: "Gemini 3.5 Flash Lite, EU multi-region-pinned — eu-strict replacement for gemini-flash-lite"
+    description: "Gemini 3.5 Flash Lite, EU multi-region-pinned — eu-strict replacement for the retired 2.5 flash-lite"
+
+  gemini-3-1-flash-lite-eu:
+    # The `lite` EU chain's fallback since 2.5 retired
+    # (2026-10-16). Live-probed OK on the "eu" multi-region the same day; not in
+    # any single europe-* region (same as 3.5-flash-lite).
+    api_name: "gemini-3.1-flash-lite"
+    provider: google
+    tier: fast
+    residency: eu
+    location: eu
+    fallbacks:
+      - gemini-3-5-flash-eu
+    context_window: 1_000_000
+    max_output_tokens: 65_536
+    description: "Gemini 3.1 Flash Lite, EU multi-region-pinned — fallback for gemini-3-5-flash-lite-eu"
 
   # ─── Anthropic Claude ─────────────────────────────────────────────────────
   # 200K context window standard; 1M available in beta for Opus 4.7.
@@ -252,7 +292,7 @@ models:
     provider: anthropic
     tier: default
     residency: us
-    fallbacks: [claude-haiku-4-5, gemini-flash-lite]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
+    fallbacks: [claude-haiku-4-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
     context_window: 200_000
     max_output_tokens: 64_000
     description: "Claude Sonnet 4.6 — best Claude speed/intelligence balance (Feb 2026)"
@@ -262,48 +302,102 @@ models:
     provider: anthropic
     tier: smart
     residency: us
-    fallbacks: [claude-sonnet-5, claude-haiku-4-5, gemini-flash-lite]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
+    fallbacks: [claude-sonnet-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
     context_window: 200_000
     max_output_tokens: 64_000
     description: "Claude Opus 4.7 — superseded by Opus 4.8 (kept for back-compat)"
 
-  # Current Anthropic flagships (2026-07 refresh — Claude 5 family + Opus 4.8).
+  # Current Anthropic models (2026-09-30 refresh: Opus 5.5 is the smart tier,
+  # Sonnet 5.5 the balanced default). Each keeps its 5.0 predecessor as the FIRST
+  # fallback rung — proven, same provider — so a 5.5 outage degrades by one
+  # generation, not to a different vendor. Same 200K/64K limits as the 5-family
+  # on purpose (see the claude-opus-5 note: context_window drives compaction).
+  claude-opus-5-5:
+    api_name: "claude-opus-5-5"
+    provider: anthropic
+    tier: smart
+    residency: us
+    fallbacks: [claude-opus-5, claude-sonnet-5-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]
+    context_window: 200_000
+    max_output_tokens: 64_000
+    description: "Claude Opus 5.5 — Anthropic flagship reasoner (current smart tier)"
+
+  claude-sonnet-5-5:
+    api_name: "claude-sonnet-5-5"
+    provider: anthropic
+    tier: default
+    residency: us
+    fallbacks: [claude-sonnet-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]
+    context_window: 200_000
+    max_output_tokens: 64_000
+    description: "Claude Sonnet 5.5 — current Claude speed/intelligence balance"
+
+  claude-fable-5-1:
+    api_name: "claude-fable-5-1"
+    provider: anthropic
+    tier: smart
+    residency: us
+    fallbacks: [claude-fable-5, claude-sonnet-5-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]
+    context_window: 200_000
+    max_output_tokens: 64_000
+    description: "Claude Fable 5.1 — max first-shot correctness on long-horizon work (slower than Opus)"
+
+  claude-opus-5:
+    api_name: "claude-opus-5"
+    provider: anthropic
+    tier: smart
+    residency: us
+    # Same-tier rung FIRST (opus-4-8 was the previous default and is proven), then
+    # the usual same-provider ladder, cross-provider gemini LAST (eu-strict drops
+    # every us rung).
+    fallbacks: [claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]
+    # Anthropic documents a 1M window / 128K max output for Opus 5. Held at the
+    # same 200K/64K as its 5-family siblings ON PURPOSE: context_window drives OUR
+    # compaction thresholds (adk/session.py context_window_for ->
+    # _EMERGENCY_WINDOW_FRACTION), so raising it here would quietly retune
+    # compaction as a side effect of a model swap. Under-stating is safe — it
+    # compacts earlier than strictly needed, never overflows. Raising the whole
+    # 5-family block is worth doing, as its own change with its own verification.
+    context_window: 200_000
+    max_output_tokens: 64_000
+    description: "Claude Opus 5 — superseded by Opus 5.5 (kept as its first fallback rung)"
+
   claude-opus-4-8:
     api_name: "claude-opus-4-8"
     provider: anthropic
     tier: smart
     residency: us
-    fallbacks: [claude-sonnet-5, claude-haiku-4-5, gemini-flash-lite]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
+    fallbacks: [claude-sonnet-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
     context_window: 200_000
     max_output_tokens: 64_000
-    description: "Claude Opus 4.8 — Anthropic flagship reasoner (current smart tier)"
+    description: "Claude Opus 4.8 — superseded by Opus 5 (kept as its first fallback rung)"
 
   claude-sonnet-5:
     api_name: "claude-sonnet-5"
     provider: anthropic
     tier: default
     residency: us
-    fallbacks: [claude-haiku-4-5, gemini-flash-lite]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
+    fallbacks: [claude-haiku-4-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
     context_window: 200_000
     max_output_tokens: 64_000
-    description: "Claude Sonnet 5 — current Claude speed/intelligence balance"
+    description: "Claude Sonnet 5 — superseded by Sonnet 5.5 (kept as its first fallback rung)"
 
   claude-fable-5:
     api_name: "claude-fable-5"
     provider: anthropic
     tier: smart
     residency: us
-    fallbacks: [claude-sonnet-5, claude-haiku-4-5, gemini-flash-lite]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
+    fallbacks: [claude-sonnet-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
     context_window: 200_000
     max_output_tokens: 64_000
-    description: "Claude Fable 5 — max first-shot correctness on long-horizon work (slower than Opus)"
+    description: "Claude Fable 5 — superseded by Fable 5.1 (kept as its first fallback rung)"
 
   claude-haiku-4-5:
     api_name: "claude-haiku-4-5-20251001"
     provider: anthropic
     tier: fast
     residency: us
-    fallbacks: [gemini-flash-lite]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
+    fallbacks: [gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
     context_window: 200_000
     max_output_tokens: 64_000
     description: "Claude Haiku 4.5 — cheapest Claude, high-volume sub-tasks"
@@ -317,7 +411,7 @@ models:
     provider: openai
     tier: smart
     residency: us
-    fallbacks: [gpt-5-6-sol, gpt-5-6-luna, gemini-flash-lite]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
+    fallbacks: [gpt-5-6-sol, gpt-5-6-luna, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
     context_window: 1_000_000
     max_output_tokens: 128_000
     description: "GPT-5.4 — superseded by the GPT-5.6 (Sol/Terra/Luna) family"
@@ -325,12 +419,25 @@ models:
   # Current OpenAI flagships — GPT-5.6 family (GA 2026-07-09). Sol/Terra/Luna are
   # durable capability tiers; the number is the generation. ~1.05M context, 128K
   # output. Needs OPENAI_API_KEY (+ OPENAI_API_BASE) — see backend/cloudbuild.yaml.
+  # GPT-6.1 Sol (2026-09-30): OpenAI's current workhorse for coding and everyday
+  # work — the Codex default line (Codex's model catalog: "Latest workhorse model
+  # for coding and everyday work"). GPT-5.6 Sol stays as its first rung.
+  gpt-6-1-sol:
+    api_name: "gpt-6.1-sol"
+    provider: openai
+    tier: smart
+    residency: us
+    fallbacks: [gpt-5-6-sol, gpt-5-6-terra, gpt-5-6-luna, gemini-3-5-flash-lite-eu]
+    context_window: 1_050_000
+    max_output_tokens: 128_000
+    description: "GPT-6.1 Sol — OpenAI workhorse for coding and hard professional work (Sep 2026)"
+
   gpt-5-6-sol:
     api_name: "gpt-5.6-sol"
     provider: openai
     tier: smart
     residency: us
-    fallbacks: [gpt-5-6-terra, gpt-5-6-luna, gemini-flash-lite]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
+    fallbacks: [gpt-5-6-terra, gpt-5-6-luna, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
     context_window: 1_050_000
     max_output_tokens: 128_000
     description: "GPT-5.6 Sol — OpenAI flagship, hardest professional work (Jul 2026)"
@@ -340,7 +447,7 @@ models:
     provider: openai
     tier: default
     residency: us
-    fallbacks: [gpt-5-6-luna, gemini-flash-lite]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
+    fallbacks: [gpt-5-6-luna, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
     context_window: 1_050_000
     max_output_tokens: 128_000
     description: "GPT-5.6 Terra — balanced everyday work (Jul 2026)"
@@ -350,7 +457,7 @@ models:
     provider: openai
     tier: fast
     residency: us
-    fallbacks: [gemini-flash-lite]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
+    fallbacks: [gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
     context_window: 1_050_000
     max_output_tokens: 128_000
     description: "GPT-5.6 Luna — fast + affordable (Jul 2026)"
@@ -360,7 +467,7 @@ models:
     provider: openai
     tier: default
     residency: us
-    fallbacks: [gpt-5-6-luna, gemini-flash-lite]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
+    fallbacks: [gpt-5-6-luna, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
     context_window: 400_000
     max_output_tokens: 128_000
     description: "GPT-5.1 Instant — fast, adaptive reasoning"
@@ -369,8 +476,8 @@ models:
 # Model used when a skill specifies a provider but no explicit model ID.
 
 defaults:
-  google: "gemini-3-7-flash"     # api_name: gemini-3.7-flash (GA; was gemini-3-6-flash)
-  anthropic: "claude-sonnet-5"   # api_name: claude-sonnet-5 (current balanced)
+  google: "gemini-3-8-flash"     # api_name: gemini-3.8-flash (GA; was gemini-3-7-flash)
+  anthropic: "claude-sonnet-5-5"   # api_name: claude-sonnet-5-5 (current balanced; was claude-sonnet-5)
   openai: "gpt-5-6-luna"         # api_name: gpt-5.6-luna (current fast tier)
 
 # ─── Platform default ─────────────────────────────────────────────────────
@@ -383,24 +490,20 @@ defaults:
 # (db/models/__init__.py), which is the `pro` TIER (2026-08-13; was a
 # hardcoded gemini-2.5-flash id). That distinction matters: THIS value
 # (platform_default) is `residency: global` — resolve_model_chain raises
-# ResidencyViolationError for a non-EU PRIMARY under eu-strict (prod), so
 # this must never become a resolved runtime default. Tiers are the
 # residency-safe path (they resolve to EU variants automatically), which is
 # exactly why SkillMetadata.model uses one instead of a raw id.
 
-platform_default: "gemini-3-7-flash"
+platform_default: "gemini-3-8-flash"
 
 # ─── Logical tier defaults ─────────────────────────────────────────────────
 # Named tiers a skill (or the Skill Studio) may reference in place of a raw
-# model id — resolved by config.models.resolve_tier(). The v6.6.0 ONE app runs
+# model id — resolved by config.models.resolve_tier(). The v6.6.0 tenant app runs
 # day-to-day on `lite` (fast Gemini); deep work is delegated to sub-skills
 # configured with `smart` (Anthropic). Keys are logical tiers; values are
 # registry ids. Add more tiers here without touching ModelEntry.tier.
-# See docs/design/v6.6.0/one-app-fork-convergence.md (Workstream D).
 
 # Every tier is a residency variant map: `default` serves the unrestricted
-# deployments (dev + test), `eu-strict` serves prod. That split is what lets
-# dev/test run the faster global-endpoint 3.x line while prod stays EU-resident
 # with ZERO skill changes — a skill says `model: lite` and gets the right model
 # per env. `default` variants use the plain global-endpoint 3.x entries (no
 # EU story needed there); `eu-strict` variants use the `-eu` siblings added
@@ -440,23 +543,33 @@ tier_defaults:
   # full numbers): ~7% faster at the median (3916ms vs 4210ms model-only
   # delta) and far tighter tail (491ms vs 1864ms stdev, no 9s+ outliers).
   # Revert to gemini-3-6-flash if a later re-run surfaces a regression.
+  #
+  # 2026-09-03: bumped default -> gemini-3-8-flash and eu-strict ->
+  # gemini-3-8-flash-eu. Region-probed live + TTFT/total A/B'd against
+  # 3.7-flash the same day (interleaved n=8/arm, real DYNAMIC planner config —
+  # see the gemini-3-8-flash registry entry for full numbers): ~4% faster
+  # median TTFT, ~17% faster median total, tail roughly halved. Cost-neutral
+  # (identical $/1M to 3.7). Revert BOTH variants to the 3.7 pair if a later
+  # re-run surfaces a regression — they remain in the registry as rung 0 of
+  # each new entry's fallback chain, so a revert is a two-line change here.
   pro:
-    default: "gemini-3-7-flash"        # dev + test
-    eu-strict: "gemini-3-7-flash-eu"   # prod — EU multi-region (2026-08-13; was gemini-2-5-pro, EOL 2026-10-16)
+    default: "gemini-3-8-flash"        # dev + test
+    eu-strict: "gemini-3-8-flash-eu"   # prod — EU multi-region (2026-09-03; was gemini-3-7-flash-eu)
   smart:                      # deep work — variant selected by MODEL_RESIDENCY_POLICY (MODEL-RELIABILITY M3)
-    default: "claude-opus-4-8"   # unrestricted deployments (Aitana dev; non-EU forks) — current Anthropic flagship
-    eu-strict: "gemini-3-7-flash-eu"  # EU deployments resolve smart→EU automatically (2026-08-13: was gemini-2-5-pro; 3.7-flash-eu is now the verified EU-resident reasoning option — see its registry comment. No EU Gemini "Pro"-class model exists at all: gemini-3-1-pro is global-only, live-probed both single-region AND "eu"/"us" multi-region)
+    default: "claude-opus-5-5"   # unrestricted deployments — current Anthropic flagship (2026-09-30; was claude-opus-5, before that claude-opus-4-8)
+    eu-strict: "gemini-3-8-flash-eu"  # EU deployments resolve smart→EU automatically (2026-09-03: was gemini-3-7-flash-eu, itself replacing gemini-2-5-pro. Moves with `pro` deliberately — the EU reasoning path has no separate candidate. No EU Gemini "Pro"-class model exists at all: gemini-3-1-pro is global-only, live-probed both single-region AND "eu"/"us" multi-region)
 
 # ─── Residency + fallback policy (MODEL-RELIABILITY M3) ───────────────────
 # Deployment-level residency gate, enforced by construction in
 # adk.agent.resolve_model_chain: under `eu-strict` non-EU entries cannot
 # enter a chain (fallbacks dropped loudly, pinned non-EU primaries fail at
 # load). MODEL_RESIDENCY_POLICY env overrides per deployment; this default
-# is the fail-safe for forks that wire nothing. Aitana: prod = eu-strict
-# (hard requirement — EU-resident); dev + test = unrestricted (accepted
-# non-EU egress: both run the faster global-endpoint 3.x line — see the
-# tier_defaults `default` vs `eu-strict` variants above, and the Anthropic
-# egress decision). Canonical per-env record: docs/ops/env-config-parity.md.
+# is the fail-safe for forks that wire nothing.
+#
+# Set MODEL_RESIDENCY_POLICY consistently across the environments used to
+# validate a deployment. A skill's thinkingModel can select a different tier
+# from its primary model; review both before deciding its residency boundary.
+# Deployment-specific routing decisions belong in private operational records.
 
 residency:
   default_policy: eu-strict
@@ -465,20 +578,10 @@ fallback_policy:
   max_retries_per_model: 2
   provider_cooldown_seconds: 120
 
-# ─── Compaction context windows ───────────────────────────────────────────
-# EventsCompactionConfig on App (not Agent/Runner).
-# Larger context = compact less often.
-# See backend/adk/session.py get_compaction_config().
-
-compaction:
-  large_context:   # ≥ 1M tokens: compact every 10 turns, overlap 3
-    models: ["gemini-", "gpt-5.4", "gpt-5.6"]
-    interval: 10
-    overlap: 3
-  small_context:   # 200K–400K tokens: compact every 5 turns, overlap 2
-    models: ["claude-", "gpt-5"]
-    interval: 5
-    overlap: 2
-  default:
-    interval: 5
-    overlap: 2
+# ─── Compaction ───────────────────────────────────────────────────────────
+# Not configured here. The per-model numbers (turn interval/overlap, token
+# threshold, retention) live in backend/adk/session.py get_compaction_config(),
+# overridable at runtime via the admin `platform_config.compaction` doc. A
+# `compaction:` block used to sit here with different numbers (10/3, 5/2) that
+# nothing read — removed 2026-10-02 so it can't be tuned by mistake.
+# Findings, traps and what is still unproven: docs/projects/compaction/README.md.

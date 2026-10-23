@@ -16,7 +16,7 @@ def test_record_writes_an_append_only_document():
             action="grant_group_tag",
             target="user@y.com",
             before={"group_tags": []},
-            after={"group_tags": ["ONE"]},
+            after={"group_tags": ["example-team"]},
         )
     assert mock_set.call_count == 1
     coll, doc_id, data = mock_set.call_args[0]
@@ -27,7 +27,7 @@ def test_record_writes_an_append_only_document():
     assert data["action"] == "grant_group_tag"
     assert data["target"] == "user@y.com"
     assert data["before"] == {"group_tags": []}
-    assert data["after"] == {"group_tags": ["ONE"]}
+    assert data["after"] == {"group_tags": ["example-team"]}
     assert data["ts"]  # ISO timestamp present
 
 

@@ -13,9 +13,11 @@ from google.genai.types import ThinkingLevel
 
 from config.thinking import ThinkDepth, thinking_config_dict_for, thinking_config_for
 
-# Registry ids, resolved through api_name_for so tier/residency changes to
-# models.yaml can't silently break the family mapping.
-GEMINI_2_5 = "gemini-flash-lite"  # -> gemini-2.5-flash-lite
+# GEMINI_3_X is a registry id, resolved through api_name_for so tier/residency
+# changes to models.yaml can't silently break the family mapping. The 2.x
+# entries left the registry when 2.5 retired (2026-10-16), so the 2.x family
+# branch is pinned with a RAW api name — what an old skill pin would carry.
+GEMINI_2_5 = "gemini-2.5-flash-lite"
 GEMINI_3_X = "gemini-3-6-flash"  # -> gemini-3.6-flash
 
 
@@ -100,8 +102,8 @@ class TestDictHelper:
 class TestTierRefsResolve:
     def test_tier_ref_resolves_thinking_params_per_policy(self, monkeypatch):
         # 2026-08-13: `pro` is a 3.x model under BOTH policies now (the eu-strict
-        # variant moved off the soon-EOL gemini-2-5-pro to the EU-pinned
-        # gemini-3-7-flash-eu — see models.yaml). thinking_level is LOW either
+        # variant moved off the soon-EOL gemini-2-5-pro to an EU-pinned 3.x
+        # entry, gemini-3-8-flash-eu since 2026-09-03 — see models.yaml). thinking_level is LOW either
         # way; what this test actually guards is that thinking_config_for
         # RE-RESOLVES the tier ref against the active policy on every call
         # rather than caching the first resolution.

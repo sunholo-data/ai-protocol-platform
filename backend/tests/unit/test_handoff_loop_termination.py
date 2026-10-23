@@ -1,6 +1,6 @@
 """Regression test for the confirm-handoff SPAM LOOP (2026-07-22).
 
-Symptom (reported live): a lite ONE front-door on ``gemini-3.5-flash-lite``
+Symptom (reported live): a lite tenant front-door on ``gemini-3.5-flash-lite``
 emitted the "Hand this conversation to PPA Obligation Analysis?" confirm card
 over and over — 10+ stacked cards and 10+ "Delegated to …" markers for one turn.
 
@@ -41,7 +41,7 @@ from db.models import DelegateRule
 # "real ADK flow" guard. See docs/design/v6.17.0/adk-contract-checklist.md (C1).
 pytestmark = pytest.mark.adk_contract
 
-_TARGET_AGENT = "one_obligation_analysis"
+_TARGET_AGENT = "demo_obligation_analysis"
 _LOOP_CAP = 6  # safety valve: a regression stops here (assert fails) rather than hang
 
 # Front-door call count — module-level, not a pydantic field (BaseLlm is a

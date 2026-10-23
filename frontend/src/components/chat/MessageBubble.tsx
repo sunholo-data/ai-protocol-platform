@@ -17,11 +17,13 @@ import { A2UIRenderer } from "@/components/protocols/A2UIRenderer";
 import { MCPAppToolCallRouter } from "@/components/protocols/MCPAppToolCallRouter";
 import { BrandAvatar } from "@/components/chat/BrandAvatar";
 import { parseA2uiSubmission } from "@/lib/a2uiSubmission";
+import { VisualEvidenceContext } from "@/components/chat/media/VisualEvidenceControl";
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown";
 import { InlineCitation } from "@/components/chat/InlineCitation";
 import { ReadAloudButton } from "@/components/chat/ReadAloudButton";
 import { ToolCallChip } from "@/components/chat/ToolCallChip";
 import { useSurfaceRegistry } from "@/providers/SurfaceRegistry";
+import { useAutoReadAloud } from "@/hooks/useAutoReadAloud";
 import { useVoiceConfig } from "@/hooks/useVoiceConfig";
 import type { SkillMessage, ToolCallState } from "@/hooks/useSkillAgent";
 
@@ -72,6 +74,8 @@ interface MessageBubbleProps {
    * so a resumed thread shows real send times, not the load time. Falls back to
    * now only when absent. */
   timestamp?: number;
+  autoSpeakAllowed?: boolean;
+  voiceSkillId?: string;
 }
 
 /**
@@ -134,9 +138,7 @@ function formatTime(timestamp?: number): string {
 export const MessageBubble = React.memo(function MessageBubble({
   message,
   skillId,
-  userInitial,
   userDisplayName,
-  userPhotoURL,
   botAvatarUrl,
   botLabel,
   toolCalls,
@@ -146,7 +148,10 @@ export const MessageBubble = React.memo(function MessageBubble({
   onChatMessage,
   sessionId,
   timestamp,
+  autoSpeakAllowed = false,
+  voiceSkillId,
 }: MessageBubbleProps) {
+  const { enabled: autoReadEnabled } = useAutoReadAloud();
   const isBot = message.role === "assistant";
   const time = formatTime(timestamp);
   // A2UI form submissions arrive as `[a2ui:action] {json}` chat messages —
@@ -155,7 +160,7 @@ export const MessageBubble = React.memo(function MessageBubble({
 
   // Read-aloud voice config. The hook is called unconditionally (rules of
   // hooks); when the feature flag is off we pass null so no fetch fires.
-  const voiceConfig = useVoiceConfig(READ_ALOUD_ENABLED ? skillId : null);
+  const voiceConfig = useVoiceConfig(READ_ALOUD_ENABLED ? (voiceSkillId ?? skillId) : null);
   // Per-skill opt-out: the skill's voice config can disable read-aloud even
   // when the global flag is on.
   const showReadAloud =
@@ -209,35 +214,43 @@ export const MessageBubble = React.memo(function MessageBubble({
       );
     }
 
+    // The assistant speaks on the page, not in a box: name + time, then the
+    // text at reading size with a readable line length (~68ch). The avatar
+    // only earns its column on desktop — on a phone it costs 40px of width.
     return (
       <div className="flex items-start gap-3">
-        {botAvatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={botAvatarUrl}
-            alt={skillId}
-            className="h-7 w-7 shrink-0 rounded-full border border-border bg-background object-cover"
-          />
-        ) : (
-          <BrandAvatar />
-        )}
-        <div className="flex max-w-[80%] flex-col gap-1">
+        <div className="mt-0.5 hidden shrink-0 md:block">
+          {botAvatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={botAvatarUrl}
+              alt={skillId}
+              className="h-7 w-7 rounded-full border border-border bg-background object-cover"
+            />
+          ) : (
+            <BrandAvatar />
+          )}
+        </div>
+        <div className="flex min-w-0 max-w-[68ch] flex-1 flex-col gap-1.5">
           <div className="flex items-baseline gap-2">
-            <span className="text-xs font-medium text-orange-600">{botLabel || skillId}</span>
+            <span className="text-sm font-semibold text-foreground">{botLabel || skillId}</span>
             <span className="text-xs text-muted-foreground">{time}</span>
             {showReadAloud && (
               <ReadAloudButton
                 text={message.content}
+                autoSpeakOnMount={autoSpeakAllowed && autoReadEnabled && !voiceConfig.loading}
                 provider={voiceConfig.tts.provider}
                 voice={voiceConfig.tts.voice}
                 lang={voiceConfig.tts.language ?? "es"}
-                skillId={skillId}
+                skillId={voiceSkillId ?? skillId}
               />
             )}
           </div>
-          <div className="space-y-2 rounded-[2px_8px_8px_8px] border-l-[3px] border-orange-400 bg-[hsl(0,0%,98%)] px-3 py-2 text-sm">
+          <div className="min-w-0 space-y-3 text-[15px] leading-[1.7] text-foreground md:text-base">
             {message.content && (
-              <ChatMarkdown content={message.content} navigateToBlock={navigateToBlock} />
+              <VisualEvidenceContext.Provider value={{ sessionId, onChatMessage }}>
+                <ChatMarkdown content={message.content} navigateToBlock={navigateToBlock} />
+              </VisualEvidenceContext.Provider>
             )}
             {a2uiCalls.map((tc) => {
               const parsed = parseA2UIResult(tc.resultContent);
@@ -291,15 +304,14 @@ export const MessageBubble = React.memo(function MessageBubble({
     );
   }
 
-  // User bubble
+  // User bubble — a quiet pale-ground block on the right. No avatar or name:
+  // the side of the page already says who is talking; both stay available to
+  // assistive tech via the group label.
   return (
-    <div className="flex items-start justify-end gap-3">
-      <div className="flex max-w-[80%] flex-col items-end gap-1">
-        <div className="flex items-baseline gap-2">
-          <span className="text-xs text-muted-foreground">{time}</span>
-          <span className="text-xs font-medium text-foreground">{userDisplayName}</span>
-        </div>
-        <div className="rounded-[2px_8px_8px_8px] border-l-[3px] border-primary bg-muted/50 px-3 py-2 text-sm">
+    <div className="flex justify-end" role="group" aria-label={`${userDisplayName}, ${time}`}>
+      <div className="flex min-w-0 max-w-[85%] flex-col items-end gap-1 md:max-w-[60ch]">
+        <span className="text-xs text-muted-foreground" aria-hidden="true">{time}</span>
+        <div className="min-w-0 max-w-full rounded-[var(--radius)] bg-muted px-4 py-3 text-base leading-relaxed text-foreground">
           {submission ? (
             <div className="flex flex-col gap-1.5" data-testid="a2ui-submission">
               <span className="flex items-center gap-1.5 text-xs font-medium text-primary">
@@ -321,24 +333,10 @@ export const MessageBubble = React.memo(function MessageBubble({
               )}
             </div>
           ) : (
-            <p className="whitespace-pre-wrap">{message.content}</p>
+            <p className="whitespace-pre-wrap break-words">{message.content}</p>
           )}
         </div>
       </div>
-      {/* G34: prefer user.photoURL when present; fallback to initial chip.
-          Both use theme tokens so a rebrand doesn't require touching this file. */}
-      {userPhotoURL ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={userPhotoURL}
-          alt={userDisplayName}
-          className="h-7 w-7 shrink-0 rounded-full border border-border object-cover"
-        />
-      ) : (
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary ring-1 ring-primary/20">
-          {userInitial}
-        </div>
-      )}
     </div>
   );
 });

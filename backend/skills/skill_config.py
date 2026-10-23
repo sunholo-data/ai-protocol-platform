@@ -76,14 +76,12 @@ def _cache_set(skill_id: str, config: SkillConfig) -> None:
 def _cache_invalidate(skill_id: str) -> None:
     _cache.pop(skill_id, None)
     # Any create/update/delete can flip a skill's public visibility, so
-    # drop the A2A card snapshot and re-sync the MCP tool registry.
-    # Function-local imports keep the skills package independent of
-    # the protocols package at import time.
+    # drop the A2A card snapshot. (The MCP tool list is computed per request,
+    # so it needs no sync.) Function-local import keeps the skills package
+    # independent of the protocols package at import time.
     from protocols.a2a import invalidate_cache as _invalidate_a2a_card
-    from protocols.mcp_server import rebuild_tools as _rebuild_mcp_tools
 
     _invalidate_a2a_card()
-    _rebuild_mcp_tools()
 
 
 # === CRUD operations ===
@@ -113,13 +111,11 @@ def create_skill(
     )
     fs.set_document(COLLECTION, skill_id, _to_firestore(config))
     _cache_set(skill_id, config)
-    # New public skills must appear in /.well-known/agent.json and /mcp
-    # tools/list immediately — not after the 60s TTL.
+    # New public skills must appear in /.well-known/agent.json immediately —
+    # not after the 60s TTL. (/mcp tools/list is computed per request.)
     from protocols.a2a import invalidate_cache as _invalidate_a2a_card
-    from protocols.mcp_server import rebuild_tools as _rebuild_mcp_tools
 
     _invalidate_a2a_card()
-    _rebuild_mcp_tools()
     return config
 
 
@@ -166,7 +162,7 @@ def resolve_skill_ref(ref: str, caller_uid: str | None = None) -> SkillConfig | 
     so a caller that passes a slug works locally and 404s deployed. That is
     exactly how ``POST /api/skill/skill-authoring-assistant/stream`` returned
     404 "Skill not found" on test (2026-08-05) while the same UI worked for
-    one-assistant, which happened to hold the UUID.
+    demo-assistant, which happened to hold the UUID.
 
     Resolution order, most specific first:
       1. canonical doc id

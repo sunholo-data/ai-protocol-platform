@@ -209,7 +209,7 @@ export default function UsersPage() {
           <div className="flex gap-2">
             <input
               className="flex-1 rounded-md border px-3 py-2 text-sm"
-              placeholder="Add a tag (e.g. ONE, aitana-admin)"
+              placeholder="Add a tag (e.g. finance-team, aitana-admin)"
               value={newTag}
               disabled={busy}
               onChange={(e) => setNewTag(e.target.value)}

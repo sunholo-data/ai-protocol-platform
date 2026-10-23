@@ -46,9 +46,9 @@ describe("MessageBubble — bot variant", () => {
     expect(screen.getByText("test-skill")).toBeInTheDocument();
   });
 
-  it("applies orange left border", () => {
+  it("uses theme tokens, not a hardcoded orange bar", () => {
     const { container } = render(<MessageBubble message={botMsg()} {...baseProps} />);
-    expect(container.querySelector(".border-orange-400")).toBeInTheDocument();
+    expect(container.querySelector("[class*=orange]")).not.toBeInTheDocument();
   });
 
   it("renders bot avatar image with branded alt text", () => {
@@ -86,63 +86,33 @@ describe("MessageBubble — user variant", () => {
     expect(screen.getByText(/hello from user/i)).toBeInTheDocument();
   });
 
-  it("shows user display name in header", () => {
+  it("names the sender for assistive tech without a visible name/avatar", () => {
     render(<MessageBubble message={userMsg()} {...baseProps} />);
-    expect(screen.getByText("Mark")).toBeInTheDocument();
-  });
-
-  it("applies primary-theme left border (G34: no hardcoded teal)", () => {
-    const { container } = render(<MessageBubble message={userMsg()} {...baseProps} />);
-    expect(container.querySelector(".border-primary")).toBeInTheDocument();
-    // Pin the regression: no hardcoded teal class should survive.
-    expect(container.querySelector(".border-teal-500")).not.toBeInTheDocument();
-    expect(container.querySelector(".from-teal-400")).not.toBeInTheDocument();
-  });
-
-  it("renders initial avatar letter when no photoURL provided", () => {
-    render(<MessageBubble message={userMsg()} {...baseProps} />);
-    expect(screen.getByText("M")).toBeInTheDocument();
-  });
-
-  it("renders user photo when userPhotoURL is provided (G34)", () => {
-    const photoURL = "https://example.com/avatar.jpg";
-    render(
-      <MessageBubble
-        message={userMsg()}
-        {...baseProps}
-        userPhotoURL={photoURL}
-      />,
-    );
-    const img = screen.getByRole("img", { name: "Mark" }) as HTMLImageElement;
-    expect(img.src).toBe(photoURL);
-    // Initial chip should NOT also render when photo is present.
+    expect(screen.getByRole("group", { name: /^Mark, / })).toBeInTheDocument();
+    // The side of the page says who is talking — no avatar chip or photo.
     expect(screen.queryByText("M")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
-  it("falls back to initial chip when userPhotoURL is null (G34 null safety)", () => {
-    render(
-      <MessageBubble
-        message={userMsg()}
-        {...baseProps}
-        userPhotoURL={null}
-      />,
-    );
-    expect(screen.getByText("M")).toBeInTheDocument();
+  it("uses theme tokens only (G34: no hardcoded teal)", () => {
+    const { container } = render(<MessageBubble message={userMsg()} {...baseProps} />);
+    expect(container.querySelector(".bg-muted")).toBeInTheDocument();
+    expect(container.querySelector("[class*=teal]")).not.toBeInTheDocument();
   });
 });
 
 describe("MessageBubble — tool call chips", () => {
-  it("renders running tool call chip with tool name", () => {
-    const toolCalls = [{ id: "tc-1", name: "web_search", status: "running" as const }];
+  it("renders running tool call chip with its friendly label", () => {
+    const toolCalls = [{ id: "tc-1", name: "web_search_agent", status: "running" as const }];
     render(<MessageBubble message={botMsg()} {...baseProps} toolCalls={toolCalls} />);
-    expect(screen.getByText("web_search")).toBeInTheDocument();
+    expect(screen.getByText("Web search")).toBeInTheDocument();
   });
 
-  it("truncates long tool names to 32 chars", () => {
+  it("truncates long tool labels to 32 chars", () => {
     const longName = "a".repeat(40);
     const toolCalls = [{ id: "tc-1", name: longName, status: "running" as const }];
     render(<MessageBubble message={botMsg()} {...baseProps} toolCalls={toolCalls} />);
-    expect(screen.getByText("a".repeat(32) + "…")).toBeInTheDocument();
+    expect(screen.getByText("A" + "a".repeat(31) + "…")).toBeInTheDocument();
   });
 });
 
@@ -180,10 +150,10 @@ describe("MessageBubble — A2UI tool delivery", () => {
 
   it("renders ToolCallChip for non-A2UI tool calls", () => {
     const toolCalls = [
-      { id: "tc-1", name: "web_search", status: "success" as const },
+      { id: "tc-1", name: "web_search_agent", status: "success" as const },
     ];
     render(<MessageBubble message={botMsg()} {...baseProps} toolCalls={toolCalls} />);
-    expect(screen.getByText("web_search")).toBeInTheDocument();
+    expect(screen.getByText("Web search")).toBeInTheDocument();
     expect(screen.queryByTestId("a2ui-renderer")).not.toBeInTheDocument();
   });
 

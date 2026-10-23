@@ -31,7 +31,7 @@ Nine of ten commits are template work. We run a subtractive pipeline over a repo
 that is ~90% template, and the script's own comment history reads as an
 incident log:
 
-- **`one-bigquery`'s `SKILL.md` was missed** (2026-08-12) — its two design docs
+- **`demo-bigquery`'s `SKILL.md` was missed** (2026-08-12) — its two design docs
   were added to `DELETE_PATHS` by hand; the file next to them carrying the
   customer's entire BigQuery schema was not. The gate caught it. The
   *mechanism* did not.
@@ -117,7 +117,7 @@ than by remembering to name things.
 - Design-doc link resolution in the published tree: **20/55 → 55/55**, enforced
   by CI (the internal-tools fork #11)
 - Deploy-tier bootstrap has an owner: the internal-tools fork #15–#26 become fixable upstream
-- A template refresh for a fork is `git merge upstream/main`, not
+- A template refresh for a fork is `git merge upstream/dev`, not
   clone-and-hand-diff
 
 **Non-Goals:**
@@ -251,8 +251,8 @@ inversion:
   upstream/downstream model these files simply don't exist upstream. Additive,
   no conflict, ever.
 - **Value replacement** (the ~120-rule `TOKEN_REPLACEMENTS` table) — **fatal.**
-  `your-project-id` → `your-project-id`, `acmeenergy.com` →
-  `acme-energy.example`, `Dana` → `Dana`. These are *the same file with
+  `your-project-id` → `your-project-id`, `energy.example` →
+  `acme-energy.example`, `a tester` → `a tester`. These are *the same file with
   different content* on each side. Under any merge-based model that is a
   permanent conflict on every sync, forever.
 
@@ -285,9 +285,9 @@ and missed the deployment-identity rules, which are the larger half:
 The good news is that most are cosmetic —
 
 ```
-backend/adk/callbacks.py:60         # comment example: "yourcompany.com and acmeenergy.com"
-AccessControlEditor.tsx:94          placeholder="acmeenergy.com"
-backend/auth/admin_roles.py:39      docstring: ``tenant-admin:acmeenergy.com``
+backend/adk/callbacks.py:60         # comment example: "yourcompany.com and energy.example"
+AccessControlEditor.tsx:94          placeholder="energy.example"
+backend/auth/admin_roles.py:39      docstring: ``tenant-admin:energy.example``
 cli/aiplatform/commands/bq.py:46    _DATA_PROJECT = "your-entsoe-project"   ← genuinely functional
 ```
 
@@ -322,7 +322,7 @@ the internal-tools fork #11 shows the published copy is incoherent anyway.
 | Platform design docs (`docs/design/v6.*`, `docs/design/template/`) | `platform-source` | Yes |
 | Deploy-tier docs (promotion, env-cut, deployment-models) | `platform-source/deploy/docs/` | No |
 | **Fork** scope docs | that fork's own repo | n/a |
-| **Customer** docs (ONE) | this repo, `docs/customers/` | n/a |
+| **Customer** docs (example tenant) | this repo, `docs/customers/` | n/a |
 | UAT / user-acceptance records | this repo only, never upstream | n/a |
 
 Link resolution becomes correct **by construction** — nothing is deleted between
@@ -359,9 +359,9 @@ it real:
 # one-time, in this repo, after Phase 1 parity reaches 0
 git remote add upstream git@github.com:sunholo-data/platform-source.git
 git fetch upstream
-git merge --allow-unrelated-histories upstream/main   # painless: contents are identical
+git merge --allow-unrelated-histories upstream/dev   # painless: contents are identical
 # thereafter
-scripts/upstream-merge.sh        # git fetch upstream && git merge upstream/main
+scripts/upstream-merge.sh        # git fetch upstream && git merge upstream/dev
 ```
 
 The graft is painless *because* Phase 1 made contents byte-identical: with an
@@ -413,6 +413,10 @@ scripts + `make` targets:
 | `make template-parity` | `scripts/template-parity.sh` | Assert deletions-only; print content-differing files |
 | `make upstream-merge` | `scripts/upstream-merge.sh` | Fetch + merge upstream, print staged deletions |
 | `make publish-public` | `scripts/publish-public.sh` | Exclude `deploy/**`, run secret gate, push |
+
+> **Update 2026-10-01:** the publish path is `private/scripts/publish_public.py`
+> (`check` / `list` / `export`), excluding `deploy/**` **and `**/private/**`** — the
+> private tier. See [template-private-tier.md](template-private-tier.md).
 
 ## Implementation Plan
 
@@ -480,7 +484,7 @@ Pure moves plus one new script. No logic change.
 ### Phase 5: re-point the forks (~0.5 day + coordination)
 - [ ] `scripts/publish-public.sh` (~50 lines) + `make publish-public`
 - [ ] First real publish from `platform-source`; verify link-check 55/55
-- [ ] Document the supported refresh path (`git merge upstream/main`) in the
+- [ ] Document the supported refresh path (`git merge upstream/dev`) in the
       public README — the internal-tools fork's Appendix A, promoted from workaround to
       contract
 - [ ] the internal-tools fork + AIPLA re-point at a real upstream remote; triage their open
@@ -566,10 +570,10 @@ full manual sweep on every refresh.
 - [ ] Published tree contains zero customer identifiers and no `deploy/`
 - [ ] Fresh clone of the public template runs on a laptop with `LOCAL_MODE=1`
       and no GCP credentials
-- [ ] This repo merges from `upstream/main` with no content conflicts on a
+- [ ] This repo merges from `upstream/dev` with no content conflicts on a
       no-op sync
 - [ ] `sunholo-voight-kampff` has write access to both upstream repos
-- [ ] the internal-tools fork + AIPLA can `git merge upstream/main` against real ancestry
+- [ ] the internal-tools fork + AIPLA can `git merge upstream/dev` against real ancestry
 - [ ] Backend + frontend suites pass in the published tree
 
 ## Open Questions

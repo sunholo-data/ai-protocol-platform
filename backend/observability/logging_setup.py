@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import sys
+import warnings
 
 # Cloud Run sets K_SERVICE on every instance. Presence of it is the signal that
 # stdout is being scraped by the logging agent and JSON will be parsed.
@@ -107,6 +108,34 @@ class StructuredFormatter(logging.Formatter):
             return json.dumps({"severity": payload["severity"], "message": payload["message"]})
 
 
+# Third-party loggers whose INFO output is per-token or per-request chatter.
+# Measured on prod over 2026-09-13/14: `ag_ui_adk` logs one `[ADK_EVENT]` line
+# per streamed partial — 36% of every line the backend wrote — and the two
+# real errors of the week were buried underneath. WARNING keeps its
+# "Background execution error" tracebacks, which is the one thing it says that
+# matters.
+_NOISY_LOGGERS: tuple[str, ...] = ("ag_ui_adk",)
+
+# `warnings.warn` output is written to stderr unformatted, so Cloud Logging
+# splits each multi-line warning into several separate entries (the pydantic
+# "serializer warnings" one alone was ~10% of prod's log volume as `), input_type=Schema])`
+# fragments). `captureWarnings` routes what is left through our JSON formatter
+# as ONE entry; these patterns are library noise with no action for us.
+_IGNORED_WARNINGS: tuple[str, ...] = (
+    r"Pydantic serializer warnings",
+    r"\[EXPERIMENTAL\]",  # google-adk's feature-flag banner, once per import site
+    r"authlib\.jose module is deprecated",
+)
+
+
+def _quiet_third_party() -> None:
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+    for pattern in _IGNORED_WARNINGS:
+        warnings.filterwarnings("ignore", message=pattern)
+    logging.captureWarnings(True)
+
+
 def setup_logging() -> str:
     """Configure root logging. Idempotent; returns the level that was applied.
 
@@ -121,6 +150,7 @@ def setup_logging() -> str:
         level_name = "INFO"
 
     root = logging.getLogger()
+    _quiet_third_party()
     if _configured:
         root.setLevel(level)
         return level_name

@@ -41,6 +41,9 @@ from auth.group_id_auth import (
     InvalidGroupToken,
 )
 from auth.permissions import ToolPermissionDenied, can_use_tool
+from auth.tailnet_auth import AUTH_MODE as _TAILNET_AUTH_MODE
+from auth.tailnet_auth import MACHINE_AUTH_MODE as _MACHINE_AUTH_MODE
+from auth.tailnet_auth import get_current_user_tailnet, is_tailnet_mode
 from config.local_mode import is_local_mode
 
 logger = logging.getLogger(__name__)
@@ -155,6 +158,9 @@ def _enforce_domain_allowlist(user: User) -> None:
         return
     if user.auth_mode == _GROUP_AUTH_MODE:
         return
+    if user.auth_mode in (_TAILNET_AUTH_MODE, _MACHINE_AUTH_MODE):
+        # TAILNET_PRINCIPALS / MACHINE_PRINCIPALS already are the allowlist.
+        return
     if _domain_allowed(user):
         return
     if not _operator_domains():
@@ -182,6 +188,49 @@ def _enforce_domain_allowlist(user: User) -> None:
     )
 
 
+def _enforce_verified_email(user: User) -> None:
+    """403 a Firebase caller whose email is present but unverified.
+
+    Firebase lets anyone self-register an email/password account for ANY
+    address, e.g. a colleague's ``@example.com``; until the mailbox owner
+    clicks the link the token says ``email_verified: false``. Everything
+    downstream trusts ``user.email`` (the domain allowlist, admin roles,
+    Severa's caller scoping), so an unverified email must never get that far.
+    Independent of ``AUTH_REQUIRE_KNOWN_DOMAIN``: the hole is the identity, not
+    the domain. Google sign-in is always verified, so real users are unaffected.
+    Firebase callers ONLY: the hole is Firebase self sign-up. LOCAL_MODE, group-id
+    and tailnet/machine principals (identity proven by Tailscale or a machine
+    token, never carrying ``email_verified``) are not this gate's business, nor
+    is an email-less Firebase user (nothing to impersonate).
+    """
+    if is_local_mode() or user.auth_mode != "firebase":
+        return
+    if not user.email or user.email_verified:
+        return
+    logger.info("auth: rejected unverified email uid=%s domain=%s", user.uid, user.domain or "(none)")
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "EMAIL_NOT_VERIFIED",
+            "message": (
+                "This account's email address hasn't been verified. "
+                "Sign in with Google using your work account instead."
+            ),
+        },
+    )
+
+
+def enforce_user_gates(user: User) -> None:
+    """Every identity gate a resolved caller must pass, in one place.
+
+    ``get_current_user`` runs it for the REST API; any other entry point that
+    resolves a user itself (the MCP endpoint's personal tokens) MUST run it too,
+    so no door has weaker identity rules than the front one. Raises 403.
+    """
+    _enforce_verified_email(user)
+    _enforce_domain_allowlist(user)
+
+
 async def get_current_user(request: Request) -> User:
     """FastAPI auth dependency. Dispatches to the right verifier and
     binds the tenant contextvar so every OTel span emitted during the
@@ -192,12 +241,13 @@ async def get_current_user(request: Request) -> User:
     ``set_tenant_context(user)`` — covering all three auth paths
     (Firebase, group-auth, LOCAL_MODE stub) without touching the 13
     endpoints that depend on ``get_current_user`` — and for the v6.18.0
-    domain allowlist (``_enforce_domain_allowlist``).
+    domain allowlist (``_enforce_domain_allowlist``) and the verified-email
+    gate (``_enforce_verified_email``).
     """
     from observability.tenant_context import set_tenant_context
 
     user = await _resolve_user(request)
-    _enforce_domain_allowlist(user)
+    enforce_user_gates(user)
     set_tenant_context(user)
     return user
 
@@ -206,12 +256,17 @@ async def _resolve_user(request: Request) -> User:
     """Token-shape dispatcher for the three auth paths.
 
     Order:
+      0. AUTH_MODE=tailnet: Tailscale identity or machine token ONLY — no
+         fallback to any other verifier (see auth.tailnet_auth).
       1. LOCAL_MODE: try stub token first; fall through to group-auth
          (group tokens are also valid in LOCAL_MODE so forks can demo).
       2. Cloud-mode: peek at the JWT's ``auth_mode`` claim:
            - "anonymous_group_id" → group_id_auth verifier
            - missing / other       → Firebase verifier
     """
+    if is_tailnet_mode():
+        return await get_current_user_tailnet(request)
+
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         # Defer the 401-shape error to the chosen verifier so the message
@@ -255,5 +310,6 @@ __all__ = [
     "build_access_context",
     "can_access",
     "can_use_tool",
+    "enforce_user_gates",
     "get_current_user",
 ]

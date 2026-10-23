@@ -150,15 +150,10 @@ The rest of this doc describes each step in detail.
 A subscription is the per-organization prerequisite. The setup page
 lives at `console.cloud.google.com/gemini-enterprise/user-license`
 (was `/manage-subscriptions` before Agentspace folded into Gemini
-Enterprise at Next 2026 — the old path 404s). The screenshot below
-captures the page on the day the rename landed:
-
-![Gemini Enterprise Standard subscription page showing Holosun Billing as the billing account, Yearly $30/month/user vs Monthly $35/month/user options](../vendor/gemini-enterprise-subscription.png)
+Enterprise at Next 2026 — the old path 404s).
 
 **What you need:**
-- A Google Cloud billing account with admin access (the screenshot shows
-  "Holosun Billing" as Sunholo's example — yours will be the org's billing
-  account).
+- A Google Cloud billing account for your organization, with admin access.
 - A subscription name (free-form; appears in the Gemini Enterprise admin UI).
 - License count — start at 1 and add seats as users join.
 - Choose **Yearly** ($30/month/user, 12-month commitment) or **Monthly**

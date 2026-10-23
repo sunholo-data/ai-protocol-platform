@@ -31,7 +31,7 @@ export function formatRelative(ts: number, now: number): string {
 
 export function absoluteTime(ts: number): string {
   if (!ts) return "";
-  return new Date(ts).toLocaleTimeString();
+  return new Date(ts).toLocaleString(undefined, { timeZoneName: "short" });
 }
 
 function tryParse(s: string): unknown {
@@ -116,4 +116,13 @@ export function formatResult(result?: string): ResultView {
     return { kind: "json", value: top, copyText: JSON.stringify(top, null, 2) };
   }
   return { kind: "text", text: String(top), copyText: String(top) };
+}
+
+/** Clock time stays visible even when the relative label becomes a date. */
+export function activityTime(ts: number, now: number): string {
+  if (!ts) return "";
+  const clock = new Date(ts).toLocaleTimeString(undefined, {
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+  return `${clock} · ${formatRelative(ts, now)}`;
 }

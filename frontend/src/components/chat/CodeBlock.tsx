@@ -1,6 +1,6 @@
 // CodeBlock — a fenced code block in a chat reply, with a copy affordance.
 //
-// The ONE Data Analyst skill shows the SQL behind every number it reports, and
+// The Example Data Analyst skill shows the SQL behind every number it reports, and
 // the natural next thing a user does with that SQL is run it somewhere else.
 // Selecting a multi-line block by hand in a scrolling chat is fiddly, so the
 // block carries its own Copy button.
@@ -117,7 +117,7 @@ export function CodeBlock({
   // Nothing to copy (an empty fence) → render the plain block, no chrome.
   if (!text.trim()) {
     return (
-      <pre className="mb-2 overflow-x-auto rounded border border-border bg-muted p-3 text-xs">{children}</pre>
+      <pre className="mb-2 overflow-x-auto rounded border border-border bg-muted p-3 text-[13px] leading-relaxed">{children}</pre>
     );
   }
 
@@ -125,14 +125,14 @@ export function CodeBlock({
     <div className="mb-2 overflow-hidden rounded border border-border">
       <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/60 px-2 py-1">
         <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          {language || "code"}
+          {language === "ail" ? "ailang" : language || "code"}
         </span>
         <span className="flex items-center gap-1">
           {actions}
           <CopyCodeButton text={text} />
         </span>
       </div>
-      <pre className="overflow-x-auto bg-muted p-3 text-xs">{children}</pre>
+      <pre className="overflow-x-auto bg-muted p-3 text-[13px] leading-relaxed">{children}</pre>
     </div>
   );
 }

@@ -148,7 +148,7 @@ class TestNoExampleRenameDependency:
         "example,real",
         [
             ("infrastructure/mcp-toolbox/tools.example.yaml", "infrastructure/mcp-toolbox/tools.yaml"),
-            ("docs/ops/deployed-urls.example.md", "docs/ops/deployed-urls.md"),
+            ("docs/deployment/deployed-urls.example.md", "docs/ops/deployed-urls.md"),
         ],
     )
     def test_example_is_tracked_and_real_is_not(self, example: str, real: str) -> None:

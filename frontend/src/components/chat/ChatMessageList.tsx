@@ -13,7 +13,7 @@ import type { StreamError, SkillMessage, ToolCallState, DelegationMarkerItem, Fa
 import { buildAgentMap } from "@/lib/messageAgent";
 import { DelegationMarker } from "./DelegationMarker";
 import { FallbackNotice } from "./FallbackNotice";
-import type { ActiveDocumentContext } from "@/components/chat/ContextBanner";
+import type { ActiveDocumentContext, ActiveProjectContext } from "@/components/chat/ContextBanner";
 import { ContextBanner } from "@/components/chat/ContextBanner";
 import { MessageBubble } from "./MessageBubble";
 import { StreamingBubble } from "./StreamingBubble";
@@ -42,6 +42,7 @@ interface ChatMessageListProps {
   thinkingContent: string;
   isThinking: boolean;
   isLoading: boolean;
+  completedReplyId?: string | null;
   error: StreamError | null;
   skillId: string;
   userInitial: string;
@@ -54,6 +55,12 @@ interface ChatMessageListProps {
    * skill matches its switcher logo (6.11). Null → brand mark. */
   botAvatarUrl?: string | null;
   activeDocumentContext?: ActiveDocumentContext | null;
+  /** The user's own instructions are set — the banner says they're on (§6.5). */
+  instructionsOn?: boolean;
+  /** The project this chat is scoped to (§6.3), once loaded. */
+  projectContext?: ActiveProjectContext | null;
+  /** Leave the project the chat is in (the banner's ✕). */
+  onLeaveProject?: () => void;
   navigateToBlock?: (docId: string, blockId: string) => void;
   onAction: (event: { actionName: string; context: Record<string, unknown> }) => void;
   errorBanner?: React.ReactNode;
@@ -145,6 +152,7 @@ export function ChatMessageList({
   thinkingContent,
   isThinking,
   isLoading,
+  completedReplyId,
   error,
   skillId,
   userInitial,
@@ -152,6 +160,9 @@ export function ChatMessageList({
   userPhotoURL,
   botAvatarUrl,
   activeDocumentContext,
+  instructionsOn = false,
+  projectContext = null,
+  onLeaveProject,
   navigateToBlock,
   onAction,
   errorBanner,
@@ -339,14 +350,11 @@ export function ChatMessageList({
       leadingSurfaces.push(s);
     }
   }
-  // `mt-4` gives the card a consistent gap above it. It's load-bearing for the
-  // INTERLEAVED case: those surfaces render as grandchildren inside a per-message
-  // `display:contents` wrapper (see stableMessages.map), so the parent's
-  // `space-y-4` never reaches them and the card would otherwise butt flush
-  // against the bubble above. For `leadingSurfaces` (direct children) `mt-4`
-  // matches the `space-y-4` value, so there's no double margin.
+  // No margin of its own: leading surfaces are direct children of the
+  // transcript column and interleaved ones sit inside a per-message block
+  // (see stableMessages.map) — both get the same `space-y-6` turn rhythm.
   const renderChatSurface = (s: ChatSurfaceItem) => (
-    <div key={`surface-${s.surfaceId}`} className="mt-4 flex justify-start">
+    <div key={`surface-${s.surfaceId}`} className="flex justify-start">
       <ChatPlacementForm
         surfaceId={s.surfaceId}
         submitted={s.submitted}
@@ -388,8 +396,13 @@ export function ChatMessageList({
 
   return (
     <div className="relative flex flex-col flex-1 overflow-hidden">
-      {activeDocumentContext !== undefined && (
-        <ContextBanner context={activeDocumentContext ?? null} />
+      {(activeDocumentContext !== undefined || instructionsOn || projectContext) && (
+        <ContextBanner
+          context={activeDocumentContext ?? null}
+          instructionsOn={instructionsOn}
+          project={projectContext}
+          onLeaveProject={onLeaveProject}
+        />
       )}
 
       <div
@@ -397,7 +410,9 @@ export function ChatMessageList({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto"
       >
-        <div ref={innerRef} className="space-y-4 p-4">
+        {/* One reading column: centred, capped at ~48rem, the same 20px phone
+            gutter as the composer (32px from md). space-y-6 is the turn rhythm. */}
+        <div ref={innerRef} className="mx-auto w-full max-w-3xl space-y-6 px-5 py-6 md:px-8">
           {historyError && (
             <p className="text-xs text-muted-foreground italic">{historyError}</p>
           )}
@@ -444,6 +459,7 @@ export function ChatMessageList({
                 <MessageBubble
                   key={m.id}
                   message={m}
+                  voiceSkillId={formSkillId ?? skillId}
                   skillId={skillId}
                   userInitial={userInitial}
                   userDisplayName={userDisplayName}
@@ -472,9 +488,11 @@ export function ChatMessageList({
             !introMessage &&
             !error &&
             !isLoading && (
-              <p className="text-sm text-muted-foreground">
-                Send a message to start the conversation.
-              </p>
+              <div className="flex min-h-[40vh] items-center justify-center px-4 text-center">
+                <p className="max-w-sm text-base text-muted-foreground">
+                  Send a message to start the conversation.
+                </p>
+              </div>
             )}
 
           {/* Chat surfaces created before the first message (7.8) — e.g. an
@@ -484,9 +502,14 @@ export function ChatMessageList({
           {stableMessages.map((m) => {
             const markers = delegationsByAfter.get(m.id);
             return (
-              <div key={m.id} className="contents">
+              // A real block (not `display:contents`) so the column's
+              // space-y-6 reaches each turn; `empty:hidden` drops the block of
+              // a tool-only turn whose bubble renders nothing inline.
+              <div key={m.id} className="space-y-6 empty:hidden">
                 <MessageBubble
                   message={m}
+                  voiceSkillId={formSkillId ?? skillId}
+                  autoSpeakAllowed={!isLoading && !error && m.id === completedReplyId}
                   skillId={skillId}
                   userInitial={userInitial}
                   userDisplayName={userDisplayName}
@@ -552,7 +575,7 @@ export function ChatMessageList({
         <button
           type="button"
           onClick={() => scrollToBottom("smooth")}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium shadow-md hover:bg-muted"
+          className="absolute bottom-4 left-1/2 min-h-9 -translate-x-1/2 rounded-[var(--radius)] border border-border bg-background px-4 text-sm font-medium text-foreground hover:bg-muted"
         >
           ↓ New message
         </button>

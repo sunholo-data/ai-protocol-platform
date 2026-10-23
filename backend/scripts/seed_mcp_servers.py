@@ -63,6 +63,27 @@ EXT_APPS_MAP_CONFIG = {
 }
 
 
+# Browser (v6.39.0) — the isolated Obscura browsing service, its own Cloud Run
+# service with a near-zero-permission SA. Per-env URL, like ext-apps-map and
+# unlike the loopback sidecars, so the same preserve-rather-than-clobber rule
+# applies: a bare run must never write a localhost default over a deployed URL.
+#
+# `gate: browser_allowlist` is load-bearing. The browser service holds no
+# project roles, so the user allowlist cannot live there — it is enforced in the
+# registry on the only path that reaches the service (tools/browser_allowlist.py,
+# and registry.py where the gate is dispatched).
+BROWSER_CONFIG = {
+    "name": "Browser — isolated Obscura browsing service",
+    "transport": "http",
+    "headers": {},
+    "auth": "google_id_token",
+    "gate": "browser_allowlist",
+    "source_repo": "https://github.com/sunholo-data/obscura",
+    "operated_by": "aitana",
+    "tags": ["browser", "web", "scraping"],
+}
+
+
 # MCP Toolbox (v6.14.0) — Google's database gateway, run as a SIDECAR container
 # inside platform-frontend rather than as its own Cloud Run service.
 #
@@ -121,15 +142,15 @@ TOOLBOX_CONFIG = {
     "tags": ["database", "bigquery", "ppa", "sidecar"],
 }
 
-# v6.23.0 ONE-BQ — the SAME sidecar, a DIFFERENT toolset path. Toolbox serves
+# v6.23.0 TENANT-BQ — the SAME sidecar, a DIFFERENT toolset path. Toolbox serves
 # each toolset at /mcp/<toolset>, which is the whole reason a second capability
 # needs no second container, no second port and no infra change: only a second
 # registry row pointing one path over.
 #
 # Kept as a separate mcp_servers/ document rather than folded into toolbox
 # because the registry document is the ACCESS unit — a skill declares server ids,
-# so two documents let one-ppa-expert keep exactly its two curated MarketData tools
-# while one-bigquery gets the generic executors, with no overlap. Merging them
+# so two documents let demo-ppa-expert keep exactly its two curated MarketData tools
+# while demo-bigquery gets the generic executors, with no overlap. Merging them
 # would hand every MarketData consumer arbitrary SQL by accident.
 TOOLBOX_BQ_URL = f"http://127.0.0.1:5000/mcp/{_BQ_TOOLSET}"
 TOOLBOX_ONE_BQ_CONFIG = {
@@ -214,35 +235,77 @@ def seed_ext_apps_map(url: str | None, *, dry_run: bool = False) -> None:
     print(f"Seeded mcp_servers/ext-apps-map: url={url}")
 
 
-def seed_toolbox(url: str = TOOLBOX_URL, *, dry_run: bool = False) -> None:
-    """Seed the MCP Toolbox sidecar entry.
+def _seed_toolbox_row(doc_id: str, config: dict, url: str, *, dry_run: bool) -> None:
+    """Write a Toolbox row, PRESERVING an existing URL.
 
-    Takes no ``--public-url``: the sidecar is loopback-only by construction, so
-    a non-loopback URL would mean someone had exposed the database gateway to
-    the network — which the design forbids. Same URL in every environment.
+    The loopback host is the same everywhere; the PATH is not. It names the
+    toolset, and a deployed env points at a customer's toolset rather than the
+    template default, where this script's defaults say ``/mcp/example``.
+
+    Until 2026-09-05 these two rows were written unconditionally, on the
+    docstring's claim that the URL is "the same in every environment". It is
+    not, and a bare run of this script against prod would have repointed both
+    at the example toolset — silently breaking the PPA and BigQuery skills,
+    which are the two most load-bearing things the deployment has.
+
+    So: same rule as ext-apps-map. Only write a URL that was asked for
+    explicitly; otherwise keep what is there.
     """
-    config = {**TOOLBOX_CONFIG, "url": url}
-    if dry_run:
-        print(f"[dry-run] would write mcp_servers/toolbox: url={url}")
+    existing = fs.get_document(COLLECTION, doc_id)
+    if existing and existing.get("url") and existing.get("url") != url:
+        print(f"{doc_id}: preserving existing url={existing['url']} (differs from the default {url})")
         return
-    fs.set_document(COLLECTION, "toolbox", config)
-    print(f"Seeded mcp_servers/toolbox: url={url}")
+    row = {**config, "url": url}
+    if dry_run:
+        print(f"[dry-run] would write mcp_servers/{doc_id}: url={url}")
+        return
+    fs.set_document(COLLECTION, doc_id, row)
+    print(f"Seeded mcp_servers/{doc_id}: url={url}")
+
+
+def seed_toolbox(url: str = TOOLBOX_URL, *, dry_run: bool = False) -> None:
+    """Seed the MCP Toolbox sidecar entry (preserving a customised URL)."""
+    _seed_toolbox_row("toolbox", TOOLBOX_CONFIG, url, dry_run=dry_run)
 
 
 def seed_toolbox_bq(url: str = TOOLBOX_BQ_URL, *, dry_run: bool = False) -> None:
-    """Seed the scoped ad-hoc BigQuery toolset (v6.23.0 ONE-BQ).
+    """Seed the scoped ad-hoc BigQuery toolset (v6.23.0 TENANT-BQ).
 
     Same sidecar as ``seed_toolbox``, same loopback-only rationale — the only
     difference is the toolset path. Takes no ``--public-url`` for the same reason:
     a non-loopback URL would mean the database gateway had been exposed to the
     network, which the design forbids.
     """
-    config = {**TOOLBOX_ONE_BQ_CONFIG, "url": url}
-    if dry_run:
-        print(f"[dry-run] would write mcp_servers/toolbox-bq: url={url}")
+    _seed_toolbox_row("toolbox-bq", TOOLBOX_ONE_BQ_CONFIG, url, dry_run=dry_run)
+
+
+def seed_browser(url: str | None, *, dry_run: bool = False) -> None:
+    """Seed the browser MCP entry. ``url`` None means 'no explicit URL given'.
+
+    Same footgun as ext-apps-map: the URL is per-env, so a bare run with no
+    ``--browser-url`` must PRESERVE what is already there rather than write a
+    default over a deployed Cloud Run service.
+
+    This row existed only as a hand-made Firestore document until 2026-09-04 —
+    it worked on dev and test because someone had written it by hand, and a
+    fresh environment would simply not have had a browser. The template guard
+    (`admin.mcp_registry_check`) caught it the moment web-browser gained a
+    SKILL.md that declares the server.
+    """
+    existing = fs.get_document(COLLECTION, "browser")
+    if url is None:
+        if existing and existing.get("url"):
+            print(f"browser: preserving existing url={existing['url']} (no --browser-url given)")
+            return
+        print("browser: SKIPPED — no --browser-url given and no existing row to preserve.")
+        print("  The service URL is per-env; pass --browser-url https://platform-browser-<hash>-ew.a.run.app/mcp")
         return
-    fs.set_document(COLLECTION, "toolbox-bq", config)
-    print(f"Seeded mcp_servers/toolbox-bq: url={url}")
+    config = {**BROWSER_CONFIG, "url": url}
+    if dry_run:
+        print(f"[dry-run] would write mcp_servers/browser: url={url}")
+        return
+    fs.set_document(COLLECTION, "browser", config)
+    print(f"Seeded mcp_servers/browser: url={url}")
 
 
 def main() -> None:
@@ -283,6 +346,10 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--browser-url",
+        help="Browser service MCP URL for this env (https://platform-browser-<hash>-ew.a.run.app/mcp). Omitted = preserve existing.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print what would be written, don't touch Firestore",
@@ -309,6 +376,9 @@ def main() -> None:
     # Google-operated endpoint, same URL in every env — like the Toolbox rows it
     # is unaffected by --url / --public-url.
     seed_maps_grounding(dry_run=args.dry_run)
+    # Per-env URL like ext-apps-map, so it preserves rather than clobbers.
+    print(f"seed_mcp_servers: browser url = {args.browser_url or '(preserve existing)'}")
+    seed_browser(args.browser_url, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from typing import Any
 # Import registers the PPA mappings as a side effect (same as the app's
 # composition root). Keeps the preview in sync with what ships.
 from adk import a2ui_elicitation_render as _a2ui_elicitation_render  # noqa: F401
+from adk import a2ui_inbox_render as _a2ui_inbox_render  # noqa: F401
 from adk import a2ui_obligation_render as _a2ui_obligation_render  # noqa: F401
 from adk import a2ui_ppa_render as _a2ui_ppa_render  # noqa: F401
 from adk.a2ui_result_render import registered_mapping_names, render_by_name

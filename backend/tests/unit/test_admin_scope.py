@@ -32,10 +32,10 @@ class TestResolution:
         assert scope.domains is None
 
     def test_single_tenant_admin(self):
-        scope = resolve_admin_scope(_user("tenant-admin:acmeenergy.com"))
+        scope = resolve_admin_scope(_user("tenant-admin:energy.example"))
         assert scope is not None
         assert not scope.is_platform
-        assert scope.domains == frozenset({"acmeenergy.com"})
+        assert scope.domains == frozenset({"energy.example"})
 
     def test_multi_tenant_admin(self):
         scope = resolve_admin_scope(_user("tenant-admin:a.com", "tenant-admin:b.com"))
@@ -44,7 +44,7 @@ class TestResolution:
 
     def test_no_admin_tags_resolves_none(self):
         assert resolve_admin_scope(_user()) is None
-        assert resolve_admin_scope(_user("ONE", "some-group")) is None
+        assert resolve_admin_scope(_user("example-team", "some-group")) is None
 
     def test_one_admin_is_not_a_platform_admin(self):
         # one-admin is a *skill* admin tag, deliberately not platform authority.

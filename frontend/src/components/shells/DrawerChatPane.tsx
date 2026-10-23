@@ -145,7 +145,7 @@ export function DrawerChatPane({
           ) : undefined
         }
       />
-      <footer className="border-t p-3">
+      <footer className="border-t p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <form
           className="flex items-end gap-2"
           onSubmit={(e) => {
@@ -153,7 +153,7 @@ export function DrawerChatPane({
             void handleSend();
           }}
         >
-          {/* 2026-08-06 UAT (ONE): same single-line-<input> wrap bug as the
+          {/* 2026-08-06 acceptance testing: same single-line-<input> wrap bug as the
               main ChatShell composer — a long prompt scrolled sideways instead
               of wrapping. Kept identical to ChatShell's fix so the two
               composers behave the same: textarea + auto-grow, Enter sends,
@@ -170,17 +170,17 @@ export function DrawerChatPane({
             }}
             rows={1}
             placeholder={placeholder}
-            className="max-h-48 flex-1 resize-none overflow-y-auto rounded-md border px-3 py-2 text-sm"
+            className="max-h-48 min-w-0 flex-1 resize-none overflow-y-auto rounded-md border px-3 py-2 text-base md:text-sm"
             disabled={isLoading}
           />
           {isLoading ? (
-            <button type="button" onClick={stop} className="rounded-md border px-3 py-2 text-sm">
+            <button type="button" onClick={stop} className="min-h-[44px] rounded-md border px-3 py-2 text-sm md:min-h-0">
               Stop
             </button>
           ) : (
             <button
               type="submit"
-              className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
+              className="min-h-[44px] rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground md:min-h-0"
               disabled={!draft.trim()}
             >
               Send

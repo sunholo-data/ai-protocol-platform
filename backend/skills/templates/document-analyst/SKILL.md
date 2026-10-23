@@ -5,7 +5,7 @@ avatar: /images/avatars/skill-document-analyst.svg
 tags:
   - document-analysis
   - extraction
-  # v6.6.0 ONE-FORK-CONVERGENCE: standing demo of the experimental
+  # v6.6.0 TENANT-FORK-CONVERGENCE: standing demo of the experimental
   # workbench-primary shell — flagged so it groups under the admin-only
   # "In development" section of the skill switcher, not the customer-facing
   # production list.
@@ -28,13 +28,8 @@ metadata:
     - list_documents
     - get_document_content
   toolConfigs:
-    ai_search:
-      # aitana3 = the shared platform datastore in aitana-ai-search/eu (bare id,
-      # expanded via VERTEX_AI_SEARCH_PROJECT/LOCATION). The previous `ds-documents`
-      # did not exist in that project, so ai_search 404'd at query time. Any real
-      # datastore in aitana-ai-search works here; drop this line entirely to inherit
-      # the VERTEX_AI_SEARCH_DATASTORE_ID default (also aitana3).
-      datastore_id: aitana3
+    # Inherit VERTEX_AI_SEARCH_DATASTORE_ID from this deployment.
+    ai_search: {}
     a2ui:
       # MULTI-SURFACE-A2UI M1 — declare this skill's A2UI specs render in
       # the persistent workspace pane by default, not inline-in-chat.

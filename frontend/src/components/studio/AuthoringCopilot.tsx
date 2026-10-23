@@ -13,6 +13,8 @@
 "use client";
 
 import { Check, Pencil, X } from "lucide-react";
+import { ChatMarkdown } from "@/components/chat/ChatMarkdown";
+import { VisualEvidenceContext } from "@/components/chat/media/VisualEvidenceControl";
 import { SendIcon } from "@/components/icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSkillAgent } from "@/hooks/useSkillAgent";
@@ -100,6 +102,15 @@ export function AuthoringCopilot({ skillId, onApplyProposal }: AuthoringCopilotP
     void sendMessage(text);
   }, [draft, isLoading, sendMessage]);
 
+  const requestVisualCorrection = useCallback((text: string) => {
+    if (isLoading) return;
+    void sendMessage(text);
+  }, [isLoading, sendMessage]);
+  const visualContext = useMemo(() => ({
+    sessionId,
+    onChatMessage: isLoading ? undefined : requestVisualCorrection,
+  }), [sessionId, isLoading, requestVisualCorrection]);
+
   const handleDismiss = useCallback((key: string) => {
     setDismissed((prev) => {
       const next = new Set(prev);
@@ -126,9 +137,11 @@ export function AuthoringCopilot({ skillId, onApplyProposal }: AuthoringCopilotP
           </p>
         )}
 
-        {messages.map((m) => (
-          <MessageRow key={m.id} role={m.role} content={m.content} />
-        ))}
+        <VisualEvidenceContext.Provider value={visualContext}>
+          {messages.map((m) => (
+            <MessageRow key={m.id} role={m.role} content={m.content} />
+          ))}
+        </VisualEvidenceContext.Provider>
 
         {isLoading && (
           <p className="text-xs text-muted-foreground" aria-live="polite">
@@ -195,6 +208,9 @@ export function AuthoringCopilot({ skillId, onApplyProposal }: AuthoringCopilotP
   );
 }
 
+// SVG fences have no document navigation; preserve callback identity across renders.
+const noDiagramNavigation = () => {};
+
 function MessageRow({ role, content }: { role: "user" | "assistant"; content: string }) {
   const isUser = role === "user";
   return (
@@ -205,7 +221,9 @@ function MessageRow({ role, content }: { role: "user" | "assistant"; content: st
           (isUser ? "bg-primary/10" : "bg-muted/40")
         }
       >
-        {content || <span className="text-muted-foreground">(no text)</span>}
+        {content ? isUser ? content : content.split(/(```svg\r?\n[\s\S]*?```)/g).map((part, index) =>
+          part.startsWith("```svg") ? <ChatMarkdown key={index} content={part} navigateToBlock={noDiagramNavigation} /> : part
+        ) : <span className="text-muted-foreground">(no text)</span>}
       </div>
     </div>
   );

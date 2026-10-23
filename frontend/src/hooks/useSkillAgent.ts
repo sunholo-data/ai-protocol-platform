@@ -7,9 +7,12 @@
 "use client";
 
 import type { Message } from "@ag-ui/client";
+import { contentToText, type ToolCallResultEvent } from "@ag-ui/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAGUIAgent } from "@/providers/AGUIProvider";
 import { useOptionalSurfaceRegistry } from "@/providers/SurfaceRegistry";
+import { logger } from "@/lib/logger";
+import { toolStageLabel } from "@/lib/toolLabels";
 import {
   recordFirstEvent,
   recordFirstStageLabel,
@@ -34,6 +37,16 @@ export interface SkillMessage {
   createdAt?: number;
 }
 
+/**
+ * The queryable fields of a StreamError — deliberately NOT `rawMessage`, which
+ * echoes backend text that can quote a document or a prompt. `kind`/`status`/
+ * `retryable` are what you actually group by when asking "how often is this
+ * happening, and to whom".
+ */
+function errorAttrs(e: StreamError): Record<string, unknown> {
+  return { kind: e.kind, status: e.status, retryable: e.retryable };
+}
+
 export interface StreamError {
   kind: "http" | "run_error" | "network" | "budget_exceeded" | "rate_limited";
   status?: number;
@@ -47,6 +60,13 @@ export interface StreamError {
    * RUN_ERROR event. The BudgetBanner renders a live countdown.
    */
   retryAfterSeconds?: number;
+  /**
+   * The run failed AFTER answer text had streamed — the reply on screen is
+   * partial. Backend `resilient_llm` never retries once answer text is visible
+   * (a retry would duplicate it), so a transient mid-stream provider 500 lands
+   * here; the banner says "cut off" rather than "unavailable".
+   */
+  interrupted?: boolean;
 }
 
 export interface ToolCallState {
@@ -150,9 +170,11 @@ export interface UseSkillAgentReturn {
    * first turn. Drives the Activity header so it reflects a router tier /
    * delegate model rather than the skill's static config (8.2). */
   resolvedModel: string | null;
+  /** Latest new reply confirmed complete by a server event; never partial/aborted. */
+  completedReplyId?: string | null;
   sendMessage: (
     text: string,
-    opts?: { documentIds?: string[]; resumedSession?: boolean },
+    opts?: { documentIds?: string[]; resumedSession?: boolean; projectId?: string | null },
   ) => Promise<void>;
   isLoading: boolean;
   error: StreamError | null;
@@ -196,7 +218,26 @@ function classifyError(err: unknown): StreamError {
   return { kind: "network", message: "Connection lost. Try again.", retryable: true, rawMessage: msg };
 }
 
-function classifyRunError(event: unknown): StreamError {
+// Codes where the failure is a provider hiccup, not something about the
+// request — safe to call "cut off, try again" when it hits mid-answer.
+// null = no code (a generic RUN_ERROR / pipeline throw).
+const INTERRUPTIBLE_CODES = new Set<unknown>(["MODEL_UNAVAILABLE", null, undefined]);
+
+function classifyRunError(event: unknown, opts: { answerStarted?: boolean } = {}): StreamError {
+  const base = classifyRunErrorEvent(event);
+  const code = event && typeof event === "object" && "code" in event ? (event as { code: unknown }).code : null;
+  if (opts.answerStarted && base.kind === "run_error" && INTERRUPTIBLE_CODES.has(code)) {
+    return {
+      ...base,
+      message: "The answer was cut off — the AI model hit a temporary error partway through. Try again for the full answer.",
+      retryable: true,
+      interrupted: true,
+    };
+  }
+  return base;
+}
+
+function classifyRunErrorEvent(event: unknown): StreamError {
   const msg =
     event && typeof event === "object" && "message" in event
       ? String((event as { message: unknown }).message)
@@ -225,6 +266,14 @@ function classifyRunError(event: unknown): StreamError {
   // about what happened and whether retrying can help.
   if (event && typeof event === "object" && "code" in event) {
     const code = (event as { code: unknown }).code;
+    if (code === "SESSION_LOOKUP_ERROR") {
+      return {
+        kind: "run_error",
+        message: "Couldn't load this conversation. Please retry in a moment.",
+        retryable: true,
+        rawMessage: msg,
+      };
+    }
     if (code === "MODEL_RATE_LIMITED") {
       const rawRetry = (event as { retry_after_seconds?: unknown }).retry_after_seconds;
       const retryAfterSeconds = typeof rawRetry === "number" ? Math.ceil(rawRetry) : undefined;
@@ -305,16 +354,8 @@ function classifyRunError(event: unknown): StreamError {
  * fresh renders. The agent keeps the canonical list; we just copy it.
  */
 
-// #12: search runs as an AgentTool / native grounding — no handoff chip — so a
-// stage label is how it stays visible in the main chat. Keyed by the tool /
-// sub-agent name AG-UI reports on TOOL_CALL_START. Non-search tools set no label
-// (they show in the Activity tab).
-const SEARCH_TOOL_LABELS: Record<string, string> = {
-  ai_search: "Searching the library…",
-  enterprise_search_agent: "Searching the library…",
-  google_search: "Searching the web…",
-  web_search_agent: "Searching the web…",
-};
+// #12: search tools set a main-chat stage label ("Searching the web…") —
+// see toolStageLabel in @/lib/toolLabels, the one frontend source of tool labels.
 export function useSkillAgent(options?: {
   _hangTimeoutMs?: number;
   _midStreamTimeoutMs?: number;
@@ -351,6 +392,7 @@ export function useSkillAgent(options?: {
   // tier, a fallback, or the front door's configured model — rather than the
   // static skill config. Null until the first turn reports it (8.2).
   const [resolvedModel, setResolvedModel] = useState<string | null>(null);
+  const [completedReplyId, setCompletedReplyId] = useState<string | null>(null);
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -373,6 +415,9 @@ export function useSkillAgent(options?: {
   // refs let onRunFinalized tell "clean finish" from "truncated".
   const sawTerminalRef = useRef(false);
   const abortedRef = useRef(false);
+  // True once this run has streamed non-empty answer text (reasoning doesn't
+  // count). A RUN_ERROR after that means the reply on screen is partial.
+  const answerStartedRef = useRef(false);
 
   // Snapshot of agent.messages.length taken at RUN_STARTED. Used by
   // onToolCallStartEvent to scope the assistant-text-message search to the
@@ -442,7 +487,9 @@ export function useSkillAgent(options?: {
         setRunStarted(true);
         // Per-run truncation tracking (see sawTerminalRef).
         sawTerminalRef.current = false;
+        setCompletedReplyId(null);
         abortedRef.current = false;
+        answerStartedRef.current = false;
         // Preserve completed tool calls from prior turns so their iframes
         // survive into the next turn. Only drop orphaned "running" entries
         // left over from an aborted previous run.
@@ -627,6 +674,9 @@ export function useSkillAgent(options?: {
           );
         }
       },
+      onTextMessageContentEvent: ({ event }: { event: { delta?: string } }) => {
+        if (event.delta) answerStartedRef.current = true;
+      },
       onReasoningStartEvent: () => {
         markActivity();
         setThinkingContent("");
@@ -643,6 +693,11 @@ export function useSkillAgent(options?: {
       // onRunFinalized can tell it apart from a truncated stream.
       onRunFinishedEvent: () => {
         sawTerminalRef.current = true;
+        if (!abortedRef.current && !runFailedRef.current) {
+          const reply = agent.messages.slice(runStartMessageCountRef.current).reverse()
+            .map(toSkillMessage).find((message) => message?.role === "assistant" && message.content.trim());
+          setCompletedReplyId(reply?.id ?? null);
+        }
       },
       onRunFinalized: () => {
         // NEVER SILENT: the run ended without any terminal event and without an
@@ -650,7 +705,7 @@ export function useSkillAgent(options?: {
         // failure/ECONNRESET, network drop). Surface it instead of just clearing
         // the spinner and leaving a dead turn on screen.
         if (!sawTerminalRef.current && !runFailedRef.current && !abortedRef.current) {
-          console.warn("stream_truncated_no_terminal");
+          logger.warn("stream_truncated_no_terminal");
           setError({
             kind: "network",
             message: "The connection dropped before the assistant finished. Please try again.",
@@ -694,12 +749,12 @@ export function useSkillAgent(options?: {
         if (code === "EMPTY_RUN" && emptyRunRetryRef.current < 1) {
           emptyRunRetryRef.current += 1;
           emptyRunPendingRef.current = true;
-          console.warn("stream_empty_run_auto_retry", emptyRunRetryRef.current);
+          logger.warn("stream_empty_run_auto_retry", { attempt: emptyRunRetryRef.current });
           return; // do NOT setError / stop loading — the retry handles it
         }
         runFailedRef.current = true;
-        const streamErr = classifyRunError(event);
-        console.warn("stream_run_error_event", streamErr);
+        const streamErr = classifyRunError(event, { answerStarted: answerStartedRef.current });
+        logger.warn("stream_run_error_event", errorAttrs(streamErr));
         setError(streamErr);
         setIsLoading(false);
         setRunStarted(false);
@@ -714,8 +769,8 @@ export function useSkillAgent(options?: {
       // wrapper. Genuine stream RUN_ERRORs come through onRunErrorEvent above.
       onRunFailed: ({ error }: { error: unknown }) => {
         runFailedRef.current = true;
-        const streamErr = classifyRunError(error);
-        console.warn("stream_run_failed", streamErr);
+        const streamErr = classifyRunError(error, { answerStarted: answerStartedRef.current });
+        logger.warn("stream_run_failed", errorAttrs(streamErr));
         setError(streamErr);
         setIsLoading(false);
         setRunStarted(false);
@@ -731,7 +786,7 @@ export function useSkillAgent(options?: {
         // never emitted a handoff chip and read as "silent" — a stage label (like
         // "Handing off…") is the never-silent signal. Clears on text-start / run-end
         // via the existing setStageLabel(null) transitions.
-        const searchLabel = SEARCH_TOOL_LABELS[event.toolCallName];
+        const searchLabel = toolStageLabel(event.toolCallName);
         if (searchLabel) setStageLabel(searchLabel);
         // F2a (2026-05-01): ADK doesn't emit parentMessageId on AG-UI
         // TOOL_CALL_START events. Without snapshotting at start time, every
@@ -787,10 +842,10 @@ export function useSkillAgent(options?: {
           ),
         );
       },
-      onToolCallResultEvent: ({ event }: { event: { toolCallId: string; content: string } }) => {
+      onToolCallResultEvent: ({ event }: { event: ToolCallResultEvent }) => {
         setToolCalls((prev) =>
           prev.map((tc) =>
-            tc.id === event.toolCallId ? { ...tc, resultContent: event.content } : tc,
+            tc.id === event.toolCallId ? { ...tc, resultContent: contentToText(event.content) } : tc,
           ),
         );
       },
@@ -826,6 +881,7 @@ export function useSkillAgent(options?: {
     // Fall back to the skill's static config until the new thread's first turn
     // reports its model (ChatShell uses `resolvedModel ?? skillModel`).
     setResolvedModel(null);
+    setCompletedReplyId(null);
   }, [agent.threadId]);
 
   // 30s watchdog: if loading starts but RUN_STARTED never fires, abort and surface error.
@@ -865,7 +921,7 @@ export function useSkillAgent(options?: {
   const sendMessage = useCallback(
     async (
       text: string,
-      opts?: { documentIds?: string[]; resumedSession?: boolean },
+      opts?: { documentIds?: string[]; resumedSession?: boolean; projectId?: string | null },
     ) => {
       clearError();
       setRunStarted(false);
@@ -892,6 +948,11 @@ export function useSkillAgent(options?: {
         }
         if (opts?.resumedSession) {
           forwardedProps.resumed_session = true;
+        }
+        // Projects §6.3: a chat scoped to a project says so on EVERY turn; the
+        // backend re-checks ownership each time and runs unscoped otherwise.
+        if (opts?.projectId) {
+          forwardedProps.project_id = opts.projectId;
         }
         // Sprint 2.10: attach per-turn A2UI surface snapshot when any
         // surface is active. Omit the slot entirely when empty so the
@@ -920,7 +981,7 @@ export function useSkillAgent(options?: {
         // the backend triggers by emitting RUN_FINISHED after RUN_ERROR.
         if (!runFailedRef.current) {
           const streamErr = classifyError(err);
-          console.warn("stream_error", streamErr);
+          logger.warn("stream_error", errorAttrs(streamErr));
           setError(streamErr);
         }
       } finally {
@@ -950,6 +1011,7 @@ export function useSkillAgent(options?: {
     compactions,
     tidyingUp,
     resolvedModel,
+    completedReplyId,
     sendMessage,
     isLoading,
     error,

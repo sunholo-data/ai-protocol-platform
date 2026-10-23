@@ -16,6 +16,7 @@ Agent Engine and are not guessable from the outside.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import UTC
@@ -35,6 +36,7 @@ from db.chat_sessions import (
     get_session_index,
     list_sessions_for_document,
     list_sessions_for_skill,
+    list_sessions_shared_with,
     most_recent_session_for_user,
     soft_delete_session,
     update_session_fields,
@@ -120,11 +122,25 @@ class ChatMessage(BaseModel):
     # falls back to the session skill / brand mark).
     avatar: str | None = None
     agent_label: str | None = None
+    # Stable per-message id (the ADK event id): act on a message exactly once.
+    id: str | None = None
+    # Who sent a USER message — from the server's per-turn record of the
+    # AUTHENTICATED caller (db.chat_sessions.record_turn_author), never from the
+    # text: {uid, email, name, role: owner|collaborator, authMode}. None for
+    # assistant messages and for turns from before authors were recorded. A
+    # collaborator's message text still starts "[name] " for the model — trust
+    # this field, not that prefix.
+    author: dict[str, str] | None = None
+    # The turn a message belongs to: a user message and the replies to it share it.
+    turn_id: str | None = None
 
 
 class GetSessionMessagesResponse(BaseModel):
     messages: list[ChatMessage]
     session_id: str
+    # Who may post in this thread besides its owner (a machine's supervisors) —
+    # shown to the owner and to collaborators.
+    collaborators: list[str] = []
     # Persisted A2UI workbench surfaces (7.5 M3 resume rehydration). Each entry
     # is the same payload the live AG-UI CUSTOM `A2UI_SURFACE` event carries
     # ({surfaceId, messages, artifact, sourceId, toolName, createdAt}), read from
@@ -202,6 +218,13 @@ class ChatSessionSummary(BaseModel):
     # user learns that before clicking rather than after. Set by
     # `aiplatform sessions reconcile --mark-lost`; see ChatSessionIndex.
     transcript_lost: bool = False
+    # Shared machine threads: the owner's friendly name (so a "Shared with me"
+    # row says whose thread it is) and whether the viewer may reply in it.
+    owner_name: str | None = None
+    can_reply: bool = False
+    # Projects (projects.md §5): explicit membership, so a chat header / row can
+    # show which project the chat is in. Derived membership is not listed here.
+    project_id: str | None = None
 
 
 class ListSessionsResponse(BaseModel):
@@ -217,6 +240,9 @@ class PatchSessionRequest(BaseModel):
     title: str | None = None
     access_control: dict[str, Any] | None = None
     archived: bool | None = None
+    # Move a chat into (an id) or out of (null) one of the caller's projects.
+    # Absent leaves it as it is — hence the model_fields_set check in the route.
+    project_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -224,12 +250,36 @@ class PatchSessionRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _owner_name(owner_uid: str, cache: dict[str, str | None] | None = None) -> str | None:
+    """Friendly name for a session owner (CLAUDE.md #9), or None if unknown."""
+    if cache is not None and owner_uid in cache:
+        return cache[owner_uid]
+    name: str | None = None
+    try:
+        from auth.firebase_auth import resolve_user_by_uid
+
+        owner = resolve_user_by_uid(owner_uid) if owner_uid else None
+        if owner is not None:
+            name = owner.display_name or owner.email or None
+    except Exception as exc:
+        log.debug("owner name lookup failed for %s: %s", owner_uid, exc)
+    if cache is not None:
+        cache[owner_uid] = name
+    return name
+
+
 def _to_summary(
     idx: ChatSessionIndex,
     viewer_uid: str,
     skill_label: str | None = None,
+    viewer_email: str = "",
+    owner_name: str | None = None,
 ) -> ChatSessionSummary:
+    is_owner = idx.owner_uid == viewer_uid
+    email = (viewer_email or "").strip().lower()
     return ChatSessionSummary(
+        owner_name=owner_name,
+        can_reply=is_owner or (bool(email) and email in (idx.collaborators or [])),
         skill_label=skill_label,
         session_id=idx.session_id,
         document_ids=list(idx.document_ids),
@@ -241,9 +291,10 @@ def _to_summary(
         first_message_at=idx.first_message_at.isoformat(),
         last_message_at=idx.last_message_at.isoformat(),
         archived_at=idx.archived_at.isoformat() if idx.archived_at else None,
-        is_owner=(idx.owner_uid == viewer_uid),
+        is_owner=is_owner,
         can_fork=(idx.archived_at is None),
         transcript_lost=idx.transcript_lost,
+        project_id=idx.project_id if is_owner else None,
     )
 
 
@@ -281,6 +332,16 @@ def _author_agent_map(idx: ChatSessionIndex, ctx: Any) -> dict[str, dict[str, st
     any resolution error returns an empty map (frontend falls back to the root).
     """
     out: dict[str, dict[str, str | None]] = {}
+    # The resident is not a skill, so the skill walk below can never name it —
+    # and its messages are the ones that most need naming, because M5a delivers
+    # them UNPROMPTED, minutes after the turn the user was watching. Without an
+    # entry a restart notice or a late answer renders as a bare assistant
+    # bubble with no provenance at all: the reader cannot tell what spoke, or
+    # why it spoke now. Seeded before the try, so a skill-resolution failure
+    # still leaves the resident attributed.
+    from internal_tasks.resident_routes import RESIDENT_AUTHOR
+
+    out[RESIDENT_AUTHOR] = {"avatar": None, "label": "Resident agent"}
     try:
         from adk.agent import _delegate_agent_name, _safe_agent_name, accessible_delegate_rules
         from skills import skill_config
@@ -319,7 +380,10 @@ def _events_to_messages(events: list, author_map: dict[str, dict[str, str | None
     for e in events:
         if not e.content or not e.content.parts:
             continue
-        text = " ".join(p.text for p in e.content.parts if p.text).strip()
+        # Thinking parts (`thought=True`) are the model's private reasoning, not
+        # its reply: a transcript reader (a person resuming, or an agent such as
+        # Daneel acting on the answer) must not take them as what was said.
+        text = " ".join(p.text for p in e.content.parts if p.text and getattr(p, "thought", None) is not True).strip()
         if not text:
             continue
         is_assistant = e.author != "user"
@@ -335,8 +399,38 @@ def _events_to_messages(events: list, author_map: dict[str, dict[str, str | None
                 content=text,
                 avatar=(agent or {}).get("avatar"),
                 agent_label=(agent or {}).get("label"),
+                id=eid if isinstance(eid := getattr(e, "id", None), str) and eid else None,
             )
         )
+    return messages
+
+
+_AUTHOR_SKEW_MS = 2000  # the record is written just before the turn's user event
+
+
+def _join_turn_authors(messages: list[ChatMessage], records: list[dict]) -> list[ChatMessage]:
+    """Attach each user message's recorded author and turn id (in place).
+
+    Records are written when a turn is ACCEPTED, so each user message takes the
+    latest unused record at or before it — a turn that failed before its
+    message was saved leaves a record that's simply skipped. Assistant messages
+    inherit the turn id of the user message they answer.
+    """
+    i, current = 0, None
+    for m in messages:
+        if m.role == "user":
+            match = None
+            while i < len(records) and float(records[i].get("at") or 0) <= m.timestamp + _AUTHOR_SKEW_MS:
+                match = records[i]
+                i += 1
+            if match is not None:
+                m.author = {k: str(match.get(k) or "") for k in ("uid", "email", "name", "role", "authMode")}
+                current = str(match.get("turnId") or "") or None
+            else:
+                current = None
+            m.turn_id = current
+        else:
+            m.turn_id = current
     return messages
 
 
@@ -524,9 +618,15 @@ async def list_my_sessions(
     skill_id: str | None = Query(default=None),
     cursor: str | None = Query(default=None),
     page_size: int = Query(default=20, ge=1, le=50),
+    shared: bool = Query(default=False),
     user: User = Depends(get_current_user),  # noqa: B008
 ) -> ListSessionsResponse:
     """The caller's own conversations across ALL skills, newest first.
+
+    ``shared=true`` lists instead the threads OTHERS own that name the caller
+    as a collaborator (shared machine threads — e.g. an agent's threads shared
+    with its supervisor), each with the owner's friendly name. ``skill_id`` is
+    ignored there.
 
     Switching agent via the top bar starts a NEW session on the new skill, so a
     single sitting that moved between agents is split into one session per
@@ -541,15 +641,29 @@ async def list_my_sessions(
     never a cross-user view.
     """
     ctx = request.state.access
-    sessions, next_cursor = list_sessions_for_skill(
-        skill_id=skill_id,
-        owner_uid=ctx.uid,
-        page_size=page_size,
-        cursor=cursor,
-    )
+    if shared:
+        sessions, next_cursor = list_sessions_shared_with(ctx.email, page_size=page_size, cursor=cursor)
+        sessions = [s for s in sessions if s.owner_uid != ctx.uid]
+    else:
+        sessions, next_cursor = list_sessions_for_skill(
+            skill_id=skill_id,
+            owner_uid=ctx.uid,
+            page_size=page_size,
+            cursor=cursor,
+        )
     labels = resolve_skill_labels([s.skill_id for s in sessions])
+    names: dict[str, str | None] = {}
     return ListSessionsResponse(
-        sessions=[_to_summary(s, ctx.uid, labels.get(s.skill_id)) for s in sessions],
+        sessions=[
+            _to_summary(
+                s,
+                ctx.uid,
+                labels.get(s.skill_id),
+                viewer_email=ctx.email,
+                owner_name=_owner_name(s.owner_uid, names) if s.owner_uid != ctx.uid else None,
+            )
+            for s in sessions
+        ],
         next_cursor=next_cursor,
     )
 
@@ -611,7 +725,14 @@ async def get_session(
     ctx = request.state.access
     if not ctx.can_access(idx):
         raise HTTPException(status_code=403, detail="Access denied")
-    return GetSessionResponse(session=_to_summary(idx, ctx.uid))
+    return GetSessionResponse(
+        session=_to_summary(
+            idx,
+            ctx.uid,
+            viewer_email=ctx.email,
+            owner_name=_owner_name(idx.owner_uid) if idx.owner_uid != ctx.uid else None,
+        )
+    )
 
 
 @router.patch("/sessions/{session_id}", response_model=GetSessionResponse)
@@ -645,6 +766,16 @@ async def patch_session(
         fields["archivedAt"] = datetime.now(UTC).isoformat()
     elif body.archived is False:
         fields["archivedAt"] = None
+    if "project_id" in body.model_fields_set:
+        if body.project_id:
+            from db.projects import get_project
+
+            # The project must be the caller's own; anything else is "not found".
+            if get_project(user.uid, body.project_id) is None:
+                raise HTTPException(
+                    status_code=404, detail={"code": "PROJECT_NOT_FOUND", "message": "Project not found."}
+                )
+        fields["projectId"] = body.project_id or None
 
     if fields:
         update_session_fields(session_id, fields)
@@ -701,9 +832,17 @@ async def get_session_messages(
             idx.owner_uid,
         )
 
+    from db.chat_sessions import list_turn_authors
+
+    messages = _events_to_messages(events, _author_agent_map(idx, ctx))
+    _join_turn_authors(messages, await asyncio.to_thread(list_turn_authors, session_id))
+    email = (getattr(ctx, "email", "") or "").strip().lower()
+    collaborators = list(idx.collaborators or [])
+    show_collaborators = idx.owner_uid == ctx.uid or (bool(email) and email in collaborators)
     return GetSessionMessagesResponse(
-        messages=_events_to_messages(events, _author_agent_map(idx, ctx)),
+        messages=messages,
         session_id=session_id,
+        collaborators=collaborators if show_collaborators else [],
         a2ui_surfaces=_state_to_a2ui_surfaces(state),
         transcript_unavailable=transcript_unavailable,
     )

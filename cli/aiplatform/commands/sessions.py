@@ -421,7 +421,9 @@ def reconcile(
             return
         ids = data.get("marked", []) or []
         verb = "would mark" if not write else "marked"
-        click.echo(f"scanned {data.get('scanned', 0)}; {verb} {len(ids)}; already flagged {data.get('already_marked', 0)}")
+        click.echo(
+            f"scanned {data.get('scanned', 0)}; {verb} {len(ids)}; already flagged {data.get('already_marked', 0)}"
+        )
         for sid in ids:
             click.echo(f"  {sid}")
         if ids and not write:

@@ -1,7 +1,7 @@
 """Per-user Vertex AI RAG Engine corpus management.
 
 Each user gets one persistent RAG corpus. The corpus resource name is stored
-in Firestore at ``user_profiles/{user_id}`` under ``ragCorpusName``.
+in Firestore at ``user_profiles/{user_id}`` under ``ragParsedTextCorpusName``.
 
 All public functions are async. Synchronous vertexai.rag SDK calls are
 dispatched via ``asyncio.to_thread`` so the FastAPI event loop is not blocked.
@@ -21,8 +21,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _USER_PROFILES_COLLECTION = "user_profiles"
-_CORPUS_NAME_FIELD = "ragCorpusName"
-_DISPLAY_NAME_PREFIX = "aitana-user-"
+# Separate from the legacy source-file corpus. Existing PDFs must not be
+# retrieved alongside the new canonical text representation.
+_CORPUS_NAME_FIELD = "ragParsedTextCorpusName"
+_DISPLAY_NAME_PREFIX = "aitana-user-text-"
 
 _vertexai_initialized = False
 
@@ -49,7 +51,7 @@ def _ensure_vertexai() -> None:
 async def get_or_create_user_corpus(user_id: str) -> str:
     """Return the user's RAG corpus resource name, creating it if absent.
 
-    Reads ``ragCorpusName`` from ``user_profiles/{user_id}`` in Firestore.
+    Reads ``ragParsedTextCorpusName`` from ``user_profiles/{user_id}`` in Firestore.
     On a miss, creates a new corpus and writes the name back before returning.
     """
     from db.firestore import get_document, set_document
@@ -64,6 +66,14 @@ async def get_or_create_user_corpus(user_id: str) -> str:
     set_document(_USER_PROFILES_COLLECTION, user_id, {_CORPUS_NAME_FIELD: corpus_name}, merge=True)
     logger.info("rag: created corpus for user %s → %s", user_id, corpus_name)
     return corpus_name
+
+
+async def get_existing_user_corpus(user_id: str) -> str | None:
+    """Resolve a text corpus without provisioning one for a chat with no attachments."""
+    from db.firestore import get_document
+
+    profile = await asyncio.to_thread(get_document, _USER_PROFILES_COLLECTION, user_id)
+    return (profile or {}).get(_CORPUS_NAME_FIELD)
 
 
 def _create_corpus_sync(user_id: str) -> str:

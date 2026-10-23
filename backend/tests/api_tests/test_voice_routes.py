@@ -192,7 +192,7 @@ class TestConfig:
     def test_resolves_default_when_skill_has_no_persona_voice(self, client_authed: TestClient):
         from db.models import SkillConfig
 
-        skill = SkillConfig(name="one-ppa-expert", skillId="s1")  # no persona voice
+        skill = SkillConfig(name="demo-ppa-expert", skillId="s1")  # no persona voice
         provider = _FakeTTSProvider()
         with (
             patch.object(voice_routes, "get_skill", return_value=skill),

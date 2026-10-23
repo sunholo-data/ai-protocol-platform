@@ -304,6 +304,7 @@ class BaseChannel(ABC):
             attachment_ids=attachment_ids,
             channel_name=self.name,
             channel_metadata=inbound.metadata,
+            session_id=_session_id_from(inbound),
         )
 
     def _stream_skill(
@@ -330,6 +331,11 @@ class BaseChannel(ABC):
             attachment_ids=attachment_ids,
             channel_name=self.name,
             channel_metadata=inbound.metadata,
+            # An adapter with a stable conversation identity (a Discord thread
+            # or DM) supplies it here so follow-ups resume the same session —
+            # history and compaction then work as on the web. None (the
+            # default) keeps the old one-session-per-message behaviour.
+            session_id=_session_id_from(inbound),
         )
 
     async def send_streaming(
@@ -361,3 +367,9 @@ __all__ = [
     "InboundMessage",
     "OutboundMessage",
 ]
+
+
+def _session_id_from(inbound: InboundMessage) -> str | None:
+    """The session an adapter asked this turn to resume (``metadata["session_id"]``)."""
+    value = (inbound.metadata or {}).get("session_id")
+    return value if isinstance(value, str) and value else None

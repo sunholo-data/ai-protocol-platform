@@ -1,6 +1,6 @@
 """Unit tests for the per-skill persona + voice model.
 
-v6.6.0 ONE-FORK-CONVERGENCE M1: promote the static per-skill `avatar` into a
+v6.6.0 TENANT-FORK-CONVERGENCE M1: promote the static per-skill `avatar` into a
 first-class `SkillPersona` bundle (avatar + interaction style + voice). Legacy
 records with only a top-level `avatar` must fold into `persona.avatar` on load.
 """

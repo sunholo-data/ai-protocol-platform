@@ -22,7 +22,7 @@ _T = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
 def _row(**overrides) -> ChatSessionIndex:
     base: dict = {
         "sessionId": "s1",
-        "skillId": "one-assistant",
+        "skillId": "demo-assistant",
         "ownerUid": "u1",
         "accessControl": AccessControl(type="private"),
         "firstMessageAt": _T,
@@ -48,7 +48,7 @@ class TestProvisionalField:
         legacy = ChatSessionIndex.model_validate(
             {
                 "sessionId": "old",
-                "skillId": "one-assistant",
+                "skillId": "demo-assistant",
                 "ownerUid": "u1",
                 "accessControl": {"type": "private"},
                 "firstMessageAt": _T,

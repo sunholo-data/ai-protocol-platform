@@ -93,10 +93,10 @@ describe("SkillSessionPanel", () => {
         onSelectSession={vi.fn()}
       />,
     );
-    expect(screen.getByText(/no previous sessions/i)).toBeInTheDocument();
+    expect(screen.getByText(/no conversations yet/i)).toBeInTheDocument();
   });
 
-  it("falls back to session ID prefix when title is null", () => {
+  it("falls back to \"Untitled chat\", not the session id, when title is null", () => {
     const sessions = [makeSession({ session_id: "abcdef12-xxxx", title: null })];
     render(
       <SkillSessionPanel
@@ -106,7 +106,9 @@ describe("SkillSessionPanel", () => {
         onSelectSession={vi.fn()}
       />,
     );
-    expect(screen.getByText(/Session abcdef12/)).toBeInTheDocument();
+    // Friendly, never the raw id (CLAUDE.md #9).
+    expect(screen.getByText("Untitled chat")).toBeInTheDocument();
+    expect(screen.queryByText(/abcdef12/)).not.toBeInTheDocument();
   });
 
   // ---------------------------------------------------------------------------
@@ -227,10 +229,10 @@ describe("SkillSessionPanel — cross-skill history (2026-08-05)", () => {
     const options = screen
       .getAllByRole("option")
       .map((o) => (o as HTMLOptionElement).textContent);
-    expect(options).toEqual(["All agents", "Contract Expert", "OpenAI Reasoner"]);
+    expect(options).toEqual(["All skills", "Contract Expert", "OpenAI Reasoner"]);
   });
 
-  it("reports the chosen agent, and null for 'All agents'", async () => {
+  it("reports the chosen agent, and null for 'All skills'", async () => {
     const onFilterChange = vi.fn();
     render(
       <SkillSessionPanel
@@ -265,7 +267,7 @@ describe("SkillSessionPanel — cross-skill history (2026-08-05)", () => {
     );
 
     expect(screen.getByLabelText("Filter conversations by agent")).toBeInTheDocument();
-    expect(screen.getByText("No conversations with this agent")).toBeInTheDocument();
+    expect(screen.getByText("No conversations with this agent yet")).toBeInTheDocument();
   });
 
   it("hides the filter when there is nothing to filter", () => {
@@ -284,7 +286,7 @@ describe("SkillSessionPanel — cross-skill history (2026-08-05)", () => {
 
 // --- v6.23.0 B5 Phase 2: dead-transcript rows ------------------------------
 //
-// 14 of the 100 most recent sessions on test (6 of them ONE's) have a mirror row
+// 14 of the 100 most recent sessions on test (6 of them the tenant's) have a mirror row
 // with real turns but no canonical transcript — casualties of the SessionManager
 // sweep fixed on 2026-08-05. Opening one already says "messages no longer
 // available"; the point of these tests is that the LIST says it too, so a user
@@ -298,10 +300,10 @@ describe("SkillSessionPanel — lost transcripts (B5)", () => {
   });
 
   it("does NOT label a healthy session, and keeps showing its agent", () => {
-    const s = makeSession({ skill_label: "ONE Assistant", transcript_lost: false });
+    const s = makeSession({ skill_label: "Example Assistant", transcript_lost: false });
     render(<SkillSessionPanel sessions={[s]} activeSessionId={null} onSelectSession={() => {}} isLoading={false} />);
     expect(screen.queryByTestId("session-transcript-lost")).toBeNull();
-    expect(screen.getByTestId("session-agent-label").textContent).toBe("ONE Assistant");
+    expect(screen.getByTestId("session-agent-label").textContent).toBe("Example Assistant");
   });
 
   it("keeps a dead row selectable — honest, not hidden", async () => {
@@ -313,5 +315,68 @@ describe("SkillSessionPanel — lost transcripts (B5)", () => {
     render(<SkillSessionPanel sessions={[s]} activeSessionId={null} onSelectSession={onSelect} isLoading={false} />);
     await userEvent.click(screen.getByTitle("PPA review"));
     expect(onSelect).toHaveBeenCalledWith("dead-1");
+  });
+});
+
+describe("SkillSessionPanel — finding your way back (2026-10-20 feedback)", () => {
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+  const DAY = 86_400_000;
+
+  it("groups rows under date headings when asked", () => {
+    const sessions = [
+      makeSession({ session_id: "a", title: "This morning", last_message_at: ago(60_000) }),
+      makeSession({ session_id: "b", title: "Last month", last_message_at: ago(20 * DAY) }),
+    ];
+    render(<SkillSessionPanel sessions={sessions} activeSessionId={null} isLoading={false} onSelectSession={vi.fn()} groupByDate />);
+    expect(screen.getByRole("group", { name: "Today" })).toHaveTextContent("This morning");
+    expect(screen.getByRole("group", { name: "Previous 30 days" })).toHaveTextContent("Last month");
+  });
+
+  it("filters by title once the list is long enough to need it", async () => {
+    const sessions = Array.from({ length: 6 }, (_, i) =>
+      makeSession({ session_id: `s${i}`, title: i === 3 ? "EDP obligations" : `Chat ${i}` }),
+    );
+    render(<SkillSessionPanel sessions={sessions} activeSessionId={null} isLoading={false} onSelectSession={vi.fn()} />);
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search conversations" }), "edp");
+    expect(screen.getByText("EDP obligations")).toBeInTheDocument();
+    expect(screen.queryByText("Chat 0")).not.toBeInTheDocument();
+  });
+
+  it("shows no search box for a short list", () => {
+    render(<SkillSessionPanel sessions={[makeSession()]} activeSessionId={null} isLoading={false} onSelectSession={vi.fn()} />);
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+  });
+
+  it("offers older conversations when there are more", async () => {
+    const onLoadMore = vi.fn();
+    render(
+      <SkillSessionPanel
+        sessions={[makeSession()]}
+        activeSessionId={null}
+        isLoading={false}
+        onSelectSession={vi.fn()}
+        hasMore
+        onLoadMore={onLoadMore}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Show older conversations" }));
+    expect(onLoadMore).toHaveBeenCalled();
+  });
+
+  it("a load failure says so with Retry — never 'no sessions' (NEVER SILENT #8)", async () => {
+    const onRetry = vi.fn();
+    render(
+      <SkillSessionPanel sessions={[]} activeSessionId={null} isLoading={false} onSelectSession={vi.fn()} error="Failed to load sessions" onRetry={onRetry} />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load your conversations.");
+    expect(screen.queryByText(/no conversations yet/i)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalled();
+  });
+
+  it("keeps the list on screen during a background refresh", () => {
+    render(<SkillSessionPanel sessions={[makeSession({ title: "Still here" })]} activeSessionId={null} isLoading onSelectSession={vi.fn()} />);
+    expect(screen.getByText("Still here")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Loading sessions")).not.toBeInTheDocument();
   });
 });

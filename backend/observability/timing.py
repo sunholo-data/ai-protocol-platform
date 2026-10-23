@@ -497,3 +497,20 @@ def get_current_tracker() -> LatencyTracker:
     if tracker is None:
         return _NULL_TRACKER
     return tracker
+
+
+def has_current_tracker() -> bool:
+    """True when a real per-request tracker is bound to this async context.
+
+    Exists because the no-op fallback makes the most expensive failure in this
+    codebase COMPLETELY SILENT: with no tracker bound, every
+    ``emit_a2ui_surface`` returns having done nothing, the frontend registers
+    no artifact, and the agent cheerfully narrates a Workspace update that
+    never happened. That was the compare-launcher bug (fixed 2026-07-11 by
+    binding the tracker in ``surface-action-run``), and backend/adk/CLAUDE.md
+    lists it as recurring.
+
+    A caller emitting outside the chat SSE path can use this to SAY SO in the
+    log rather than fail invisibly. It is not a reason to skip the emit —
+    calling on the null tracker is always safe."""
+    return _current_tracker.get() is not None

@@ -2,15 +2,15 @@
 name: maps-assistant
 display_name: Maps & Places
 avatar: /images/avatars/skill-web-researcher.svg
-# Opened to ONE 2026-08-12 (requested after the admin-only trial), alongside
-# adding this skill to one-assistant's delegation.allow so the ONE front door
+# Opened to the tenant 2026-08-12 (requested after the admin-only trial), alongside
+# adding this skill to demo-assistant's delegation.allow so the tenant front door
 # can hand off to it.
 #
 # PROD IS STILL PROTECTED, and NOT by these tags. Prod's
 # MAPS_GROUNDING_API_KEY is still the "dummy_value" placeholder (staged
 # rollout — terraform applied on dev/test only), so a Maps call there would
 # 401. What keeps ONE off that path is the SECOND gate: `enabled_skills` on
-# clients/acmeenergy.com, which is per-env runtime data that does NOT ride a
+# clients/energy.example, which is per-env runtime data that does NOT ride a
 # deploy. `maps-assistant` was added to that allowlist on dev and test only;
 # prod's list is non-null and omits it, so the skill is invisible there
 # regardless of tags.
@@ -24,8 +24,8 @@ avatar: /images/avatars/skill-web-researcher.svg
 # docs/design/v6.23.0/maps-grounding.md M3) — no change needed here.
 access_control:
   type: tagged
+  tags_from: maps_assistant
   tags:
-    - ONE
     - aitana-admin
 tags:
   - maps

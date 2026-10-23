@@ -15,18 +15,24 @@ from aiplatform.commands.a2ui import a2ui
 from aiplatform.commands.access import access
 from aiplatform.commands.admin import admin
 from aiplatform.commands.bq import bq
-from aiplatform.commands.compaction import compaction
+from aiplatform.commands.browse import browse
 from aiplatform.commands.bucket import bucket
 from aiplatform.commands.client import client
+from aiplatform.commands.compaction import compaction
 from aiplatform.commands.deploy import deploy
 from aiplatform.commands.docs import docs
 from aiplatform.commands.folder import folder
 from aiplatform.commands.groups import groups
+from aiplatform.commands.guide import guide
+from aiplatform.commands.kb import kb
 from aiplatform.commands.logs import logs
 from aiplatform.commands.models import models
+from aiplatform.commands.resident import resident
 from aiplatform.commands.sessions import sessions
 from aiplatform.commands.skill import skill
 from aiplatform.commands.toolbox import toolbox
+from aiplatform.commands.user import user
+from aiplatform.commands.webmcp import webmcp
 
 
 @click.group()
@@ -46,22 +52,28 @@ def main(ctx: click.Context, env: str) -> None:
 
 
 main.add_command(a2a)
+main.add_command(resident)
 main.add_command(a2ui)
 main.add_command(admin)
 main.add_command(bq)
 main.add_command(compaction)
+main.add_command(browse)
 main.add_command(bucket)
 main.add_command(client)
 main.add_command(deploy)
 main.add_command(docs)
 main.add_command(folder)
 main.add_command(groups)
+main.add_command(guide)
+main.add_command(kb)
 main.add_command(logs)
 main.add_command(models)
 main.add_command(access)
 main.add_command(skill)
 main.add_command(sessions)
 main.add_command(toolbox)
+main.add_command(user)
+main.add_command(webmcp)
 
 
 if __name__ == "__main__":

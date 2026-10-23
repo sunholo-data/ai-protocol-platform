@@ -59,11 +59,10 @@ async def recompact(body: RecompactRequest, scope: PlatformScope) -> dict:
         raise HTTPException(status_code=404, detail="session not found for that user_id")
 
     if body.enqueue:
-        from google.adk.apps.compaction import _latest_compaction_event
-
+        from adk.compaction_compat import latest_compaction_event
         from internal_tasks.enqueue import schedule_second_pass
 
-        latest = _latest_compaction_event(list(session.events or []))
+        latest = latest_compaction_event(list(session.events or []))
         comp = latest.actions.compaction if latest is not None else None
         end_ts = getattr(comp, "end_timestamp", None)
         if end_ts is None:

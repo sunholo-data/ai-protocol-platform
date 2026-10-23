@@ -74,7 +74,7 @@ class TestTheInvariant:
             "firebase_uid": "uid-1",
             "email": "attacker@evil.test",
             "domain": "evil.test",
-            "group_tags": ["ONE", "admin", "finance"],  # <-- the tampering
+            "group_tags": ["example-team", "admin", "finance"],  # <-- the tampering
         }
 
         snapshot = MagicMock()
@@ -91,7 +91,7 @@ class TestTheInvariant:
             user = _build_channel_user("uid-1")
 
         assert user.group_tags == frozenset(), "the advisory mirror granted privileges — invariant broken"
-        assert "ONE" not in user.group_tags
+        assert "example-team" not in user.group_tags
         assert user.email == "real@corp.test", "email must come from the authoritative record too"
         assert user.domain == "corp.test", "domain must derive from the authoritative email, not the mirror"
 
@@ -110,11 +110,11 @@ class TestAuthoritativeResolution:
     def test_custom_claim_grants_tags(self, enrichment_on: None) -> None:
         with patch(
             "firebase_admin.auth.get_user",
-            return_value=_record(email="u@corp.test", claims={"groupTags": ["ONE"]}),
+            return_value=_record(email="u@corp.test", claims={"groupTags": ["example-team"]}),
         ):
             user = _build_channel_user("uid-1")
 
-        assert user.group_tags == frozenset({"ONE"})
+        assert user.group_tags == frozenset({"example-team"})
         assert user.email == "u@corp.test"
         assert user.domain == "corp.test"
 
@@ -129,13 +129,13 @@ class TestAuthoritativeResolution:
         with (
             patch(
                 "firebase_admin.auth.get_user",
-                return_value=_record(email="u@acmeenergy.com", claims={"groupTags": ["BASE"]}),
+                return_value=_record(email="u@energy.example", claims={"groupTags": ["BASE"]}),
             ),
-            patch("db.clients.resolve_derived_group_tags", return_value=frozenset({"ONE"})),
+            patch("db.clients.resolve_derived_group_tags", return_value=frozenset({"example-team"})),
         ):
             user = _build_channel_user("uid-1")
 
-        assert user.group_tags == frozenset({"BASE", "ONE"})
+        assert user.group_tags == frozenset({"BASE", "example-team"})
 
     def test_malformed_claim_grants_nothing(self, enrichment_on: None) -> None:
         """A non-iterable groupTags claim must not raise or grant."""
@@ -181,7 +181,7 @@ class TestFeatureFlag:
     def test_flag_off_preserves_todays_behaviour(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CHANNEL_IDENTITY_ENRICHMENT", raising=False)
 
-        with patch("firebase_admin.auth.get_user", return_value=_record(claims={"groupTags": ["ONE"]})) as spy:
+        with patch("firebase_admin.auth.get_user", return_value=_record(claims={"groupTags": ["example-team"]})) as spy:
             user = _build_channel_user("uid-1")
 
         assert user == User(uid="uid-1", email="", domain="", group_tags=frozenset())
@@ -210,7 +210,7 @@ class TestCaching:
         """One Admin SDK call per inbound message would be a latency bug."""
         with patch(
             "firebase_admin.auth.get_user",
-            return_value=_record(email="u@corp.test", claims={"groupTags": ["ONE"]}),
+            return_value=_record(email="u@corp.test", claims={"groupTags": ["example-team"]}),
         ) as spy:
             for _ in range(5):
                 resolve_user_by_uid("uid-1")
@@ -282,7 +282,7 @@ class TestGuildAllowlistStillGates:
 
         with (
             patch("channels.discord.get_document", return_value=None),
-            patch("firebase_admin.auth.get_user", return_value=_record(claims={"groupTags": ["ONE"]})) as spy,
+            patch("firebase_admin.auth.get_user", return_value=_record(claims={"groupTags": ["example-team"]})) as spy,
         ):
             uid = await adapter.on_unknown_user(msg)
 
@@ -297,5 +297,5 @@ class TestGuildAllowlistStillGates:
         adapter = DiscordChannel(public_key_hex="aa" * 32, token="t")
         msg = InboundMessage(channel_user_id="999", channel_chat_id="c1", text="hi", metadata={})
 
-        with patch("firebase_admin.auth.get_user", return_value=_record(claims={"groupTags": ["ONE"]})):
+        with patch("firebase_admin.auth.get_user", return_value=_record(claims={"groupTags": ["example-team"]})):
             assert await adapter.on_unknown_user(msg) is None

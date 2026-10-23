@@ -9,10 +9,16 @@ beforeAll(() => {
   let n = 0;
   // jsdom has crypto.randomUUID, but pinning makes the change-detection
   // assertions in tests below far easier to read.
-  vi.stubGlobal("crypto", {
-    ...globalThis.crypto,
-    randomUUID: () => `mock-uuid-${++n}`,
-  });
+  // Spy rather than replace: a spread copy of `crypto` drops prototype getters
+  // such as `subtle`, and CI runs every file in one process, so it leaked into
+  // later suites (visualEvidence's digest failed on CI only).
+  vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation(
+    () => `mock-uuid-${++n}` as ReturnType<Crypto["randomUUID"]>,
+  );
+});
+
+afterAll(() => {
+  vi.restoreAllMocks();
 });
 
 describe("useStableThreadId — chat-history-deep-fixes-2 Bug A' fix", () => {

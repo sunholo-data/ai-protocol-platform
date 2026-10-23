@@ -17,12 +17,12 @@ metadata:
   version: "1.0"
   # v6.11.0 — skill-dropdown grouping (presentation only). See SkillSwitcher.
   category: specialist
-  # Pinned to OpenAI GPT-5.6 Sol — OpenAI's current flagship (GA 2026-07-09) — for
+  # Pinned to OpenAI GPT-6.1 Sol — OpenAI's current workhorse (2026-09; was GPT-5.6 Sol) — for
   # the multi-model comparison (this skill = GPT Sol; deep-reasoner = Claude Opus
   # 4.8). Needs OPENAI_API_KEY (+ OPENAI_API_BASE) mounted — wired in
   # backend/cloudbuild.yaml. Unrestricted deploys only (Aitana dev): under
   # eu-strict a pinned non-EU provider is rejected at resolve_model_chain.
-  model: gpt-5-6-sol
+  model: gpt-6-1-sol
   tools:
     - google_search
     - url_processing

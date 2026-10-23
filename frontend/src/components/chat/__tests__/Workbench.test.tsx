@@ -155,7 +155,7 @@ describe("Workbench", () => {
     expect(innerSpans[1].className).toContain("rounded-full");
   });
 
-  it("active tab underline carries the animated zoom-in fade-in classes", () => {
+  it("active tab has a static primary underline spanning the tab", () => {
     const { container } = render(
       <Workbench
         tabs={[tab("a", "A"), tab("b", "B")]}
@@ -173,9 +173,9 @@ describe("Workbench", () => {
       ?.closest("div.group");
     const underline = wrapper?.querySelector("span.bg-primary");
     expect(underline).toBeTruthy();
-    expect(underline?.className).toContain("animate-in");
-    expect(underline?.className).toContain("fade-in");
-    expect(underline?.className).toContain("zoom-in-x-50");
+    // Static by design: the brand defaults to no motion for ordinary UI.
+    expect(underline?.className).toContain("inset-x-0");
+    expect(underline?.className).not.toContain("animate-in");
   });
 
   it("active tab panel renders with animate-in fade-in classes", () => {

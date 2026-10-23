@@ -55,6 +55,7 @@ def create_session_index(
     first_message_at: datetime | None = None,
     owner_domain: str = "",
     provisional: bool = False,
+    collaborators: list[str] | tuple[str, ...] = (),
 ) -> ChatSessionIndex:
     """Persist a new ChatSessionIndex row. Idempotent: overwrites if exists.
 
@@ -75,6 +76,7 @@ def create_session_index(
         firstMessageAt=now,
         lastMessageAt=now,
         provisional=provisional,
+        collaborators=sorted({c.strip().lower() for c in collaborators if c and c.strip()}),
     )
     set_document(_COLLECTION, session_id, _to_firestore(idx))
     return idx
@@ -151,6 +153,11 @@ def add_session_documents(session_id: str, doc_ids: list[str]) -> None:
             "documentIds": _fs.ArrayUnion(list(doc_ids)),
         },
     )
+    # Projects writer 2: a chat that uses a document joins that document's
+    # projects (derived membership). Best-effort — it never fails the attach.
+    from db.projects import add_document_projects_to_session
+
+    add_document_projects_to_session(session_id, list(doc_ids))
 
 
 def soft_delete_session(session_id: str) -> None:
@@ -303,9 +310,34 @@ def list_sessions_for_skill(
     query = col
     if skill_id is not None:
         query = query.where(filter=_fs.FieldFilter("skillId", "==", skill_id))
+    query = query.where(filter=_fs.FieldFilter("ownerUid", "==", owner_uid))
+    return _page_newest_first(col, query, page_size, cursor)
+
+
+def list_sessions_shared_with(
+    email: str,
+    page_size: int = 20,
+    cursor: str | None = None,
+) -> tuple[list[ChatSessionIndex], str | None]:
+    """Non-archived sessions OWNED BY OTHERS that name ``email`` as a
+    collaborator (shared machine threads), newest first.
+
+    Served by the composite index (collaborators CONTAINS, archivedAt ==,
+    lastMessageAt desc).
+    """
+    email = (email or "").strip().lower()
+    if not email:
+        return [], None
+    client = get_client()
+    col = client.collection(_COLLECTION)
+    query = col.where(filter=_fs.FieldFilter("collaborators", "array_contains", email))
+    return _page_newest_first(col, query, page_size, cursor)
+
+
+def _page_newest_first(col, query, page_size: int, cursor: str | None) -> tuple[list[ChatSessionIndex], str | None]:
+    """One page of non-archived, non-provisional rows, newest first."""
     query = (
-        query.where(filter=_fs.FieldFilter("ownerUid", "==", owner_uid))
-        .where(filter=_fs.FieldFilter("archivedAt", "==", None))
+        query.where(filter=_fs.FieldFilter("archivedAt", "==", None))
         .order_by("lastMessageAt", direction=_fs.Query.DESCENDING)
         .limit(page_size + 1)  # fetch one extra to detect next page
     )
@@ -342,6 +374,78 @@ def list_sessions_for_skill(
 
     next_cursor = last_id if len(results) == page_size else None
     return results, next_cursor
+
+
+def list_sessions_for_project(
+    owner_uid: str,
+    project_id: str,
+    project_doc_ids: set[str],
+    page_size: int = 20,
+    cursor: str | None = None,
+) -> tuple[list[dict], str | None]:
+    """A project's chats: explicit (``projectId``) plus derived (``projectIds``),
+    the owner's own only, not archived, not provisional, newest first.
+
+    Each row is ``{"session": ChatSessionIndex, "membership": "explicit" |
+    "derived", "linkedDocumentId": str | None}``. A derived row is re-checked
+    against the session's CURRENT ``documentIds``: if none of them is still in
+    the project (a writer failed, or a document was untagged mid-flight), the
+    row is dropped rather than shown, and the session is recomputed.
+
+    ``cursor`` is the stored ``lastMessageAt`` of the previous page's last row.
+    Served by the composite indexes (ownerUid, projectId, archivedAt,
+    lastMessageAt desc) and (ownerUid, projectIds CONTAINS, archivedAt,
+    lastMessageAt desc).
+    """
+    col = get_client().collection(_COLLECTION)
+    fetch = page_size * 2 + 1  # derived rows can be dropped by the re-check
+
+    def _query(field: str, op: str):
+        query = (
+            col.where(filter=_fs.FieldFilter("ownerUid", "==", owner_uid))
+            .where(filter=_fs.FieldFilter(field, op, project_id))
+            .where(filter=_fs.FieldFilter("archivedAt", "==", None))
+        )
+        if cursor:
+            query = query.where(filter=_fs.FieldFilter("lastMessageAt", "<", cursor))
+        return query.order_by("lastMessageAt", direction=_fs.Query.DESCENDING).limit(fetch)
+
+    merged: dict[str, dict] = {}
+    exhausted = True
+    for field, op, membership in (("projectId", "==", "explicit"), ("projectIds", "array_contains", "derived")):
+        snaps = [snap for snap in _query(field, op).stream() if snap.exists]
+        if len(snaps) >= fetch:
+            exhausted = False
+        for snap in snaps:
+            if snap.id in merged:
+                continue
+            data = snap.to_dict() or {}
+            try:
+                idx = _from_firestore(data, snap.id)
+            except Exception as exc:
+                logger.warning("malformed chat_sessions/%s: %s", snap.id, exc)
+                continue
+            if idx.provisional or idx.owner_uid != owner_uid:
+                continue
+            linked = next((d for d in idx.document_ids if d in project_doc_ids), None)
+            if membership == "derived" and linked is None:
+                from db.projects import recompute_session_projects
+
+                recompute_session_projects(snap.id, data)
+                continue
+            merged[snap.id] = {
+                "session": idx,
+                "membership": membership,
+                "linkedDocumentId": linked if membership == "derived" else None,
+                "_cursor": str(data.get("lastMessageAt") or ""),
+            }
+    rows = sorted(merged.values(), key=lambda r: r["_cursor"], reverse=True)
+    page = rows[:page_size]
+    more = len(rows) > page_size or not exhausted
+    next_cursor = page[-1]["_cursor"] if more and page else None
+    for row in page:
+        row.pop("_cursor", None)
+    return page, next_cursor or None
 
 
 def most_recent_session_for_user(owner_uid: str, limit: int = 10) -> list[ChatSessionIndex]:
@@ -402,3 +506,61 @@ def _from_firestore(data: dict, doc_id: str) -> ChatSessionIndex:
     if "sessionId" not in data:
         data = {**data, "sessionId": doc_id}
     return ChatSessionIndex.model_validate(data)
+
+
+# ---------------------------------------------------------------------------
+# Turn authors — who actually sent each user turn
+# ---------------------------------------------------------------------------
+#
+# A shared thread (a machine's threads shared with its supervisors) has more
+# than one person typing into it, but every ADK user event is authored "user".
+# The `[name] ` prefix on a collaborator's message is for the MODEL; it's text,
+# so anyone who can put text in the thread can forge it (an agent relaying an
+# email that starts "[Mark] …"). The record below is written by the server from
+# the AUTHENTICATED caller when the turn is accepted — never from the text — and
+# GET /api/sessions/{id}/messages joins it onto each user message as `author`.
+
+_TURNS = "turns"
+
+
+def _turns_collection(session_id: str) -> str:
+    return f"{_COLLECTION}/{session_id}/{_TURNS}"
+
+
+def record_turn_author(session_id: str, *, uid: str, email: str, name: str, role: str, auth_mode: str) -> str:
+    """Record who sent the turn about to run in ``session_id``. Returns the
+    turn id ("" when the write failed — logged; the turn still runs)."""
+    import time
+    import uuid
+
+    turn_id = f"turn-{uuid.uuid4().hex[:16]}"
+    try:
+        set_document(
+            _turns_collection(session_id),
+            turn_id,
+            {
+                "turnId": turn_id,
+                "at": time.time() * 1000,
+                "uid": uid,
+                "email": (email or "").strip().lower(),
+                "name": name or email or uid,
+                "role": role,
+                "authMode": auth_mode,
+            },
+        )
+    except Exception as exc:
+        logger.error("turn author not recorded for %s (%s): %s", session_id, uid, exc)
+        return ""
+    return turn_id
+
+
+def list_turn_authors(session_id: str) -> list[dict]:
+    """The session's turn-author records, oldest first. [] on any failure."""
+    from db.firestore import query_documents
+
+    try:
+        rows = list(query_documents(_turns_collection(session_id)))
+    except Exception as exc:
+        logger.warning("turn authors unreadable for %s: %s", session_id, exc)
+        return []
+    return sorted((r for r in rows if r.get("at")), key=lambda r: r["at"])

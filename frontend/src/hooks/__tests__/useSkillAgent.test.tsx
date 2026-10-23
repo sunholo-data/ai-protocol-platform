@@ -75,6 +75,12 @@ class FakeAgent {
     );
   }
 
+  emitTextMessageContent(delta: string) {
+    this.subscribers.forEach((s) =>
+      s.onTextMessageContentEvent?.({ event: { delta } }),
+    );
+  }
+
   emitToolCallStart(toolCallId: string, toolCallName: string, parentMessageId?: string) {
     this.subscribers.forEach((s) =>
       s.onToolCallStartEvent?.({ event: { toolCallId, toolCallName, parentMessageId } }),
@@ -85,6 +91,10 @@ class FakeAgent {
     this.subscribers.forEach((s) =>
       s.onToolCallArgsEvent?.({ event: { toolCallId, delta } }),
     );
+  }
+
+  emitToolCallResult(toolCallId: string, content: unknown) {
+    this.subscribers.forEach((s) => s.onToolCallResultEvent?.({ event: { toolCallId, content } }));
   }
 
   emitToolCallEnd(toolCallId: string) {
@@ -147,6 +157,7 @@ describe("useSkillAgent — core", () => {
       "clearError",
       // COMPACTION-WIRE M4 — history compactions, rendered in Activity.
       "compactions",
+      "completedReplyId",
       "delegations",
       "error",
       "fallbacks",
@@ -500,6 +511,26 @@ describe("useSkillAgent — deterministic document attachment", () => {
     expect(fake.runAgent).toHaveBeenCalledWith({
       forwardedProps: { document_ids: ["doc-volunteers", "doc-claim"] },
     });
+  });
+
+  it("sendMessage scopes the turn to a project via forwardedProps.project_id (projects §6.3)", async () => {
+    const { result } = renderHook(() => useSkillAgent());
+
+    await act(async () => {
+      await result.current.sendMessage("what changed?", { projectId: "p-iberia" });
+    });
+
+    expect(fake.runAgent).toHaveBeenCalledWith({ forwardedProps: { project_id: "p-iberia" } });
+  });
+
+  it("a null projectId sends no project_id", async () => {
+    const { result } = renderHook(() => useSkillAgent());
+
+    await act(async () => {
+      await result.current.sendMessage("hello", { projectId: null });
+    });
+
+    expect(fake.runAgent).toHaveBeenCalledWith(undefined);
   });
 
   it("omits forwardedProps entirely when no docs and no resume flag", async () => {
@@ -1370,6 +1401,55 @@ describe("useSkillAgent — typed model error codes (M2)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Mid-answer interruption. resilient_llm never retries once answer text is
+// visible, so a transient provider 500 mid-stream arrives as MODEL_UNAVAILABLE
+// with a partial reply on screen — the banner must say "cut off", not
+// "unavailable, try in a minute" (observed live 2026-09-30, maps-assistant).
+// ---------------------------------------------------------------------------
+
+describe("useSkillAgent — interrupted answer", () => {
+  it("MODEL_UNAVAILABLE after answer text → interrupted, retryable, cut-off copy", () => {
+    const { result } = renderHook(() => useSkillAgent());
+    act(() => fake.emitRunStart());
+    act(() => fake.emitTextMessageContent("Driving from Værløse takes"));
+    act(() => fake.emitRunError({ message: "500 INTERNAL", code: "MODEL_UNAVAILABLE" }));
+    expect(result.current.error?.interrupted).toBe(true);
+    expect(result.current.error?.retryable).toBe(true);
+    expect(result.current.error?.message).toMatch(/cut off/i);
+  });
+
+  it("MODEL_UNAVAILABLE before any answer text keeps the unavailable copy", () => {
+    const { result } = renderHook(() => useSkillAgent());
+    act(() => fake.emitRunStart());
+    act(() => fake.emitReasoningStart());
+    act(() => fake.emitReasoningContent("thinking…"));
+    act(() => fake.emitTextMessageContent(""));
+    act(() => fake.emitRunError({ code: "MODEL_UNAVAILABLE" }));
+    expect(result.current.error?.interrupted).toBeUndefined();
+    expect(result.current.error?.message).toMatch(/temporarily unavailable/i);
+  });
+
+  it("non-transient codes are not relabelled as a cut-off", () => {
+    const { result } = renderHook(() => useSkillAgent());
+    act(() => fake.emitRunStart());
+    act(() => fake.emitTextMessageContent("partial"));
+    act(() => fake.emitRunError({ code: "MODEL_AUTH_FAILED" }));
+    expect(result.current.error?.interrupted).toBeUndefined();
+    expect(result.current.error?.retryable).toBe(false);
+  });
+
+  it("answer-started state resets on the next run", () => {
+    const { result } = renderHook(() => useSkillAgent());
+    act(() => fake.emitRunStart());
+    act(() => fake.emitTextMessageContent("first answer"));
+    act(() => fake.emitRunFinished());
+    act(() => fake.emitRunStart());
+    act(() => fake.emitRunError({ code: "MODEL_UNAVAILABLE" }));
+    expect(result.current.error?.interrupted).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // MODEL-RELIABILITY M3 — MODEL_RETRY / MODEL_FALLBACK custom events.
 // Retry is transient (stage label, auto-fades); fallback is persistent
 // (transcript notice) — degradation announced, never hidden.
@@ -1435,8 +1515,8 @@ describe("useSkillAgent — AGENT_DELEGATION anchoring (transparent front-door)"
     });
     act(() => {
       fake.emitCustomEvent("AGENT_DELEGATION", {
-        parent: "one-assistant",
-        target: "one-ppa-expert",
+        parent: "demo-assistant",
+        target: "demo-ppa-expert",
         target_display: "Contract Expert",
         mode: "auto",
       });
@@ -1460,5 +1540,53 @@ describe("useSkillAgent — AGENT_DELEGATION anchoring (transparent front-door)"
       });
     });
     expect(result.current.delegations[0].afterMessageId).toBeNull();
+  });
+});
+
+
+describe("voice reply completion", () => {
+  it("only exposes a newly generated reply after RUN_FINISHED", () => {
+    fake.messages = [{ id: "old", role: "assistant", content: "Previous reply" }];
+    const { result } = renderHook(() => useSkillAgent());
+    expect(result.current.completedReplyId).toBeNull();
+    act(() => fake.emitRunStart());
+    act(() => fake.addMessage({ id: "new", role: "assistant", content: "New reply" }));
+    expect(result.current.completedReplyId).toBeNull();
+    act(() => fake.emitRunFinished());
+    expect(result.current.completedReplyId).toBe("new");
+    act(() => fake.emitRunStart());
+    expect(result.current.completedReplyId).toBeNull();
+    act(() => fake.emitRunFinished());
+    expect(result.current.completedReplyId).toBeNull();
+  });
+
+  it("does not expose stopped partial replies, even if a late terminal arrives", () => {
+    const { result } = renderHook(() => useSkillAgent());
+    act(() => fake.emitRunStart());
+    act(() => fake.addMessage({ id: "partial", role: "assistant", content: "Partial" }));
+    act(() => result.current.stop());
+    act(() => fake.emitRunFinished());
+    expect(result.current.completedReplyId).toBeNull();
+  });
+});
+
+
+describe("AG-UI 1.0 compatibility", () => {
+  it.each([
+    ["plain tool result", "plain tool result"],
+    [[{ type: "text", text: "structured tool result" }], "structured tool result"],
+  ])("keeps tool results readable: %j", (content, expected) => {
+    const { result } = renderHook(() => useSkillAgent());
+    act(() => fake.emitToolCallStart("tc-result", "lookup"));
+    act(() => fake.emitToolCallResult("tc-result", content));
+    expect(result.current.toolCalls.find((tc) => tc.id === "tc-result")?.resultContent).toBe(expected);
+  });
+
+  it("surfaces a session lookup error with a retry", () => {
+    const { result } = renderHook(() => useSkillAgent());
+    act(() => fake.emitRunStart());
+    act(() => fake.emitRunError({ code: "SESSION_LOOKUP_ERROR", message: "session service unavailable" }));
+    expect(result.current.error?.message).toContain("Couldn't load this conversation");
+    expect(result.current.error?.retryable).toBe(true);
   });
 });

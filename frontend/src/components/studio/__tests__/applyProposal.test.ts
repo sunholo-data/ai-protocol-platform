@@ -16,7 +16,7 @@ function base(): StudioDraft {
   };
 }
 
-describe("applyProposal — 9 kinds", () => {
+describe("applyProposal — 10 kinds", () => {
   it("set_display_name → draft.displayName", () => {
     const out = applyProposal(base(), {
       kind: "set_display_name",
@@ -126,6 +126,16 @@ describe("applyProposal — 9 kinds", () => {
       spec: { introMessage: "Hi there" },
     });
     expect(out.welcome?.introMessage).toBe("Hi there");
+  });
+
+  it("set_knowledge_bases → enables knowledge_search and replaces its bound list", () => {
+    const draft = base();
+    draft.skillMetadata = { ...draft.skillMetadata, toolConfigs: { knowledge_search: { knowledge_bases: ["old"], default_filters: { status: "implemented" } } } };
+    const out = applyProposal(draft, { kind: "set_knowledge_bases", label: "Search llm", value: ["llm"] });
+    expect(out.skillMetadata?.tools).toEqual(["a", "knowledge_search"]);
+    expect(out.skillMetadata?.toolConfigs?.knowledge_search).toEqual({ knowledge_bases: ["llm"], default_filters: { status: "implemented" } });
+    // applying twice doesn't duplicate the tool
+    expect(applyProposal(out, { kind: "set_knowledge_bases", label: "x", value: ["llm"] }).skillMetadata?.tools).toEqual(["a", "knowledge_search"]);
   });
 });
 

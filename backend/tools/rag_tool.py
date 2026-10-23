@@ -51,11 +51,39 @@ async def search_documents(query: str, tool_context: ToolContext = None) -> str:
     if not results:
         return "No relevant content found in your documents for that query."
 
-    lines: list[str] = [f"Found {len(results)} relevant excerpt(s) from your documents:\n"]
+    # The number is a DISTANCE, not a relevance (PRECUT-HARDENING M1a).
+    #
+    # rag.create_corpus() is called with no backend_config, so the corpus uses
+    # Vertex's default RagManagedDb / COSINE_DISTANCE. Per the RagContexts.Context
+    # proto, `score` is then "the distance between the query and the context. The
+    # larger the distance, the less relevant … range [0, 2], 0 means the most
+    # relevant". Labelling it "relevance" told the model the exact opposite: it
+    # reads 0.37 as "37% — weak" when 0.37 actually means a CLOSE match, and would
+    # read 1.80 as strong when it is nearly the worst possible.
+    #
+    # Also drop the word "relevant" from the header. Vertex returns nearest-K with
+    # no distance filter configured, so on a non-empty corpus it ALWAYS returns
+    # something; calling those hits "relevant" is a claim this tool cannot support
+    # and is half of how a search for an absent contract came back looking like a
+    # find. See the identity guard on the PPA tools for the half that actually
+    # settles document identity — distance cannot, because different PPAs share
+    # near-identical legal boilerplate and sit genuinely close in embedding space.
+    lines: list[str] = [
+        f"Found {len(results)} excerpt(s), nearest first. `distance` is a COSINE "
+        f"distance in [0, 2] where LOWER is closer; it is NOT a relevance percentage. "
+        f"These are the nearest chunks in the corpus, which is not the same as a match "
+        f"— if none of them is actually the document or clause asked for, say so "
+        f"rather than answering from the closest one.\n"
+        f"SCOPE: this searches ONLY documents already parsed into the workspace. The "
+        f"tenant bucket normally holds many more. A weak or wrong hit here therefore "
+        f"means 'not in the parsed corpus', NOT 'does not exist' — call "
+        f"list_bucket_documents and open it with gs_url= instead of settling for the "
+        f"nearest excerpt.\n"
+    ]
     for i, chunk in enumerate(results, 1):
         source = chunk.get("source_file") or "unknown source"
         text = (chunk.get("text") or "").strip()
         score = float(chunk.get("score") or 0)
-        lines.append(f"[{i}] From: {source} (relevance: {score:.2f})\n{text}\n")
+        lines.append(f"[{i}] From: {source} (distance: {score:.2f})\n{text}\n")
 
     return "\n".join(lines)

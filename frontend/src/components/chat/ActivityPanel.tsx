@@ -26,7 +26,8 @@ import { A2UISurfaceMount } from "@/components/protocols/A2UISurfaceMount";
 import { useSurfaceState } from "@/providers/SurfaceRegistry";
 import { ArrowIcon, StatusDot, WrenchIcon } from "@/components/activity/bits";
 import { ToolCallDetails, hasToolDetail } from "@/components/activity/ToolCallDetails";
-import { absoluteTime, formatRelative, useNow } from "@/components/activity/format";
+import { absoluteTime, activityTime, useNow } from "@/components/activity/format";
+import { useToolLabels } from "@/hooks/useToolLabels";
 
 /** Session context shown in the pinned header row (model + voice config). */
 export interface ActivityContext {
@@ -167,6 +168,10 @@ function ContextRow({ context }: { context: ActivityContext }) {
 function ToolRow({ entry, now }: { entry: Extract<Entry, { kind: "tool" }>; now: number }) {
   const [open, setOpen] = useState(false);
   const hasDetail = hasToolDetail(entry.argsJson, entry.resultContent);
+  // CLAUDE.md #9 — friendly label first; the raw tool name is secondary
+  // detail (row tooltip + the expanded view).
+  const labelFor = useToolLabels();
+  const label = labelFor(entry.name);
 
   return (
     <li className="rounded-md text-xs text-muted-foreground">
@@ -176,16 +181,18 @@ function ToolRow({ entry, now }: { entry: Extract<Entry, { kind: "tool" }>; now:
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted/40 disabled:cursor-default disabled:hover:bg-transparent"
         aria-expanded={hasDetail ? open : undefined}
+        title={entry.name}
+        data-tool-name={entry.name}
       >
         <WrenchIcon />
-        <span className="flex-1 truncate font-medium text-foreground/80">{entry.name}</span>
+        <span className="flex-1 truncate font-medium text-foreground/80">{label}</span>
         {entry.ts ? (
           <time
             dateTime={new Date(entry.ts).toISOString()}
             title={absoluteTime(entry.ts)}
             className="shrink-0 tabular-nums text-[10px] text-muted-foreground/70"
           >
-            {formatRelative(entry.ts, now)}
+            {activityTime(entry.ts, now)}
           </time>
         ) : null}
         <StatusDot status={entry.status} />
@@ -197,6 +204,11 @@ function ToolRow({ entry, now }: { entry: Extract<Entry, { kind: "tool" }>; now:
       </button>
       {open && hasDetail && (
         <div className="ml-6 mb-1.5 mr-2">
+          {label !== entry.name && (
+            <p data-testid="activity-tool-raw-name" className="mb-1 font-mono text-[10px] text-muted-foreground/70">
+              {entry.name}
+            </p>
+          )}
           <ToolCallDetails argsJson={entry.argsJson} resultContent={entry.resultContent} />
         </div>
       )}
@@ -216,7 +228,7 @@ function SimpleRow({ icon, children, ts, now }: { icon: ReactNode; children: Rea
           title={absoluteTime(ts)}
           className="shrink-0 tabular-nums text-[10px] text-muted-foreground/70"
         >
-          {formatRelative(ts, now)}
+          {activityTime(ts, now)}
         </time>
       ) : null}
     </li>

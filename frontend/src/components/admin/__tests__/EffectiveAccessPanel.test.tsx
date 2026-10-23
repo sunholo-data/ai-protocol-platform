@@ -18,8 +18,8 @@ function mockCheck(plane: unknown, opts: { ok?: boolean; status?: number; userFo
     ok: opts.ok ?? true,
     status: opts.status ?? 200,
     json: async () => ({
-      email: "user@one.com",
-      domain: "one.com",
+      email: "user@customer.example",
+      domain: "customer.example",
       userFound: opts.userFound ?? true,
       skillVisibility: plane,
     }),
@@ -27,14 +27,14 @@ function mockCheck(plane: unknown, opts: { ok?: boolean; status?: number; userFo
 }
 
 const PLANE = {
-  enabledSkills: ["one-assistant"],
+  enabledSkills: ["demo-assistant"],
   visibleCount: 1,
   totalCount: 2,
   hiddenByTenantFilter: ["Wip Demo"],
   skills: [
     {
       skillId: "id-1",
-      slug: "one-assistant",
+      slug: "demo-assistant",
       label: "One Assistant",
       visible: true,
       reason: "access_control.type=public → allow; in the tenant's enabled_skills",
@@ -55,7 +55,7 @@ const PLANE = {
   ],
 };
 
-async function submit(email = "user@one.com") {
+async function submit(email = "user@customer.example") {
   fireEvent.change(screen.getByLabelText("User email to inspect"), { target: { value: email } });
   fireEvent.click(screen.getByRole("button", { name: "Check" }));
 }
@@ -66,13 +66,13 @@ describe("EffectiveAccessPanel", () => {
   });
 
   it("explains up front that the admin's own list is not a preview", () => {
-    render(<EffectiveAccessPanel domain="one.com" />);
+    render(<EffectiveAccessPanel domain="customer.example" />);
     expect(screen.getByText(/admins bypass the tenant/i)).toBeTruthy();
   });
 
   it("renders the per-skill verdicts and the backend's reasons verbatim", async () => {
     mockCheck(PLANE);
-    render(<EffectiveAccessPanel domain="one.com" />);
+    render(<EffectiveAccessPanel domain="customer.example" />);
     await submit();
     await waitFor(() => expect(screen.getByText("One Assistant")).toBeTruthy());
     // "Wip Demo" appears twice by design — once in the hidden-skills callout and
@@ -85,7 +85,7 @@ describe("EffectiveAccessPanel", () => {
 
   it("headlines the skills the admin sees but the user does not", async () => {
     mockCheck(PLANE);
-    render(<EffectiveAccessPanel domain="one.com" />);
+    render(<EffectiveAccessPanel domain="customer.example" />);
     await submit();
     await waitFor(() => expect(screen.getByText(/You can see 1 skill that this user cannot/)).toBeTruthy());
   });
@@ -95,42 +95,42 @@ describe("EffectiveAccessPanel", () => {
       ...PLANE,
       skills: [{ ...PLANE.skills[1], visible: true, adminBypass: true, tenantAllowed: false }],
     });
-    render(<EffectiveAccessPanel domain="one.com" />);
+    render(<EffectiveAccessPanel domain="customer.example" />);
     await submit();
     await waitFor(() => expect(screen.getByText(/you only see this as an admin/i)).toBeTruthy());
   });
 
   it("says when the tenant has no filter at all", async () => {
     mockCheck({ ...PLANE, enabledSkills: null, hiddenByTenantFilter: [] });
-    render(<EffectiveAccessPanel domain="one.com" />);
+    render(<EffectiveAccessPanel domain="customer.example" />);
     await submit();
     await waitFor(() => expect(screen.getByText(/no enabled-skills filter/i)).toBeTruthy());
   });
 
   it("warns when the user has never signed in (projection, not fact)", async () => {
     mockCheck(PLANE, { userFound: false });
-    render(<EffectiveAccessPanel domain="one.com" />);
+    render(<EffectiveAccessPanel domain="customer.example" />);
     await submit();
     await waitFor(() => expect(screen.getByText(/hasn't signed in yet/i)).toBeTruthy());
   });
 
   it("explains a 403 as an out-of-scope user, not a generic failure", async () => {
     vi.mocked(fetchWithAuth).mockResolvedValue({ ok: false, status: 403 } as Response);
-    render(<EffectiveAccessPanel domain="one.com" />);
+    render(<EffectiveAccessPanel domain="customer.example" />);
     await submit("someone@other.com");
     await waitFor(() => expect(screen.getByText(/outside your tenant scope/i)).toBeTruthy());
   });
 
   it("surfaces a network failure visibly (never-silent)", async () => {
     vi.mocked(fetchWithAuth).mockRejectedValue(new Error("offline"));
-    render(<EffectiveAccessPanel domain="one.com" />);
+    render(<EffectiveAccessPanel domain="customer.example" />);
     await submit();
     await waitFor(() => expect(screen.getByText(/connection problem/i)).toBeTruthy());
   });
 
   it("surfaces a missing visibility payload rather than rendering blank", async () => {
     mockCheck(null);
-    render(<EffectiveAccessPanel domain="one.com" />);
+    render(<EffectiveAccessPanel domain="customer.example" />);
     await submit();
     await waitFor(() => expect(screen.getByText(/no visibility data/i)).toBeTruthy());
   });
@@ -138,14 +138,14 @@ describe("EffectiveAccessPanel", () => {
   it("shows a pending state while the check runs", async () => {
     let release: (v: Response) => void = () => {};
     vi.mocked(fetchWithAuth).mockReturnValue(new Promise((res) => (release = res)) as Promise<Response>);
-    render(<EffectiveAccessPanel domain="one.com" />);
+    render(<EffectiveAccessPanel domain="customer.example" />);
     await submit();
     await waitFor(() => expect(screen.getByRole("button", { name: "Checking…" })).toBeTruthy());
     release({ ok: true, status: 200, json: async () => ({ skillVisibility: PLANE }) } as unknown as Response);
   });
 
   it("does not fire on an empty email", async () => {
-    render(<EffectiveAccessPanel domain="one.com" />);
+    render(<EffectiveAccessPanel domain="customer.example" />);
     fireEvent.click(screen.getByRole("button", { name: "Check" }));
     expect(fetchWithAuth).not.toHaveBeenCalled();
   });

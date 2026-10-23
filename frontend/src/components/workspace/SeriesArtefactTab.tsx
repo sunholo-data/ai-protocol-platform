@@ -41,7 +41,7 @@ interface AxisDecl {
 }
 
 /** An uncertainty band around a series — the two edge columns are read from the
- *  same rows, so a band costs no extra payload. Declared by the server (ONE's
+ *  same rows, so a band costs no extra payload. Declared by the server (the tenant's
  *  `_basecase`/`_lowcase`/`_highcase` convention); the tab holds no knowledge of
  *  that convention, exactly as it holds none of ENTSO-E's. */
 interface BandDecl {
@@ -62,7 +62,7 @@ interface SeriesRoot {
   startDate?: string;
   endDate?: string;
   rowCount?: number;
-  /** ONE-BQ-SHAPES — all optional; absent means "render as before". */
+  /** TENANT-BQ-SHAPES — all optional; absent means "render as before". */
   bands?: BandDecl[];
   /** Measures the server declined to chart because they are on another scale.
    *  Declared, never dropped: the tab must be able to say what it left out. */

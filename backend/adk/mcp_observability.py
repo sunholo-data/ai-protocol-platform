@@ -32,6 +32,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from google.adk.tools.base_tool import BaseTool
 from opentelemetry import trace
 
 from tools.mcp.registry import SERVER_ID_ATTR
@@ -165,19 +166,58 @@ def compose_before_tool_callbacks(
     short-circuit pattern — override the tool call), respect that and skip
     the MCP callback. Otherwise run ``mcp`` for its side effects only.
 
-    ``existing`` may be None (no existing callback configured) — then this
-    returns ``mcp`` unchanged.
+    ADK 2 supplies a bare BaseTool placeholder for unresolved names, runs the
+    before-chain, then skips the after-chain. Reject that exact placeholder
+    before side effects: callbacks stay balanced and the user gets a named
+    RUN_ERROR, preserving our fail-fast policy instead of relying on the model
+    to explain its own hallucinated tool. Concrete tools/subclasses are allowed.
     """
-    if existing is None:
-        return mcp
 
     def _composed(tool: Any, args: dict, tool_context: Any) -> Any:
-        result = existing(tool=tool, args=args, tool_context=tool_context)
+        if type(tool) is BaseTool and tool.description == "Tool not found":
+            raise ValueError(f"Tool '{tool.name}' not found.")
+        result = existing(tool=tool, args=args, tool_context=tool_context) if existing else None
         if result is not None:
             return result
         return mcp(tool=tool, args=args, tool_context=tool_context)
 
     return _composed
+
+
+def chain_mutators(*mutators: Callable[..., Any]) -> Callable[..., Any]:
+    """Compose after-tool callbacks that MAY REWRITE the response, in order.
+
+    ``compose_after_tool_callbacks`` takes exactly one mutating callback (its
+    ``existing`` slot) and treats everything else as an observer whose return
+    value is discarded. That is the right shape for OTel tagging and A2UI
+    emission, and the wrong shape the moment a second callback needs to rewrite
+    — which is what converting MCP image blocks into artefact references needs.
+
+    Order is load-bearing, not stylistic. ``_convert_media_results`` must run
+    BEFORE ``_handle_large_output``: composed the other way round the offload
+    has already replaced a screenshot with a pointer string, the converter finds
+    no image, and the failure is silent — no exception, nothing logged, and a
+    screenshot the user is never shown. `tests/unit/test_media_results.py` pins
+    both orders so the wrong one cannot return unnoticed.
+
+    Each mutator sees the previous one's rewrite. Returns ``None`` when no
+    mutator rewrote anything, preserving ADK's "is not None means use this"
+    contract so a chain of decliners stays a decline.
+    """
+
+    async def _chained(tool: Any, args: dict, tool_context: Any, tool_response: Any) -> Any:
+        effective = tool_response
+        rewritten = False
+        for mutator in mutators:
+            result = mutator(tool=tool, args=args, tool_context=tool_context, tool_response=effective)
+            if inspect.isawaitable(result):
+                result = await result
+            if result is not None:
+                effective = result
+                rewritten = True
+        return effective if rewritten else None
+
+    return _chained
 
 
 def compose_after_tool_callbacks(
@@ -225,6 +265,7 @@ def compose_after_tool_callbacks(
 
 
 __all__ = [
+    "chain_mutators",
     "compose_after_tool_callbacks",
     "compose_before_tool_callbacks",
     "make_mcp_after_tool_callback",

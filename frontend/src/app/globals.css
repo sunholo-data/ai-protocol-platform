@@ -2,6 +2,61 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Euclid Circular B ───────────────────────────────────────────────────────
+   The customer's brand typeface, licensed to them (confirmed 2026-09-07).
+   Converted TTF -> WOFF2 with fontTools; 212 KB for six weights against 823 KB
+   of TTF, so this costs less than the fallback stack used to cost in reflow.
+
+   `tailwind.config.ts` asked for "Euclid Circular A" — a different family, and
+   one no @font-face ever declared, so every render silently fell through to
+   system-ui. The name was aspirational; this makes it real.
+
+   `font-display: swap` — text paints in the fallback immediately and reflows
+   when the face lands. Never `block`: a blank page while a font downloads is a
+   silent state (principle #8), even if only for 100ms. */
+@font-face {
+  font-family: "Euclid Circular B";
+  src: url("/fonts/one-euclid-circular-b/euclid-circular-b-light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Euclid Circular B";
+  src: url("/fonts/one-euclid-circular-b/euclid-circular-b-regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Euclid Circular B";
+  src: url("/fonts/one-euclid-circular-b/euclid-circular-b-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Euclid Circular B";
+  src: url("/fonts/one-euclid-circular-b/euclid-circular-b-medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Euclid Circular B";
+  src: url("/fonts/one-euclid-circular-b/euclid-circular-b-semibold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Euclid Circular B";
+  src: url("/fonts/one-euclid-circular-b/euclid-circular-b-bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 @layer utilities {
   /* Hide the native scrollbar while keeping the element scrollable — used by
      the Workbench tab strip (the native bar was big + ugly with many tabs). */
@@ -14,6 +69,16 @@
   }
 }
 
+/* Design tokens. The template's default look is the Sunholo brand
+   (sunholo.com/assets — kit v1): white paper, ink/slate text, restrained
+   orange, 3px corners. A fork restyles by OVERRIDING these in its own theme
+   stylesheet (NEXT_PUBLIC_BRAND_THEME_CSS, see public/brand/README.md) — not by
+   editing this file. Contrast ratios are the brand guide's.
+
+   FORKS — merge conflict here? This block became the Sunholo brand on
+   2026-10-01. Take upstream's version and move your own values into
+   public/brand/<your-fork>/theme.css: UPGRADING.md has the steps. Keeping your
+   edits here instead means a conflict on every future style change. */
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -22,9 +87,18 @@
     --muted-foreground: 215.4 16.3% 46.9%;
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 24 95% 53%;
-    --primary: 24 95% 53%;
-    --primary-foreground: 0 0% 100%;
+    --ring: 27 96% 65%;
+    /* Brand primary — the customer's theme accent1 (#FB9D4F), lifted from
+       their PowerPoint theme and cross-confirmed against the LaTeX offer
+       template's \definecolor{titlecolor}{HTML}{FB9D4F}.
+
+       The foreground is DARK, not white, and that is a contrast decision, not
+       a style one: #FB9D4F on white is 2.09:1, which fails even the 3:1 floor
+       for UI components. On near-black it is 10.04:1. The orange it replaces
+       (#F97015) was itself only 2.85:1 on white, so this is a large
+       accessibility improvement rather than a regression to work around. */
+    --primary: 27 96% 65%;
+    --primary-foreground: 222.2 47.4% 11.2%;
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
     --accent: 210 40% 96.1%;
@@ -39,6 +113,9 @@
     --a2ui-primary-color: hsl(var(--primary));
   }
 
+  /* No brand dark theme exists; this is a derived slate-night variant. Filled
+     buttons carry dark text on a lighter orange (4.82:1) because white on it
+     would be 3.18:1 and fail AA. */
   .dark {
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
@@ -46,9 +123,9 @@
     --muted-foreground: 215 20.2% 65.1%;
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
-    --ring: 24 95% 53%;
-    --primary: 24 95% 53%;
-    --primary-foreground: 0 0% 100%;
+    --ring: 27 96% 65%;
+    --primary: 27 96% 65%;
+    --primary-foreground: 222.2 47.4% 11.2%;
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
     --accent: 217.2 32.6% 17.5%;
@@ -66,6 +143,177 @@
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
   }
+  /* Bold headings (700), regular reading text (400) — the brand hierarchy. */
+  h1,
+  h2,
+  h3 {
+    font-weight: 700;
+  }
+  /* A visible keyboard focus ring everywhere; mouse clicks stay clean. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+}
+
+/* Quiet, flat surfaces: popovers, menus and cards carry a 1px rule, not a
+   shadow. A fork that wants depth restores it in its theme stylesheet. */
+.shadow-sm,
+.shadow,
+.shadow-md,
+.shadow-lg,
+.shadow-xl {
+  box-shadow: none;
+}
+
+/* Links in prose: the primary colour, underlined (colour alone must not carry
+   meaning). Inline code on the muted ground with a rule. */
+.prose a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.prose :not(pre) > code {
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  padding: 0 4px;
+}
+
+/* The header lockup: the product name in bold slate beside the mark. */
+header[aria-label="Skills navigation"] a[aria-label="Home"] span {
+  color: var(--brand-slate);
+  font-weight: 700;
+}
+
+/* ── A2UI surface skin (base) ────────────────────────────────────────────────
+   Applies to every A2UI surface EXCEPT the chat elicitation forms, which have
+   their own tighter skin below (both classes land on the same element — the
+   A2UISurfaceMount container — so `:not(.chat-a2ui-form)` separates them
+   cleanly).
+
+   The selectors here are ELEMENT + INLINE-STYLE matches, not classes, and that
+   is not a shortcut: the React renderer emits no class hooks at all. Verified
+   in a real browser on 2026-09-04 — the rendered tree inside a surface is bare
+   `div`/`h2`/`h3`/`span`/`img` whose only classes come from our own wrapper.
+   An earlier attempt at this skin targeted `.a2ui-card` / `.a2ui-image`, which
+   exist in the SDK's stylesheet for a DIFFERENT render path, and had precisely
+   no effect. The form skin below says "the SDK exposes no class hooks"; it
+   means it literally.
+
+   `!important` is required for the same reason it is there: author
+   `!important` is the one thing that beats an element's own inline style.
+   `rgb(204, 204, 204)` is the card border React serialises from `#ccc`. */
+[data-surface]:not(.chat-a2ui-form) {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: hsl(var(--foreground));
+}
+/* Cards: flat themed panels rather than bordered slabs with 8px of drift. */
+[data-surface]:not(.chat-a2ui-form) div[style*="rgb(204, 204, 204)"] {
+  background: hsl(var(--muted) / 0.35) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: none !important;
+  margin: 0 0 0.5rem !important;
+  padding: 0.625rem 0.75rem !important;
+}
+[data-surface]:not(.chat-a2ui-form) :is(h1, h2, h3, h4, h5) {
+  margin: 0 0 0.25rem !important;
+  font-weight: 600;
+  line-height: 1.3;
+  color: hsl(var(--foreground));
+}
+[data-surface]:not(.chat-a2ui-form) h2 {
+  font-size: 0.9375rem !important;
+}
+/* Section labels ("Pages visited") — quiet, uppercase, the site's own idiom. */
+[data-surface]:not(.chat-a2ui-form) h3 {
+  font-size: 0.6875rem !important;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground)) !important;
+  margin-top: 0.25rem !important;
+}
+[data-surface]:not(.chat-a2ui-form) span {
+  margin: 0 !important;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: hsl(var(--muted-foreground));
+  overflow-wrap: anywhere;
+}
+/* The screenshot is the point of the browser pane: give it the page's own
+   border treatment instead of a raw 8px inline margin. */
+[data-surface]:not(.chat-a2ui-form) img {
+  margin: 0 !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: calc(var(--radius) - 2px) !important;
+  background: hsl(var(--background));
+}
+
+/* ── A2UI surface skin (base) ────────────────────────────────────────────────
+   Applies to every A2UI surface EXCEPT the chat elicitation forms, which have
+   their own tighter skin below (both classes land on the same element — the
+   A2UISurfaceMount container — so `:not(.chat-a2ui-form)` separates them
+   cleanly).
+
+   The selectors here are ELEMENT + INLINE-STYLE matches, not classes, and that
+   is not a shortcut: the React renderer emits no class hooks at all. Verified
+   in a real browser on 2026-09-04 — the rendered tree inside a surface is bare
+   `div`/`h2`/`h3`/`span`/`img` whose only classes come from our own wrapper.
+   An earlier attempt at this skin targeted `.a2ui-card` / `.a2ui-image`, which
+   exist in the SDK's stylesheet for a DIFFERENT render path, and had precisely
+   no effect. The form skin below says "the SDK exposes no class hooks"; it
+   means it literally.
+
+   `!important` is required for the same reason it is there: author
+   `!important` is the one thing that beats an element's own inline style.
+   `rgb(204, 204, 204)` is the card border React serialises from `#ccc`. */
+[data-surface]:not(.chat-a2ui-form) {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: hsl(var(--foreground));
+}
+/* Cards: flat themed panels rather than bordered slabs with 8px of drift. */
+[data-surface]:not(.chat-a2ui-form) div[style*="rgb(204, 204, 204)"] {
+  background: hsl(var(--muted) / 0.35) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: none !important;
+  margin: 0 0 0.5rem !important;
+  padding: 0.625rem 0.75rem !important;
+}
+[data-surface]:not(.chat-a2ui-form) :is(h1, h2, h3, h4, h5) {
+  margin: 0 0 0.25rem !important;
+  font-weight: 600;
+  line-height: 1.3;
+  color: hsl(var(--foreground));
+}
+[data-surface]:not(.chat-a2ui-form) h2 {
+  font-size: 0.9375rem !important;
+}
+/* Section labels ("Pages visited") — quiet, uppercase, the site's own idiom. */
+[data-surface]:not(.chat-a2ui-form) h3 {
+  font-size: 0.6875rem !important;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground)) !important;
+  margin-top: 0.25rem !important;
+}
+[data-surface]:not(.chat-a2ui-form) span {
+  margin: 0 !important;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: hsl(var(--muted-foreground));
+  overflow-wrap: anywhere;
+}
+/* The screenshot is the point of the browser pane: give it the page's own
+   border treatment instead of a raw 8px inline margin. */
+[data-surface]:not(.chat-a2ui-form) img {
+  margin: 0 !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: calc(var(--radius) - 2px) !important;
+  background: hsl(var(--background));
 }
 
 /* ── A2UI elicitation form skin (7.8) ────────────────────────────────────────
@@ -173,3 +421,159 @@
   margin: 0.625rem 0 0 auto !important;
   padding: 0.4375rem 1.125rem !important;
 }
+
+/* Markdown inside an A2UI Text (a2uiMarkdownCatalog).
+ *
+ * Agents write markdown and Basic's Text rendered it literally; the catalog now
+ * renders it properly, but a `<pre>` with no styling laid out INLINE inside the
+ * surface's flex column — a fenced code block appeared as a run of monospace on
+ * the same line as the sentence before it. Seen in a browser 2026-09-06; no
+ * test could see it, because the markup was correct and only the layout was
+ * wrong.
+ *
+ * Deliberately minimal: block flow, a quiet ground for code, and horizontal
+ * scroll so a long command widens nothing. Colours come from the app's own
+ * tokens so this follows the theme rather than pinning light mode.
+ */
+.a2ui-md {
+  display: block;
+  white-space: normal;
+}
+.a2ui-md > :first-child { margin-top: 0; }
+.a2ui-md > :last-child { margin-bottom: 0; }
+.a2ui-md p { margin: 0.35em 0; }
+.a2ui-md ul,
+.a2ui-md ol { margin: 0.35em 0; padding-left: 1.4em; }
+.a2ui-md li { margin: 0.15em 0; }
+.a2ui-md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+  background: hsl(var(--muted));
+  padding: 0.1em 0.32em;
+  border-radius: 3px;
+}
+.a2ui-md pre {
+  display: block;
+  margin: 0.5em 0;
+  padding: 0.6em 0.75em;
+  background: hsl(var(--muted));
+  border-radius: 6px;
+  /* A long command must scroll, not stretch the card and every sibling with it. */
+  overflow-x: auto;
+  max-width: 100%;
+}
+.a2ui-md pre code {
+  background: none;
+  padding: 0;
+  white-space: pre;
+}
+.a2ui-md a { text-decoration: underline; }
+
+/* MOBILE — iOS Safari zooms the page into any focused field whose font-size is
+   under 16px, and never zooms back out: that is the "the app keeps zooming"
+   bug on iPhone. Rather than chase every `text-sm`/`text-xs` field (composers,
+   the skill-switcher search that autofocuses on open, admin forms, the A2UI
+   form overrides above), phone widths get a 16px floor on every text field.
+   Desktop keeps its compact sizes. Not `maximum-scale=1`: that also kills
+   pinch-zoom, which people need. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+  textarea,
+  select,
+  .chat-a2ui-form input,
+  .chat-a2ui-form textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Code highlighting — rehype-highlight emits `hljs-*` token classes; these give
+   them colour. Every colour is a variable so a fork theme (BRANDING.
+   themeStylesheet) can restyle code without touching this file. Default: the
+   brand's few colours, with weight carrying the rest — the primary orange for
+   keywords, slate/ink for structure, muted strings, italic comments, and the
+   mark's orange for AILANG effect rows (`! {IO}`). */
+:root {
+  --code-keyword: #bd3012;
+  --code-string: #526677;
+  --code-comment: #6f8292;
+  --code-number: #9a3412;
+  --code-function: #2c3e50;
+  --code-type: #314352;
+  --code-meta: #e73c17;
+}
+.dark {
+  --code-keyword: #f0643f;
+  --code-string: #a9b7c3;
+  --code-comment: #8797a6;
+  --code-number: #f59e7a;
+  --code-function: #f6f8fa;
+  --code-type: #dce3e8;
+  --code-meta: #f0643f;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag { color: var(--code-keyword); }
+.hljs-string,
+.hljs-regexp,
+.hljs-addition { color: var(--code-string); }
+.hljs-comment,
+.hljs-quote { color: var(--code-comment); font-style: italic; }
+.hljs-number,
+.hljs-literal,
+.hljs-built_in,
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-symbol { color: var(--code-number); }
+.hljs-title,
+.hljs-section { color: var(--code-function); }
+.hljs-type,
+.hljs-title.class_,
+.hljs-name,
+.hljs-tag,
+.hljs-selector-class,
+.hljs-selector-id { color: var(--code-type); }
+.hljs-meta,
+.hljs-deletion { color: var(--code-meta); }
+.hljs-title,
+.hljs-type,
+.hljs-meta { font-weight: 600; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
+
+/* Wide display equations scroll inside the message, including on phones. */
+.katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.25rem;
+}
+
+/* Protocol document content: bounded tables/code, readable Markdown. */
+.a2ui-document { color: hsl(var(--foreground)); line-height: 1.65; overflow-wrap: anywhere; }
+.a2ui-document > * + * { margin-top: 0.8rem; }
+.a2ui-document :is(h1,h2,h3,h4) { text-transform: none !important; letter-spacing: normal !important; font-size: 1rem !important; color: hsl(var(--foreground)) !important; }
+.a2ui-document :is(ul,ol) { padding-left: 1.5rem; }
+.a2ui-document ul { list-style: disc; }
+.a2ui-document ol { list-style: decimal; }
+.a2ui-document a { color: hsl(var(--primary)); text-decoration: underline; }
+.a2ui-document pre { max-width: 100%; overflow-x: auto; padding: 0.8rem; border-radius: var(--radius); background: hsl(var(--muted)); font-size: 0.8rem; }
+.a2ui-document code { font-family: monospace; }
+.a2ui-document blockquote { border-left: 3px solid hsl(var(--border)); padding-left: 1rem; color: hsl(var(--muted-foreground)); }
+.a2ui-document table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.a2ui-document :is(th,td) { padding: 0.4rem 0.7rem; border: 1px solid hsl(var(--border)); text-align: left; }
+/* The inbox is a list of compact rows, not a stack of expanding documents. */
+[data-surface="inbox_board"] div[style*="rgb(204, 204, 204)"] { padding: 0.4rem 0.65rem !important; margin-bottom: 0.25rem !important; background: hsl(var(--background)) !important; }
+[data-surface="inbox_board"] div[style*="flex-direction: row"] { flex-wrap: wrap; gap: 0.35rem 0.7rem !important; }
+[data-surface="inbox_board"] input[type="checkbox"] { accent-color: hsl(var(--primary)); }
+[data-surface="inbox_board"] label { font-weight: 500; overflow-wrap: anywhere; }
+[data-surface="inbox_board"] button { border-radius: var(--radius); }
+
+[data-surface="inbox_board"] div[style*="margin: 8px"] { margin: 2px !important; }
+[data-surface="inbox_board"] button { margin: 2px 4px 2px 0 !important; padding: 5px 9px !important; border-color: hsl(var(--border)) !important; }
+[data-surface="inbox_board"] :is(button,input)[style*="background-color: rgb(255, 255, 255)"] { background: hsl(var(--background)) !important; color: hsl(var(--foreground)) !important; }
+[data-surface="inbox_board"] button[style*="var(--a2ui-primary-color"] { color: hsl(var(--primary-foreground)) !important; }
+[data-surface="inbox_board"] label { max-width: 42ch; }
+
+[data-surface="inbox_board"] button span { color: inherit !important; }

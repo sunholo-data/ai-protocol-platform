@@ -1,8 +1,38 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown";
+import { resetHelpViewer, setHelpOpener } from "@/lib/helpViewer";
 
 const noop = () => {};
+
+describe("ChatMarkdown — links into the app", () => {
+  it("opens a help link in the workbench Help tab when there is one", () => {
+    resetHelpViewer();
+    const opener = vi.fn();
+    setHelpOpener(opener);
+    render(<ChatMarkdown content="[Upload a whole folder](/help/folders#upload-a-whole-folder)" navigateToBlock={noop} />);
+    const link = screen.getByRole("link", { name: "Upload a whole folder" });
+    expect(link).toHaveAttribute("href", "/help/folders#upload-a-whole-folder");
+    const notPrevented = fireEvent.click(link);
+    expect(notPrevented).toBe(false);
+    expect(opener).toHaveBeenCalledWith({ slug: "folders", anchor: "upload-a-whole-folder" });
+    resetHelpViewer();
+  });
+
+  it("falls back to opening the help page in a new tab", () => {
+    resetHelpViewer();
+    render(<ChatMarkdown content="[Upload a whole folder](/help/folders#upload-a-whole-folder)" navigateToBlock={noop} />);
+    const link = screen.getByRole("link", { name: "Upload a whole folder" });
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(fireEvent.click(link)).toBe(true);
+  });
+
+  it("keeps other app links working, but never a protocol-relative URL", () => {
+    render(<ChatMarkdown content="[Web researcher](/chat/@aitana-platform/web-researcher) and [x](//evil.example/a)" navigateToBlock={noop} />);
+    expect(screen.getByRole("link", { name: "Web researcher" })).toHaveAttribute("href", "/chat/@aitana-platform/web-researcher");
+    expect(screen.getByRole("link", { name: "x" })).toHaveAttribute("href", "#");
+  });
+});
 
 describe("ChatMarkdown", () => {
   it("renders bold text as <strong>", () => {
@@ -86,5 +116,20 @@ describe("ChatMarkdown", () => {
   it("renders plain text unchanged", () => {
     render(<ChatMarkdown content="Hello world" navigateToBlock={noop} />);
     expect(screen.getByText("Hello world")).toBeTruthy();
+  });
+
+  it("highlights ```ail / ```ailang fences, and still highlights common languages", () => {
+    for (const lang of ["ail", "ailang"]) {
+      const { container, unmount } = render(
+        <ChatMarkdown content={"```" + lang + "\nfunc main() -> unit ! {IO} { println(\"hi\") }\n```"} navigateToBlock={noop} />,
+      );
+      expect(container.querySelector(".hljs-keyword")?.textContent).toBe("func");
+      expect(container.querySelector(".hljs-meta")?.textContent).toContain("IO");
+      unmount();
+    }
+    const { container } = render(
+      <ChatMarkdown content={"```python\ndef f():\n    return 1\n```"} navigateToBlock={noop} />,
+    );
+    expect(container.querySelector(".hljs-keyword")?.textContent).toBe("def");
   });
 });

@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SkillExamplesPicker } from "../SkillExamplesPicker";
 import type { ExampleDocument } from "@/types/skill";
+import type { RecentDocument } from "@/hooks/useRecentDocuments";
 
 vi.mock("@/lib/apiClient", () => ({ fetchWithAuth: vi.fn() }));
 import { fetchWithAuth } from "@/lib/apiClient";
@@ -210,5 +211,119 @@ describe("SkillExamplesPicker — action prompts", () => {
   it("renders nothing when there are neither documents nor prompts", () => {
     const { container } = render(<SkillExamplesPicker examples={[]} onPickExample={() => {}} />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("SkillExamplesPicker — the user's recent documents replace the demos", () => {
+  function makeRecent(overrides: Partial<RecentDocument> = {}): RecentDocument {
+    return {
+      id: "doc-1",
+      originalFilename: "Acme supply agreement.pdf",
+      sourceFormat: "pdf",
+      parseStatus: "parsed",
+      lastUsedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+      lastSessionId: "sess-9",
+      lastSessionTitle: "Termination clauses",
+      ...overrides,
+    };
+  }
+
+  it("shows the user's documents and hides the shared examples", () => {
+    render(
+      <SkillExamplesPicker
+        examples={[makeExample({ label: "Demo PPA" })]}
+        onPickExample={() => {}}
+        recent={[makeRecent()]}
+        recentStatus="ready"
+        onOpenRecent={() => {}}
+      />,
+    );
+    expect(screen.getByText("Pick up where you left off")).toBeInTheDocument();
+    expect(screen.getByText("Acme supply agreement.pdf")).toBeInTheDocument();
+    expect(screen.getByText("Last used 2d ago")).toBeInTheDocument();
+    expect(screen.queryByText("Demo PPA")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the examples for a user with no documents yet", () => {
+    render(
+      <SkillExamplesPicker
+        examples={[makeExample({ label: "Demo PPA" })]}
+        onPickExample={() => {}}
+        recent={[]}
+        recentStatus="ready"
+        onOpenRecent={() => {}}
+      />,
+    );
+    expect(screen.getByText("Demo PPA")).toBeInTheDocument();
+    expect(screen.queryByText("Pick up where you left off")).not.toBeInTheDocument();
+  });
+
+  it("does not flash the examples while the user's list loads", () => {
+    render(
+      <SkillExamplesPicker
+        examples={[makeExample({ label: "Demo PPA" })]}
+        onPickExample={() => {}}
+        recent={[]}
+        recentStatus="loading"
+        onOpenRecent={() => {}}
+      />,
+    );
+    expect(screen.getByRole("status", { name: "Loading your recent documents" })).toBeInTheDocument();
+    expect(screen.queryByText("Demo PPA")).not.toBeInTheDocument();
+  });
+
+  it("says why it is showing examples when the user's list fails (NEVER SILENT #8)", () => {
+    const onRetry = vi.fn();
+    render(
+      <SkillExamplesPicker
+        examples={[makeExample({ label: "Demo PPA" })]}
+        onPickExample={() => {}}
+        recent={[]}
+        recentStatus="error"
+        onRetryRecent={onRetry}
+        onOpenRecent={() => {}}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load your recent documents");
+    expect(screen.getByText("Demo PPA")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalled();
+  });
+
+  it("opens the document, or continues its conversation — two separate targets", () => {
+    const onOpen = vi.fn();
+    const onResume = vi.fn();
+    const doc = makeRecent();
+    render(
+      <SkillExamplesPicker
+        examples={[]}
+        onPickExample={() => {}}
+        recent={[doc]}
+        recentStatus="ready"
+        onOpenRecent={onOpen}
+        onResumeSession={onResume}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open Acme supply agreement.pdf" }));
+    expect(onOpen).toHaveBeenCalledWith(doc);
+    expect(onResume).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Continue .Termination clauses./ }));
+    expect(onResume).toHaveBeenCalledWith("sess-9");
+  });
+
+  it("a document not yet discussed says when it was added and offers no conversation", () => {
+    render(
+      <SkillExamplesPicker
+        examples={[]}
+        onPickExample={() => {}}
+        recent={[makeRecent({ lastSessionId: null, lastSessionTitle: null })]}
+        recentStatus="ready"
+        onOpenRecent={() => {}}
+        onResumeSession={() => {}}
+      />,
+    );
+    expect(screen.getByText(/^Added /)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Continue/ })).not.toBeInTheDocument();
   });
 });

@@ -19,12 +19,12 @@ import { DOMAIN_NOT_PERMITTED_EVENT } from "@/lib/apiClient";
  */
 export function AccessRestrictedGate({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth();
-  const [denied, setDenied] = useState<{ message?: string } | null>(null);
+  const [denied, setDenied] = useState<{ message?: string; code?: string } | null>(null);
 
   useEffect(() => {
     const onDenied = (e: Event) => {
-      const message = (e as CustomEvent<{ message?: string }>).detail?.message;
-      setDenied({ message });
+      const { message, code } = (e as CustomEvent<{ message?: string; code?: string }>).detail ?? {};
+      setDenied({ message, code });
     };
     window.addEventListener(DOMAIN_NOT_PERMITTED_EVENT, onDenied);
     return () => window.removeEventListener(DOMAIN_NOT_PERMITTED_EVENT, onDenied);
@@ -41,6 +41,7 @@ export function AccessRestrictedGate({ children }: { children: ReactNode }) {
       <AccessRestrictedScreen
         email={user?.email ?? null}
         message={denied.message}
+        unverified={denied.code === "EMAIL_NOT_VERIFIED"}
         onSignOut={signOut}
       />
     );

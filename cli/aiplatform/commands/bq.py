@@ -1,22 +1,22 @@
-"""`aiplatform bq` — query ONE's scoped BigQuery warehouse from a terminal.
+"""`aiplatform bq` — query the tenant's scoped BigQuery warehouse from a terminal.
 
 The task-shaped counterpart to ``aiplatform toolbox probe``. Probe speaks MCP
 ("call tool X with these JSON args against this URL"); this group speaks
 BigQuery ("what tables are in market_prices?"), which is what you actually want when
 reproducing a data question or checking the security boundary by hand.
 
-Design: docs/design/v6.23.0/one-bigquery.md
+Design: docs/design/v6.23.0/demo-bigquery.md
 
 ## Why `bq sql`, not `bq query`
 
 ``generated-document-outputs.md`` Track C reserves ``aiplatform bq query list``
-for Dana's NAMED query library. If ad-hoc SQL took the ``query`` verb, Click
+for a tester's NAMED query library. If ad-hoc SQL took the ``query`` verb, Click
 would read ``bq query list`` as "run the SQL `list`". Keeping ad-hoc on ``sql``
 leaves the ``query`` namespace free for that library to land in cleanly.
 
 ## Dataset → tool routing comes from tools.yaml, not a constant
 
-ONE's datasets span two BigQuery regions, so the toolset carries two parallel
+the tenant's datasets span two BigQuery regions, so the toolset carries two parallel
 tool families (``bq_market_*`` / ``bq_analysis_*``). Which one serves a dataset
 is derived by READING the shipped ``tools.yaml`` sources, so this CLI cannot
 drift from the gateway: add a dataset to a source's ``allowedDatasets`` and the
@@ -26,8 +26,8 @@ routing follows automatically.
 from __future__ import annotations
 
 import json
-import sys
 import os
+import sys
 from pathlib import Path
 
 import click
@@ -41,7 +41,7 @@ _TOOLBOX_DIR = _REPO_ROOT / "infrastructure" / "mcp-toolbox"
 
 # The sidecar is loopback in every environment by design (v6.14.0) — there is no
 # per-env URL to pass. Override only for a non-default port in local dev.
-DEFAULT_URL = "http://127.0.0.1:5000/mcp/one-bigquery"
+DEFAULT_URL = "http://127.0.0.1:5000/mcp/demo-bigquery"
 
 # The DATA project (not the billing project the source runs jobs in).
 #
@@ -60,6 +60,7 @@ def _data_project() -> str:
     with a project name that names its own problem.
     """
     return os.environ.get(_DATA_PROJECT_ENV, "") or "SET-AIPLATFORM_BQ_DATA_PROJECT"
+
 
 # A "family" is a group of executor tools bound to one Toolbox source. Several
 # exist because a Toolbox source declares a SINGLE BigQuery location, and a
@@ -99,9 +100,7 @@ def _dataset_routing() -> dict[str, str]:
     family_by_source = {
         str(d["source"]): str(d["name"])[: -len(_QUERY_TOOL_SUFFIX)]
         for d in docs
-        if d.get("kind") == "tool"
-        and str(d.get("name", "")).endswith(_QUERY_TOOL_SUFFIX)
-        and d.get("source")
+        if d.get("kind") == "tool" and str(d.get("name", "")).endswith(_QUERY_TOOL_SUFFIX) and d.get("source")
     }
 
     routing: dict[str, str] = {}
@@ -205,9 +204,7 @@ def tables(dataset: str, url: str, as_json: bool) -> None:
     a cross-project dataset.
     """
     family = _family_for(dataset)
-    sql_text = (
-        f"SELECT table_name FROM `{_data_project()}.{dataset}.INFORMATION_SCHEMA.TABLES` ORDER BY table_name"
-    )
+    sql_text = f"SELECT table_name FROM `{_data_project()}.{dataset}.INFORMATION_SCHEMA.TABLES` ORDER BY table_name"
     content, is_error = _call(url, f"{family}_query", {"sql": sql_text})
     _emit(content, is_error, as_json=as_json)
 

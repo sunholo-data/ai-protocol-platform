@@ -123,9 +123,25 @@ For each milestone:
    # Backend
    cd backend && pytest tests/ -m "not slow" -v --tb=short
    ```
-5. **Update Sprint JSON** - Set `passes: true/false`, `completed` timestamp, `notes`
-6. **Commit** - Git commit with milestone reference
-7. **Pause for Breath** - Show progress, ask user if ready to continue
+5. **Check repo routing** (only when this repo merges from an upstream — skip if
+   `git remote` shows none). Run the repo's routing checker if it has one, e.g.
+   `scripts/check-upstream-routing.sh`. Compare what it reports against the
+   milestone's **Repo** field in the plan: platform paths edited during a
+   milestone marked `here` are either prototyping to port up, or a routing
+   mistake — decide which now and record it in `notes`, while the reasoning is
+   still in your head.
+
+   Do this per milestone, not once at the end. Divergence is cheap to move on
+   the day it is written and expensive weeks later, when it surfaces as a
+   conflict for whoever runs the next upstream merge.
+
+   Also re-run any **publish/parity gate the repo's CI blocks on** (e.g.
+   `make template-parity`) rather than trusting a run from the start of the
+   sprint. These gates catch content that should not ship — exactly the kind of
+   thing a milestone adds *after* you last checked.
+6. **Update Sprint JSON** - Set `passes: true/false`, `completed` timestamp, `notes`
+7. **Commit** - Git commit with milestone reference
+8. **Pause for Breath** - Show progress, ask user if ready to continue
 
 ### Phase 2B: Parallel Milestone Execution
 

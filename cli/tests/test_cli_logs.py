@@ -50,7 +50,7 @@ def test_logs_invokes_gcloud_with_resolved_target(mock_run, _which) -> None:
     assert f'service_name="{_LOG_CFG["service"]}"' in log_filter
     assert 'container_name="sidecar"' in log_filter
     assert 'textPayload:"doc loader"' in log_filter
-    assert f'--project={_LOG_CFG["projects"]["dev"]}' in cmd
+    assert f"--project={_LOG_CFG['projects']['dev']}" in cmd
     assert "--freshness=10m" in cmd
     assert "--limit=20" in cmd
     assert "line one" in result.output

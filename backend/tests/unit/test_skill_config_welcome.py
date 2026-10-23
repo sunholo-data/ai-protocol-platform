@@ -48,7 +48,7 @@ def test_skill_config_round_trip_with_empty_welcome() -> None:
 
 def test_skill_config_round_trip_with_full_welcome() -> None:
     """Full welcome block — intro_message + 5 example_documents + bucket_browser.
-    This matches what the one-ppa-expert skill ships with."""
+    This matches what the demo-ppa-expert skill ships with."""
     welcome = WelcomeConfig(
         intro_message="PPA, PtX, BESS — what would you like to analyse?",
         example_documents=[
@@ -65,7 +65,7 @@ def test_skill_config_round_trip_with_full_welcome() -> None:
             ),
         ],
         bucket_browser=BucketBrowserConfig(
-            bucket="multivac-acme-energy-bucket",
+            bucket="example-customer-documents",
             root_path="PPAs/longform/",
             label="Contracts library",
             default_open=False,
@@ -89,7 +89,7 @@ def test_skill_config_round_trip_with_full_welcome() -> None:
     assert len(restored.welcome.example_documents) == 2
     assert restored.welcome.example_documents[0].label.startswith("Example PPA")
     assert restored.welcome.bucket_browser is not None
-    assert restored.welcome.bucket_browser.bucket == "multivac-acme-energy-bucket"
+    assert restored.welcome.bucket_browser.bucket == "example-customer-documents"
 
 
 def test_example_document_optional_fields() -> None:

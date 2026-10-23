@@ -20,11 +20,16 @@ _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _TRIM_HYPHENS = re.compile(r"^-+|-+$")
 
 
+_FALLBACK = "untitled-skill"
+
+
 def slugify(name: str) -> str:
     """Convert a free-form name to a URL-safe kebab-case slug.
 
-    Falls back to ``"skill"`` if the name contains nothing slugifiable
-    (e.g. only emoji or punctuation).
+    Falls back to ``"untitled-skill"`` if the name contains nothing slugifiable
+    (e.g. only emoji or punctuation, or a single character). NOT ``"skill"``:
+    that is in ``RESERVED_SLUGS``, so the model rejected the fallback itself and
+    every such create failed.
     """
     folded = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
     lowered = folded.lower()
@@ -33,13 +38,13 @@ def slugify(name: str) -> str:
     if len(trimmed) > _MAX_LEN:
         trimmed = _TRIM_HYPHENS.sub("", trimmed[:_MAX_LEN])
     # Reserved-word suffix runs before the short-input fallback so that empty /
-    # punctuation-only input falls back to a plain "skill", not "skill-skill".
+    # punctuation-only input falls back to "untitled-skill", not "skill-skill".
     if trimmed in RESERVED_SLUGS:
         trimmed = f"{trimmed}-skill"
     if len(trimmed) < _MIN_LEN:
-        return "skill"
+        return _FALLBACK
     if not _SLUG_PATTERN.match(trimmed):
-        return "skill"
+        return _FALLBACK
     return trimmed
 
 

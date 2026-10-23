@@ -21,11 +21,11 @@ const SESSIONS = {
   sessions: [
     {
       session_id: "sess-1",
-      skill_id: "one-ppa-expert",
+      skill_id: "demo-ppa-expert",
       skill_label: "Contract Expert",
       owner_uid: "u1",
-      owner_email: "dv@acmeenergy.com",
-      owner_name: "Dana Vega",
+      owner_email: "dv@energy.example",
+      owner_name: "a tester Vega",
       title: "DK1 electricity prices",
       turn_count: 2,
       document_count: 2,
@@ -51,11 +51,11 @@ const SESSIONS = {
     },
   ],
   owners: [
-    { uid: "u1", email: "dv@acmeenergy.com", name: "Dana Vega", sessions: 5, last_active: "2026-08-09" },
+    { uid: "u1", email: "dv@energy.example", name: "a tester Vega", sessions: 5, last_active: "2026-08-09" },
     { uid: "u2", email: "owner@yourcompany.com", name: "Mark", sessions: 3, last_active: "2026-08-08" },
   ],
   skills: [
-    { id: "one-ppa-expert", label: "Contract Expert", sessions: 6 },
+    { id: "demo-ppa-expert", label: "Contract Expert", sessions: 6 },
     { id: "web-researcher", label: "Web Researcher", sessions: 2 },
   ],
   hidden_empty: 214,
@@ -63,11 +63,11 @@ const SESSIONS = {
 
 const TRACE = {
   session_id: "sess-1",
-  skill_id: "one-ppa-expert",
+  skill_id: "demo-ppa-expert",
   skill_label: "Contract Expert",
   owner_uid: "u1",
-  owner_email: "dv@acmeenergy.com",
-  owner_name: "Dana Vega",
+  owner_email: "dv@energy.example",
+  owner_name: "a tester Vega",
   title: "DK1 electricity prices",
   turn_count: 2,
   first_message_at: "2026-08-09T12:38:00+00:00",
@@ -118,7 +118,7 @@ describe("AnalyticsPage", () => {
     mockRoutes();
     render(<AnalyticsPage />);
     await waitFor(() => expect(screen.getByText("DK1 electricity prices")).toBeTruthy());
-    expect(screen.getAllByText(/Dana Vega/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/a tester Vega/).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Contract Expert").length).toBeGreaterThan(0);
     expect(screen.getByText(/2 docs/)).toBeTruthy();
     expect(screen.getByText(/transcript lost/i)).toBeTruthy();
@@ -135,7 +135,7 @@ describe("AnalyticsPage", () => {
     render(<AnalyticsPage />);
     await waitFor(() => expect(screen.getByText("DK1 electricity prices")).toBeTruthy());
     const ownerSelect = screen.getByLabelText("Filter by user") as HTMLSelectElement;
-    expect(within(ownerSelect).getByText("Dana Vega (5)")).toBeTruthy();
+    expect(within(ownerSelect).getByText("a tester Vega (5)")).toBeTruthy();
     fireEvent.change(ownerSelect, { target: { value: "u1" } });
     await waitFor(() => {
       const calls = vi.mocked(fetchWithAuth).mock.calls.map((c) => String(c[0]));

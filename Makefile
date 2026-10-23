@@ -1,4 +1,4 @@
-.PHONY: promote sweep-test-logs dev dev-restart dev-local proxy-check logs help cli-install cli-reinstall cli-uninstall cli-doctor cli-selftest-mock cli-selftest-live cli-selftest verify-a2a setup-gemini-enterprise smoke-long-stream handoff-e2e elicitation-e2e model-fallback-e2e adk-conformance fetch-ailang-wasm gate-obligation-artefact toolbox-install template-parity template-triage link-check materialize-config upstream-merge check-routing
+.PHONY: guide-bundle guide-check guide-shots guide-verify publish-check verify-house-style promote sweep-test-logs dev dev-restart dev-local proxy-check logs help cli-install cli-reinstall cli-uninstall cli-doctor cli-selftest-mock cli-selftest-live cli-selftest verify-a2a setup-gemini-enterprise smoke-long-stream handoff-e2e elicitation-e2e model-fallback-e2e adk-conformance fetch-ailang-wasm gate-obligation-artefact toolbox-install template-parity template-triage link-check materialize-config upstream-merge check-routing port-up pwa-icons
 
 # ── AILANG WASM deontic engine (ppa-obligation-analysis artefact, 7.6) ──────
 # Runtime is pinned in ONE place. Bump AILANG_VERSION in a reviewed one-liner
@@ -136,6 +136,15 @@ promote:
 handoff-e2e:
 	@./scripts/handoff-e2e.sh $(or $(ENV),dev)
 
+# Does a REVISION keep the tenant house style? Generation applying a template is
+# the easy half; this asserts the DEFAULT survives an edit, which is where it
+# broke — editing one passage of an on-brand document silently returned it to
+# Word's defaults, with no way back. Asserts on stored provenance rather than the
+# HTTP response, because the response cannot tell the two apart.
+# Set AIPLATFORM_TEST_EMAIL to an identity on your own domain. ENV=dev|test|prod.
+verify-house-style:
+	@./scripts/verify-house-style.sh $(or $(ENV),dev)
+
 # ADK-CONTRACT-CONFORMANCE (v6.17.0): the hermetic "real ADK flow" guards that
 # catch custom<->ADK boundary regressions (the class jsdom/isolated tests miss).
 # Root passthrough to the backend target. This is the gate for a `google-adk`
@@ -193,6 +202,12 @@ sweep-test-logs:
 # upstream); rewrites are not (same path, different bytes = a permanent merge
 # conflict on every sync). Reaching 0 is the go/no-go gate for making the
 # template upstream. See docs/design/template/template-repo-topology.md
+# platform-source: what the public template would contain, and whether it is
+# sound without the private tier (**/private/**, deploy/**). No-op elsewhere.
+publish-check:
+	@if [ -f private/scripts/publish_public.py ]; then python3 private/scripts/publish_public.py check; \
+	else echo "no private tier in this repo"; fi
+
 template-parity:
 	@./scripts/template-parity.sh
 
@@ -208,6 +223,24 @@ template-triage:
 # is exactly that bug.
 link-check:
 	@./scripts/link-check.py
+
+# User guide (docs/user-guide + fork overlays) — see docs/user-guide/README.md.
+guide-bundle:
+	@node scripts/user-guide/bundle.mjs
+
+guide-check:
+	@node --test scripts/user-guide/*.test.mjs
+	@node scripts/user-guide/check.mjs
+
+# Regenerate screenshots against the local app with synthetic data: PAGE=folders
+guide-shots:
+	@PAGE="$(PAGE)" ./scripts/user-guide/shots.sh
+
+# Prove the deployed guide works (pages, KB, skill, guards): ENV=dev [DOOR=<front-door slug>] [RUNS=3]
+# Needs the CLI's usual credentials (AIPLATFORM_ID_TOKEN for an identity that can
+# see the guide skill); a fork usually wraps this with its own token minting.
+guide-verify:
+	@cd cli && uv run aiplatform --env $(or $(ENV),dev) guide verify $(if $(DOOR),--door $(DOOR),) --runs $(or $(RUNS),1)
 
 # Create the local real-valued config files from their tracked .example
 # templates (infrastructure/mcp-toolbox/tools.yaml, docs/ops/deployed-urls.md).
@@ -229,6 +262,18 @@ upstream-merge:
 check-routing:
 	@./scripts/check-upstream-routing.sh
 
+# The other half of the loop: upstream-merge brings changes DOWN, this sends the
+# platform ones UP. Per-path, not cherry-pick — a real commit routinely straddles
+# both tiers, and cherry-picking one drags customer content upstream. Dry run by
+# default; GO=1 pushes a branch and opens the PR. Refuses to push if the upstream
+# suite fails without this deployment's customer content present.
+port-up:
+	@./scripts/port-up.sh $(RANGE) $(if $(GO),GO=1,)
+
+## Regenerate home-screen/PWA icons from an SVG mark (SRC=…svg BG='#rrggbb')
+pwa-icons:
+	cd frontend && node scripts/generate-pwa-icons.mjs $(if $(SRC),$(abspath $(SRC))) $(BG)
+
 help:
 	@echo "make dev                — start backend (1956) + frontend (3456) — cloud mode (real GCP/Vertex)"
 	@echo "make template-parity    — TEMPLATE-INVERT: files the sanitizer REWRITES (goal: 0)"
@@ -237,6 +282,7 @@ help:
 	@echo "make materialize-config — create local tools.yaml / deployed-urls.md from .example"
 	@echo "make upstream-merge     — pull template changes down from platform-source (GO=1 to commit)"
 	@echo "make check-routing      — advisory: does this change belong upstream?"
+	@echo "make pwa-icons          — regenerate home-screen icons (SRC=mark.svg BG=#rrggbb)"
 	@echo "make dev-local          — start backend + frontend in LOCAL_MODE (no GCP creds, in-memory Firestore)"
 	@echo "make logs               — stream backend logs (OTEL noise filtered out)"
 	@echo "make proxy-check        — smoke-test the proxy bridge (CI helper)"
@@ -259,3 +305,8 @@ help:
 	@echo "make verify-a2a         — A2A spec-compliance probe (G43); set AP_URL=https://… for deployed"
 	@echo "make setup-gemini-enterprise — bootstrap a fresh GCP project for hosting a Gemini Enterprise app"
 	@echo "                                (PROJECT_ID=… ORG_ID=… BILLING_ACCOUNT=… [AP_URL=…])"
+
+# Runtime lockfile audits; AUDIT_INCLUDE_DEV=1 broadens the npm inventory.
+.PHONY: security-check
+security-check:
+	@scripts/security-check.sh

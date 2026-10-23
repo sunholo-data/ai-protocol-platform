@@ -16,10 +16,13 @@
 export function AccessRestrictedScreen({
   email,
   message,
+  unverified = false,
   onSignOut,
 }: {
   email: string | null;
   message?: string | null;
+  /** the email is right but unproven, not the wrong domain. */
+  unverified?: boolean;
   onSignOut: () => Promise<void> | void;
 }) {
   return (
@@ -29,7 +32,9 @@ export function AccessRestrictedScreen({
           Access restricted
         </p>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
-          This workspace is limited to your organization&apos;s accounts.
+          {unverified
+            ? "This account's email address isn't verified."
+            : "This workspace is limited to your organization's accounts."}
         </h1>
         <p className="text-sm text-muted-foreground">
           {message?.trim()

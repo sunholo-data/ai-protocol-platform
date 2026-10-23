@@ -36,7 +36,7 @@ export const CITATION_SCHEME =
 export const TRANSPORT_FIELD = `__${process.env.NEXT_PUBLIC_APP_SLUG || "platform"}Transport`;
 
 /**
- * Per-deployment branding (v6.4.0 ONE-DEMO M1).
+ * Per-deployment branding (v6.4.0 TENANT-DEMO M1).
  *
  * Every field reads NEXT_PUBLIC_BRAND_* from the build environment with the
  * Sunholo strings/paths as fallbacks. The public template at
@@ -63,6 +63,17 @@ export const BRANDING = {
     process.env.NEXT_PUBLIC_BRAND_DESCRIPTION ||
     "Open-source AI protocol platform — Skills + AG-UI + A2UI + MCP Apps + A2A on Google ADK",
 
+  /** Optional fork theme stylesheet (a path under /public), linked after the
+   * bundled CSS. Lets a fork restyle the design tokens in globals.css (colours,
+   * radius, font) by ADDING a file rather than editing this template — empty
+   * means the template's own tokens. See public/brand/README.md. */
+  themeStylesheet: process.env.NEXT_PUBLIC_BRAND_THEME_CSS || "",
+
+  /** Browser/OS chrome colour — the status bar and task switcher of the
+   * installed (home-screen) app, and the manifest's splash background. Should
+   * match the page background of the theme above. */
+  themeColor: process.env.NEXT_PUBLIC_BRAND_THEME_COLOR || "#ffffff",
+
   /** Public-facing logo paths. Swap the files in /public/images/logo/ to
    * rebrand without touching this object — or set NEXT_PUBLIC_BRAND_LOGO_*
    * to point at fork-specific files. */
@@ -85,11 +96,11 @@ export const BRANDING = {
   },
 
   /**
-   * Landing-page demo copy + CTA targets (v6.4.0 ONE-DEMO M3.5).
+   * Landing-page demo copy + CTA targets (v6.4.0 TENANT-DEMO M3.5).
    *
    * Two CTAs are rendered on the Hero — both navigate to chat skills by
    * default. Upstream defaults are Sunholo-neutral so the public template
-   * keeps a working demo without ONE-specific content. Each fork overrides
+   * keeps a working demo without deployment-specific content. Each fork overrides
    * via NEXT_PUBLIC_BRAND_DEMO_* env vars in Cloud Build.
    *
    * `pillars` is intentionally a deploy-time constant (not env-driven) —

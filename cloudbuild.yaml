@@ -5,11 +5,74 @@
 # Substitutions are managed by Terraform (see infrastructure repo)
 
 substitutions:
+  _VERTEX_AI_SEARCH_DATASTORE_ID: ''
+  _VERTEX_AI_SEARCH_PROJECT: ''
+  _VERTEX_AI_SEARCH_LOCATION: 'eu'
+  _A2A_AGENT_DOCUMENTS_BUCKET: ''
+  # v6.39.0: off unless the env sets it. Real values live in the
+  # trigger substitutions, per docs/ops/env-config-parity.md.
+  _BROWSER_SERVICE_ENABLED: 'false'
+  _BROWSER_SERVICE_URL: ''
+  # v6.40.0 RESIDENT-P1 M11: the resident agent's base URL. Empty by default,
+  # so `ask_assistant` refuses visibly ("no resident assistant is configured")
+  # rather than half-working. Real value belongs in the TRIGGER substitutions
+  # alongside _BROWSER_SERVICE_URL, per docs/ops/env-config-parity.md — it is
+  # Terraform-managed and not set from here.
+  _RESIDENT_AGENT_URL: ''
+  # v6.40.0 M4: where to ask for a stopped resident agent to be started.
+  # A stopped instance does NOT wake on a request — its URL 404s until
+  # something calls :start — so without this an idle-stopped agent is simply
+  # unreachable, and the user is told that plainly rather than shown a
+  # transport error. The coordinator hosts it because the AILANG estate is
+  # where the authority to operate those instances belongs (design P2).
+  _RESIDENT_START_ENDPOINT: ''
+  # v6.40.0 M12-M14: per-user resident instances. OFF by default, and an
+  # EXPLICIT mode rather than "resolve a record if one happens to exist" — a
+  # silent fallback from per-user to the shared instance is precisely how one
+  # user's question ends up answered on another user's box (design D11).
+  # Terraform-managed alongside the two above. Turning it ON means every
+  # eligible user needs a `resident_agents` record: without one they are told
+  # plainly that they have no assistant, which is the correct fail-closed
+  # answer and NOT a fallback to the shared instance.
+  _RESIDENT_AGENT_PER_USER: 'false'
+  # v6.40.0 M7: show the asking user the story of their resident run —
+  # the commands it ran and the files it touched — in the workbench,
+  # instead of one line of prose after up to 180 seconds of nothing.
+  # OFF by default and dev first: it puts peer-controlled text on a
+  # surface, and the whole feature degrades to today's behaviour when
+  # unset, so there is no reason to switch it on everywhere at once.
+  _RESIDENT_SESSION_STORY_ENABLED: 'false'
+  # v6.40.0 M5a: where the resident should POST a task update when it finishes,
+  # so an answer that outlives its chat turn still reaches the user. This is
+  # the deployment's OWN public origin — the FRONTEND service, because the
+  # standalone backend is deployed --no-allow-unauthenticated and the instance
+  # holds no credential for it, while the frontend is public and its
+  # `/api/proxy/**` catch-all forwards Authorization untouched to the sidecar.
+  # Terraform-managed alongside the three above.
+  #
+  # INCLUDE THE `/api/proxy` SUFFIX when this is a frontend origin. Verified
+  # live 2026-09-04: POST <fe>/api/proxy/internal/tasks/recompact returns the
+  # backend's JSON 403, while POST <fe>/internal/tasks/recompact returns a Next
+  # 404 HTML page. Without it every webhook 404s and says so only in the
+  # instance's log, where nobody is looking — the /start vs /instances/start
+  # shape again (HANDOVER §3).
+  #
+  # EMPTY IS A WORKING STATE, not a broken one: no webhook is registered, and a
+  # slow question is reported as slow instead of promising a delivery nothing
+  # can make. That is what lets this code reach an env before its config does.
+  _RESIDENT_PUSH_BASE_URL: ''
   # TEMPLATE-INVERT M4b: neutral default + a hard guard below. Deploying with
   # the wrong service name does not error — it creates a SECOND Cloud Run
   # service while the real one keeps serving, which is a silent split-brain.
   # The guard turns that into a failed build (CLAUDE.md #8: never silent).
-  _SERVICE_NAME: platform-frontend
+  # `terraform_managed`, not a plausible service name: the deploy guard
+  # below refuses this exact value, and TEST's real service IS called
+  # `platform-frontend`. Guarding on a real name meant test could never
+  # deploy — it only worked on dev, whose services are `platform-v6-*`.
+  _SERVICE_NAME: terraform_managed
+  # Opt-in for the first deploy of a NEW env; otherwise a missing service means
+  # the substitution is wrong.
+  _ALLOW_NEW_SERVICE: "false"
   # Prefix for Terraform-created per-deploy resources: the logs bucket, the
   # compaction queue and the tasks SA all share it. One substitution rather
   # than three literals, so a fork renames its resources in one place.
@@ -55,6 +118,11 @@ substitutions:
   # backend/cloudbuild.yaml for the same block on the standalone service.
   _COMPACTION_SECOND_PASS: ""
   _COMPACTION_TASKS_TARGET_URL: ""
+  # Memory Bank write path (backend/adk/memory_autosave.py). Recall tools are on
+  # for every skill by default, so writing is on by default too: with recall on
+  # and writing off, every turn searched a bank nothing was ever saved to
+  # (found 2026-10-20 — no env had it set). "" or "0" turns it off per trigger.
+  _MEMORY_AUTOSAVE: "1"
   # MODEL-RELIABILITY M1: gates GET /api/debug/slow-stream (auth-required
   # transport probe used by scripts/smoke-long-stream.sh). Default true is
   # safe while only the dev trigger exists — set "false" per-trigger when
@@ -104,12 +172,23 @@ substitutions:
   # bakes NEXT_PUBLIC_ENABLE_SKILL_STUDIO into the frontend build. Behind Firebase
   # auth; has known gaps (see docs/design/v6.9.0/skill-administration.md).
   _ENABLE_SKILL_STUDIO: 'true'
+  # Experimental browser diagnostics and visual evidence require explicit opt-in.
+  _WEBMCP_ENABLED: 'false'
+  _VISUAL_EVIDENCE_ENABLED: 'false'
+  # All gates must be explicitly populated for synthetic visual inspection.
+  _VISUAL_EVIDENCE_ALLOWED_UIDS: ''
+  _VISUAL_EVIDENCE_SYNTHETIC_SOURCE_DIGESTS: ''
+  _VISUAL_EVIDENCE_SYNTHETIC_CAPTURE_PAIRS: ''
+  _VISUAL_EVIDENCE_MODEL: ''
+  _VISUAL_EVIDENCE_APPROVED_MODEL_REGIONS: ''
   # Feature flag: read-aloud (TTS) button on assistant messages. Was set in
   # frontend/.env.local ONLY, so it worked locally and was compiled OUT of every
   # deployed build — the backend served a valid voice config and /api/voice/config
   # reported enabled:true, but no button ever rendered (2026-08-05). Declared here
   # rather than left to the FIREBASE_ENV secret so it cannot drift per env.
   _ENABLE_READ_ALOUD: 'true'
+  # FRONTEND-OBS M3: 'off' degrades the client logger to console-only.
+  _CLIENT_LOGGING: 'on'
   # G17 (template-fork-ergonomics.md): include the 7-skill workshop demo
   # bundle (code-assistant, data-extractor, document-analyst,
   # general-assistant, web-researcher, workspace-demo, workspace-demo-interactive)?
@@ -213,9 +292,21 @@ steps:
   # splits on the first `=` only and treats the rest as literal — safe for
   # arbitrary values including spaces, `&`, `=`, quotes, etc.
   # See get-firebase-config.sh for the matching producer change.
+  # --- User guide → both build contexts ---
+  # frontend/ and backend/ each build from their own folder, so neither can read
+  # docs/user-guide. Merge platform pages + any docs/customers/*/user-guide
+  # overlay into frontend/content, frontend/public/help/img and backend/bundled
+  # (gitignored build outputs). A bad page (missing image, unknown anchor) fails
+  # the build here rather than shipping a broken /help.
+  - name: 'node:20-slim'
+    id: bundle-user-guide
+    waitFor: ['ci-gate-backend', 'ci-gate-frontend']
+    entrypoint: 'node'
+    args: ['scripts/user-guide/bundle.mjs']
+
   - name: 'gcr.io/cloud-builders/docker'
     id: build-frontend
-    waitFor: ['get-firebase-config']
+    waitFor: ['get-firebase-config', 'bundle-user-guide']
     entrypoint: 'bash'
     args:
       - '-c'
@@ -228,7 +319,11 @@ steps:
         docker build $$ARGS \
           --build-arg NEXT_PUBLIC_MCP_SANDBOX_URL=${_MCP_SANDBOX_URL} \
           --build-arg NEXT_PUBLIC_ENABLE_SKILL_STUDIO=${_ENABLE_SKILL_STUDIO} \
+          --build-arg NEXT_PUBLIC_WORKSPACE_DEFAULT_RATIOS \
+          --build-arg NEXT_PUBLIC_WEBMCP_ENABLED=${_WEBMCP_ENABLED} \
+          --build-arg NEXT_PUBLIC_VISUAL_EVIDENCE_ENABLED=${_VISUAL_EVIDENCE_ENABLED} \
           --build-arg NEXT_PUBLIC_ENABLE_READ_ALOUD=${_ENABLE_READ_ALOUD} \
+          --build-arg NEXT_PUBLIC_CLIENT_LOGGING=${_CLIENT_LOGGING} \
           -t ${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/ui:${SHORT_SHA} \
           -f frontend/Dockerfile \
           frontend/
@@ -236,7 +331,7 @@ steps:
   # --- Build backend ---
   - name: 'gcr.io/cloud-builders/docker'
     id: build-backend
-    waitFor: ['ci-gate-backend', 'ci-gate-frontend']
+    waitFor: ['ci-gate-backend', 'ci-gate-frontend', 'bundle-user-guide']
     dir: ${_BUILD_FOLDER}/backend
     args:
       - 'build'
@@ -246,6 +341,14 @@ steps:
       - 'GOOGLE_CLOUD_PROJECT=${_PROJECT_ID}'
       - '--build-arg'
       - 'GOOGLE_CLOUD_LOCATION=${_REGION}'
+      # The image carries its own version (build-once: promote copies the image,
+      # so a deploy-time env var would be wrong by construction). Error Reporting
+      # groups browser errors by serviceContext.version; without this every env
+      # reported "dev" and releases could not be told apart. SHORT_SHA only: a
+      # build step may not reference TAG_NAME (empty on a branch build — see
+      # test_cloudbuild_image_identity.py), and a tag resolves to its commit.
+      - '--build-arg'
+      - 'COMMIT_SHA=${SHORT_SHA}'
       - '-t'
       - '${_ARTIFACT_REGISTRY_REPO_URL_CLIENT}/${_SERVICE_NAME}/backend:${SHORT_SHA}'
       - '.'
@@ -401,7 +504,7 @@ steps:
   #     and the image is distroless (no shell for an exec probe). Same form
   #     the backend sidecar uses on :1956.
   #   * No secrets, no auth: it runs as this service's runtime SA,
-  #     which already holds bigquery.dataViewer on ONE's project. tools.yaml
+  #     which already holds bigquery.dataViewer on the tenant's project. tools.yaml
   #     is baked into the image (git-tracked, PR-reviewed) — no mount.
   #   * TOOLBOX_BQ_PROJECT — BigQuery BILLING/job project, per env.
   #     Full rationale in the YAML comment above this step.
@@ -457,188 +560,114 @@ steps:
   # step arg at 10,000 chars and that script is already at ~9.6K. Adding a
   # dozen comment lines there failed the build at VALIDATION time
   # ("invalid .steps field: build step 10 arg 1 too long"), before any step ran.
+  #
+  # ENV_TIER (relocated out of the inline script 2026-09-01 to buy
+  # headroom under Cloud Build's 10,000-char step-arg cap; the rationale
+  # is unchanged):
+  #
+  # v6.15.0: ai_search cites gs:// sources in the PROD-indexed llmops bucket.
+  # Remap them to THIS env's llmops bucket (docs duplicated at identical
+  # paths) so open/preview reads a same-project bucket. dev/test remap to
+  # their own bucket; prod reads the real prod bucket directly → no override.
+  # Keyed on _PROJECT_ID, NOT BRANCH_NAME: BRANCH_NAME is EMPTY on a tag
+  # build, so every one of these case statements fell through to `*)` and
+  # silently deployed an env with the wrong settings. _PROJECT_ID is
+  # terraform-managed per trigger and correct for branch, tag and manual
+  # runs alike. (v6.20.0 — caught when the first tag build ran.)
+  # TEMPLATE-INVERT M4b: the env tier is derived from the project id's
+  # SUFFIX, not from a list of project names. Same behaviour, but the
+  # pipeline no longer contains this deployment's identity — a fork's
+  # `<anything>-dev` resolves exactly the same way ours does, with no new
+  # trigger substitution to wire in two places (traps.md #23).
+  #
+  # The codebase already derives env this way (`_env_from_project`), so
+  # this makes the pipeline agree with the app instead of restating it.
+  #
+  # A2A_INVOCATION_REQUIRE_AUTH (2026-09-01) — the inline `case` below keys this
+  # on ENV_TIER so prod gets `true`. It was hardcoded `false` for EVERY env,
+  # while the code default is `true` and backend/protocols/a2a_invocation.py is
+  # explicit that "Production should always leave it true"; `false` exists only
+  # so a dev env can integrate with the Gemini Enterprise auth modes that inject
+  # service identity differently (docs/design/template/
+  # template-a2a-invocation-bridge.md says "set false in dev"). The effect was
+  # that an anonymous POST /a2a reached the JSON-RPC dispatcher on a public
+  # production URL — verified against prod, which answered -32601 "Method not
+  # found" instead of the 401 JSON-RPC envelope. Caught during the test -> prod
+  # readiness audit, before assistant.example.com was repointed at v6.
+  #
+  # ALWAYS-REQUIRED SIDECAR SECRETS (ADK agent engine) — the `SECRETS=` line
+  # below. Prose lives out here because a comment INSIDE the `- |` script
+  # counts toward Cloud Build's 10,000-character per-arg limit, which fails
+  # validation before any step runs (guarded by
+  # backend/tests/unit/test_cloudbuild_ci_gate.py).
+  #
+  # MAPS_GROUNDING_API_KEY is consumed indirectly: the
+  # mcp_servers/maps-grounding-lite registry row carries the header value
+  # "${MAPS_GROUNDING_API_KEY}" and tools/mcp/registry.py resolves it from the
+  # environment. Written with a single $ here because a YAML comment never
+  # reaches the build config; INSIDE the script it must be escaped `$$`, as the
+  # dollar-brace form is parsed as a substitution key even in a shell comment
+  # and an unescaped one fails the whole config with "not a valid built-in
+  # substitution".
+  #
+  # Unconditional (no _ENABLE_ flag) because every env has the secret: dev/test
+  # hold real keys, prod holds the "dummy_value" placeholder, so the mount
+  # never fails on a missing secret.
+  #
+  # The mount is on the SIDECAR, and that is the whole point. The maps-assistant
+  # skill 500'd on dev (2026-08-12) with the secret mounted only in
+  # backend/cloudbuild.yaml — that file deploys the standalone IAM-protected
+  # backend, but chat is served by THIS multi-container frontend's backend
+  # sidecar. Both need it; a secret added to one is not added to the other.
+  # The spec itself lives in scripts/deploy-run-service.sh — ONE definition,
+  # called by this pipeline and by cloudbuild.promote.yaml. Read that file's
+  # header for why; the short version is that promotion used to be images-only
+  # to avoid duplicating this surface, which left prod's spec with no deploy
+  # route at all. Every substitution below is forwarded under its own name.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: deploy
     entrypoint: bash
     waitFor: ['push-frontend', 'push-backend', 'push-toolbox']
-    args:
-      - '-c'
-      - |
-        set -euo pipefail
-        # Deploy by DIGEST, never by the branch tag (v6.20.0, AIPLA #47): a
-        # concurrent build can move that tag between our push and this deploy,
-        # and a mutable tag cannot be rolled back to. The push steps resolved
-        # these and failed the build if any was empty.
-        UI_IMAGE=$$(cat /workspace/image_ui)
-        BACKEND_IMAGE=$$(cat /workspace/image_backend)
-        TOOLBOX_IMAGE=$$(cat /workspace/image_toolbox)
-        echo "Deploying ui=$${UI_IMAGE} backend=$${BACKEND_IMAGE} toolbox=$${TOOLBOX_IMAGE}"
-        # Always-required sidecar secrets (ADK agent engine).
-        # MAPS_GROUNDING_API_KEY: consumed indirectly — the
-        # mcp_servers/maps-grounding-lite registry row carries the header value
-        # "$${MAPS_GROUNDING_API_KEY}" and tools/mcp/registry.py resolves it from
-        # the environment. (The $$ is a Cloud Build escape, not a typo: the
-        # dollar-brace form is parsed as a substitution key even inside a shell
-        # COMMENT, and an unescaped one fails the whole build config with
-        # "not a valid built-in substitution" before any step runs.)
-        # Unconditional (no _ENABLE_ flag) because every env
-        # has the secret: dev/test hold real keys, prod holds the "dummy_value"
-        # placeholder, so the mount never fails on a missing secret.
-        #
-        # This mount is on the SIDECAR, and that is the whole point. The
-        # maps-assistant skill 500'd on dev (2026-08-12) with the secret mounted
-        # only in backend/cloudbuild.yaml — that file deploys the STANDALONE
-        # IAM-protected standalone backend, but chat is served by this
-        # multi-container frontend's backend sidecar. Both need it; a secret
-        # added to one is not added to the other.
-        SECRETS="AGENT_ENGINE_ID=AGENT_ENGINE_ID:latest,DOCPARSE_API_KEY=DOCPARSE_API_KEY:latest,MAPS_GROUNDING_API_KEY=MAPS_GROUNDING_API_KEY:latest"
-        # AI model key — almost always needed; set _ENABLE_ANTHROPIC=false to skip
-        if [ "${_ENABLE_ANTHROPIC}" = "true" ]; then
-          SECRETS="$${SECRETS},ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest"
-        fi
-        # OpenAI (GPT-tier skills). Off by default — the OPENAI_API_KEY +
-        # OPENAI_API_BASE secrets must exist in this env before enabling, else
-        # the deploy fails mounting a missing secret. Without it, GPT-pinned
-        # skills fall back to gemini (models.yaml ladder).
-        if [ "${_ENABLE_OPENAI}" = "true" ]; then
-          SECRETS="$${SECRETS},OPENAI_API_KEY=OPENAI_API_KEY:latest,OPENAI_API_BASE=OPENAI_API_BASE:latest"
-        fi
-        # Channel secrets — only wired when the channel is enabled
-        if [ "${_ENABLE_TELEGRAM}" = "true" ]; then
-          SECRETS="$${SECRETS},TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest"
-        fi
-        if [ "${_ENABLE_WHATSAPP}" = "true" ]; then
-          SECRETS="$${SECRETS},TWILIO_ACCOUNT_SID=TWILIO_ACCOUNT_SID:latest,TWILIO_AUTH_TOKEN=TWILIO_AUTH_TOKEN:latest"
-        fi
-        if [ "${_ENABLE_EMAIL}" = "true" ]; then
-          SECRETS="$${SECRETS},MAILGUN_API_KEY=MAILGUN_API_KEY:latest,MAILGUN_WEBHOOK_SECRET=MAILGUN_WEBHOOK_SECRET:latest"
-        fi
-        # v6.15.0: ai_search cites gs:// sources in the PROD-indexed llmops bucket.
-        # Remap them to THIS env's llmops bucket (docs duplicated at identical
-        # paths) so open/preview reads a same-project bucket. dev/test remap to
-        # their own bucket; prod reads the real prod bucket directly → no override.
-        # Keyed on _PROJECT_ID, NOT BRANCH_NAME: BRANCH_NAME is EMPTY on a tag
-        # build, so every one of these case statements fell through to `*)` and
-        # silently deployed an env with the wrong settings. _PROJECT_ID is
-        # terraform-managed per trigger and correct for branch, tag and manual
-        # runs alike. (v6.20.0 — caught when the first tag build ran.)
-        # TEMPLATE-INVERT M4b: the env tier is derived from the project id's
-        # SUFFIX, not from a list of project names. Same behaviour, but the
-        # pipeline no longer contains this deployment's identity — a fork's
-        # `<anything>-dev` resolves exactly the same way ours does, with no new
-        # trigger substitution to wire in two places (traps.md #23).
-        #
-        # The codebase already derives env this way (`_env_from_project`), so
-        # this makes the pipeline agree with the app instead of restating it.
-        case "${_PROJECT_ID}" in
-          *-dev)        ENV_TIER=dev ;;
-          *-test)       ENV_TIER=test ;;
-          *-production) ENV_TIER=prod ;;
-          *)            ENV_TIER=unknown ;;
-        esac
-        # Refuse to deploy under the template's placeholder name. Without this
-        # a missing _SERVICE_NAME substitution silently stands up a duplicate
-        # service beside the live one instead of updating it.
-        if [ "${_SERVICE_NAME}" = "platform-frontend" ]; then
-          echo "ERROR: _SERVICE_NAME is still the template placeholder."
-          echo "Set it in this environment's Cloud Build trigger substitutions."
-          echo "See traps.md #23 — that is TWO triggers, branch and tag-release."
-          exit 1
-        fi
-        # Only pass PUBLIC_BASE_URL when this env supplies one — an empty
-        # --set-env-vars=PUBLIC_BASE_URL= would blank it rather than omit it.
-        if [ -n "${_PUBLIC_BASE_URL}" ]; then
-          PUBLIC_BASE_URL_FLAG="--set-env-vars=PUBLIC_BASE_URL=${_PUBLIC_BASE_URL}"
-        else
-          PUBLIC_BASE_URL_FLAG=""
-        fi
-        case "$${ENV_TIER}" in
-          dev|test) AI_SEARCH_SRC_BUCKET=${_PROJECT_ID}-$${ENV_TIER}-llmops-bucket ;;
-          *)        AI_SEARCH_SRC_BUCKET="" ;;
-        esac
-        # v6.18.0 Gap B: restrict authentication to the deployment's operator +
-        # mapped-tenant domains. Enabled on dev/test; prod DEFERRED until the
-        # #31-coordinated TENANT_FALLBACK_FAIL_CLOSED flip (needs this
-        # deployment's own upload bucket first). Gap A (bucket authz) is
-        # on-by-default and needs no flag.
-        #
-        # TEMPLATE-INVERT M3: operator domains are DEPLOYMENT IDENTITY and no
-        # longer have a code default — backend/auth/__init__.py defaults to
-        # empty so a fork cannot inherit ours (AIPLA #42). This pipeline is
-        # therefore the sole supplier: without the _AUTH_OPERATOR_DOMAINS
-        # substitution below, dev/test would 403 every operator, because both
-        # set AUTH_REQUIRE_KNOWN_DOMAIN=1.
-        case "$${ENV_TIER}" in
-          dev|test) AUTH_REQUIRE_KNOWN_DOMAIN=1 ;;
-          *)        AUTH_REQUIRE_KNOWN_DOMAIN=0 ;;
-        esac
-        # v6.18.0: deny an unmapped tenant the shared fallback bucket (read AND
-        # write) — closes the shared-bucket exposure alongside Gap-A/B. dev/test
-        # on; prod DEFERRED (frozen). Precondition-free: operators are admins
-        # (read via Gap-A bypass) and don't upload, so their upload-403 is
-        # intended. Coordinated with #31 (write-side UX already shipped).
-        case "$${ENV_TIER}" in
-          dev|test) TENANT_FALLBACK_FAIL_CLOSED=1 ;;
-          *)        TENANT_FALLBACK_FAIL_CLOSED=0 ;;
-        esac
-        gcloud run deploy ${_SERVICE_NAME} \
-          --region=${_REGION} \
-          --project=${_PROJECT_ID} \
-          --platform=managed \
-          --allow-unauthenticated \
-          --max-instances=3 \
-          --session-affinity \
-          --timeout=3600 \
-          --container=main \
-          --image=$${UI_IMAGE} \
-          --port=8080 \
-          --memory=2Gi \
-          --cpu=1 \
-          --set-env-vars=BACKEND_URL=http://127.0.0.1:1956 \
-          --container=sidecar \
-          --image=$${BACKEND_IMAGE} \
-          --memory=4Gi \
-          --cpu=2 \
-          --startup-probe=tcpSocket.port=1956,periodSeconds=5,failureThreshold=24,timeoutSeconds=5 \
-          --set-secrets="$${SECRETS}" \
-          --set-env-vars=TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886 \
-          --set-env-vars=GOOGLE_CLOUD_PROJECT=${_PROJECT_ID} \
-          --set-env-vars=GOOGLE_CLOUD_LOCATION=${_REGION} \
-          --set-env-vars=GOOGLE_GENAI_USE_VERTEXAI=True \
-          --set-env-vars=ADK_ARTIFACT_BUCKET=${_PROJECT_ID}-artifacts \
-          --set-env-vars=LOGS_BUCKET_NAME=${_PROJECT_ID}-${_RESOURCE_PREFIX}-logs \
-          --set-env-vars=GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true \
-          --set-env-vars=OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true \
-          --set-env-vars=OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental \
-          --set-env-vars='^|^ADMIN_SEED_ALLOWED_SAS=${_ADMIN_SEED_ALLOWED_SAS}' \
-          --set-env-vars=PLATFORM_OWNER_EMAIL=${_PLATFORM_OWNER_EMAIL} \
-          --set-env-vars=_INCLUDE_DEMO_SKILLS=${_INCLUDE_DEMO_SKILLS} \
-          --set-env-vars=RAG_DOCUMENTS_ENABLED=true \
-          --set-env-vars=VERTEX_AI_SEARCH_DATASTORE_ID=projects/aitana-ai-search/locations/eu/collections/default_collection/dataStores/aitana3 \
-          --set-env-vars=VERTEX_AI_SEARCH_PROJECT=aitana-ai-search \
-          --set-env-vars=VERTEX_AI_SEARCH_LOCATION=eu \
-          --set-env-vars=AI_SEARCH_SOURCE_BUCKET_OVERRIDE=$${AI_SEARCH_SRC_BUCKET} \
-          --set-env-vars=AUTH_REQUIRE_KNOWN_DOMAIN=$${AUTH_REQUIRE_KNOWN_DOMAIN} \
-          --set-env-vars='^|^AUTH_OPERATOR_DOMAINS=${_AUTH_OPERATOR_DOMAINS}' \
-          --set-env-vars=ENTSOE_PROJECT=${_ENTSOE_PROJECT} \
-          --set-env-vars=TENANT_FALLBACK_FAIL_CLOSED=$${TENANT_FALLBACK_FAIL_CLOSED} \
-          --set-env-vars=SLOW_STREAM_PROBE_ENABLED=${_SLOW_STREAM_PROBE_ENABLED} \
-          --set-env-vars=MODEL_RESIDENCY_POLICY=${_MODEL_RESIDENCY_POLICY} \
-          --set-env-vars=COMPACTION_SECOND_PASS_ENABLED=${_COMPACTION_SECOND_PASS} \
-          --set-env-vars=COMPACTION_TASKS_QUEUE=projects/${_PROJECT_ID}/locations/${_REGION}/queues/${_RESOURCE_PREFIX}-compaction \
-          --set-env-vars=COMPACTION_TASKS_OIDC_SA=${_RESOURCE_PREFIX}-tasks@${_PROJECT_ID}.iam.gserviceaccount.com \
-          --set-env-vars=COMPACTION_TASKS_TARGET_URL=${_COMPACTION_TASKS_TARGET_URL} \
-          --set-env-vars=ENABLE_A2A_INVOCATION=true \
-          --set-env-vars=A2A_INVOCATION_REQUIRE_AUTH=false \
-          $${PUBLIC_BASE_URL_FLAG} \
-          --set-env-vars=ENABLE_A2A_FILE_INPUT=true \
-          --set-env-vars=A2A_AGENT_DOCUMENTS_BUCKET=gs://aitana-public-bucket/demo/ \
-          --container=toolbox \
-          --image=$${TOOLBOX_IMAGE} \
-          --memory=512Mi \
-          --cpu=1 \
-          --set-env-vars=TOOLBOX_BQ_PROJECT=${_PROJECT_ID} \
-          --startup-probe=tcpSocket.port=5000,periodSeconds=5,failureThreshold=24,timeoutSeconds=5 \
-          --args=--config=/app/tools.yaml,--address=0.0.0.0,--port=5000,--disable-reload
+    env:
+      - '_PROJECT_ID=${_PROJECT_ID}'
+      - '_REGION=${_REGION}'
+      - '_SERVICE_NAME=${_SERVICE_NAME}'
+      - '_RESOURCE_PREFIX=${_RESOURCE_PREFIX}'
+      - '_ENABLE_ANTHROPIC=${_ENABLE_ANTHROPIC}'
+      - '_ENABLE_OPENAI=${_ENABLE_OPENAI}'
+      - '_ENABLE_TELEGRAM=${_ENABLE_TELEGRAM}'
+      - '_ENABLE_WHATSAPP=${_ENABLE_WHATSAPP}'
+      - '_ENABLE_EMAIL=${_ENABLE_EMAIL}'
+      - '_ALLOW_NEW_SERVICE=${_ALLOW_NEW_SERVICE}'
+      - '_ADMIN_SEED_ALLOWED_SAS=${_ADMIN_SEED_ALLOWED_SAS}'
+      - '_PLATFORM_OWNER_EMAIL=${_PLATFORM_OWNER_EMAIL}'
+      - '_AUTH_OPERATOR_DOMAINS=${_AUTH_OPERATOR_DOMAINS}'
+      - '_INCLUDE_DEMO_SKILLS=${_INCLUDE_DEMO_SKILLS}'
+      - '_ENTSOE_PROJECT=${_ENTSOE_PROJECT}'
+      - '_VERTEX_AI_SEARCH_DATASTORE_ID=${_VERTEX_AI_SEARCH_DATASTORE_ID}'
+      - '_VERTEX_AI_SEARCH_PROJECT=${_VERTEX_AI_SEARCH_PROJECT}'
+      - '_VERTEX_AI_SEARCH_LOCATION=${_VERTEX_AI_SEARCH_LOCATION}'
+      - '_A2A_AGENT_DOCUMENTS_BUCKET=${_A2A_AGENT_DOCUMENTS_BUCKET}'
+      - '_MODEL_RESIDENCY_POLICY=${_MODEL_RESIDENCY_POLICY}'
+      - '_SLOW_STREAM_PROBE_ENABLED=${_SLOW_STREAM_PROBE_ENABLED}'
+      - '_COMPACTION_SECOND_PASS=${_COMPACTION_SECOND_PASS}'
+      - '_COMPACTION_TASKS_TARGET_URL=${_COMPACTION_TASKS_TARGET_URL}'
+      - '_MEMORY_AUTOSAVE=${_MEMORY_AUTOSAVE}'
+      - '_BROWSER_SERVICE_ENABLED=${_BROWSER_SERVICE_ENABLED}'
+      - '_BROWSER_SERVICE_URL=${_BROWSER_SERVICE_URL}'
+      - '_VISUAL_EVIDENCE_ENABLED=${_VISUAL_EVIDENCE_ENABLED}'
+      - '_VISUAL_EVIDENCE_ALLOWED_UIDS=${_VISUAL_EVIDENCE_ALLOWED_UIDS}'
+      - '_VISUAL_EVIDENCE_SYNTHETIC_SOURCE_DIGESTS=${_VISUAL_EVIDENCE_SYNTHETIC_SOURCE_DIGESTS}'
+      - '_VISUAL_EVIDENCE_SYNTHETIC_CAPTURE_PAIRS=${_VISUAL_EVIDENCE_SYNTHETIC_CAPTURE_PAIRS}'
+      - '_VISUAL_EVIDENCE_MODEL=${_VISUAL_EVIDENCE_MODEL}'
+      - '_VISUAL_EVIDENCE_APPROVED_MODEL_REGIONS=${_VISUAL_EVIDENCE_APPROVED_MODEL_REGIONS}'
+      - '_RESIDENT_AGENT_URL=${_RESIDENT_AGENT_URL}'
+      - '_RESIDENT_START_ENDPOINT=${_RESIDENT_START_ENDPOINT}'
+      - '_RESIDENT_AGENT_PER_USER=${_RESIDENT_AGENT_PER_USER}'
+      - '_RESIDENT_SESSION_STORY_ENABLED=${_RESIDENT_SESSION_STORY_ENABLED}'
+      - '_RESIDENT_PUSH_BASE_URL=${_RESIDENT_PUSH_BASE_URL}'
+      - '_PUBLIC_BASE_URL=${_PUBLIC_BASE_URL}'
+    args: ['scripts/deploy-run-service.sh']
 
   # --- Post-deploy smoke: fail the build if any critical endpoint is not 200 ---
   # Per CLAUDE.md: no feature lands with manual-only verification. This step
@@ -715,6 +744,19 @@ steps:
         for path in "/api/proxy/api/skills" "/api/proxy/api/auth/whoami"; do
           probe "$${path}" "401" "" || fail=1
         done
+        # A browser write carries an Origin header. It must reach auth (401),
+        # not be refused by the sidecar's origin check (403): after the ADK
+        # 1.39 bump every browser write on test 403'd while GET-only and CLI
+        # checks stayed green (2026-10-20).
+        code=$(curl -sS -o /tmp/body -w '%{http_code}' --max-time 60 -X POST \
+          -H "Origin: $${URL}" -H 'Content-Type: application/json' -d '{}' \
+          "$${URL}/api/proxy/api/folders") || code=000
+        if [ "$${code}" = "401" ]; then
+          echo "OK   POST /api/proxy/api/folders (browser Origin, anon) -> 401"
+        else
+          echo "FAIL POST /api/proxy/api/folders (browser Origin, anon) -> $${code} (expected 401; 403 = origin check) body=$$(head -c 200 /tmp/body)"
+          fail=1
+        fi
         exit $${fail}
 
   # --- Platform-skill seed (via sidecar proxy). Idempotent. Fails build on error.
@@ -743,5 +785,28 @@ steps:
         echo "seed-platform-skills -> $${code} body=$${body}"
         if [ "$${code}" != "200" ]; then
           echo "ERROR: seed step returned $${code} — marketplace will be empty" >&2
+          exit 1
+        fi
+        # MCP REGISTRY GATE. The seed already runs `verify_mcp_registry` and
+        # returns `mcp_missing` — every entry is a skill that will hard-500 at
+        # agent build (G42) the moment a user opens it. Until 2026-09-05 that
+        # was only LOGGED, so a deploy reported success and the first person to
+        # open the skill got an opaque error instead.
+        #
+        # That is exactly how prod shipped without `mcp_servers/browser`: the
+        # row was hand-written on dev and test and never seeded, the check
+        # noticed, wrote an ERROR line nobody reads, and the build went green.
+        # Parse failure must FAIL, not pass quietly. `|| echo ""` here would turn
+        # a broken python3 or a malformed body into a green gate — an assertion
+        # that cannot run reporting success is worse than no assertion, which is
+        # the whole reason this gate exists (see the log-only check it replaced).
+        if ! missing=$(python3 -c "import json;d=json.load(open('/tmp/seed'));print(','.join(d.get('mcp_missing') or []))"); then
+          echo "ERROR: could not read mcp_missing from the seed response — the registry gate did NOT run" >&2
+          exit 1
+        fi
+        if [ -n "$${missing}" ]; then
+          echo "ERROR: mcp_servers registry cannot satisfy declared servers: $${missing}" >&2
+          echo "  Those skills WILL hard-500 at agent build. Seed the row for this env:" >&2
+          echo "    uv run python backend/scripts/seed_mcp_servers.py --env <env> [--browser-url ...]" >&2
           exit 1
         fi

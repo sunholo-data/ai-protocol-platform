@@ -103,9 +103,9 @@ def test_status_reports_digest_per_container():
     # Read from the config under test rather than a literal: this reads the
     # deployment's real config.yaml here and the shipped example upstream, so
     # a hardcoded project id disagrees with one of the two by construction.
-    from aiplatform.commands.deploy import _DEPLOY_CFG
+    from aiplatform.commands.deploy import _project_for
 
-    assert _DEPLOY_CFG["projects"]["test"] in result.output
+    assert _project_for("test") in result.output
 
 
 def test_status_flags_an_unpinned_tag_rather_than_printing_it_as_an_identity():

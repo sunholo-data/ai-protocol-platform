@@ -76,7 +76,7 @@ const ARCH_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 200">
 // ---------------------------------------------------------------------------
 
 const PDF_URL =
-  "https://storage.googleapis.com/aitana-public-bucket/press-release/AitanaIncorporation.pdf";
+  "https://storage.googleapis.com/example-public-documents/press-release/AitanaIncorporation.pdf";
 seedPDFInfoCache(PDF_URL, { filename: "AitanaIncorporation.pdf", pages: 2 });
 
 // ---------------------------------------------------------------------------

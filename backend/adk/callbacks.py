@@ -1,7 +1,7 @@
 """ADK callback hooks for the Aitana platform.
 
 Callbacks wired into every skill by `adk.agent.create_agent`:
-  * `before_tool_callback`   = `make_permission_enforcer(email, domain)`
+  * `before_tool_callback`   = `make_permission_enforcer(email, domain, tags)`
   * `before_agent_callback`  = `make_before_agent(skill_id)` composed with
                                `make_session_tracker(owner_uid)` — the latter
                                creates/initialises the ChatSessionIndex on the
@@ -22,6 +22,7 @@ Firestore QPS low during bursty agent loops.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -39,6 +40,7 @@ from adk.a2ui_result_render import (
     render_for_emit,
 )
 from auth.access_context import AccessContext
+from auth.admin_roles import is_resident_user
 from auth.permissions import ToolPermissionDenied, can_use_tool
 from db.chat_sessions import add_session_documents, get_session_index
 from db.models.access import AccessControl
@@ -57,7 +59,7 @@ _RAG_DOCUMENTS_ENABLED = os.environ.get("RAG_DOCUMENTS_ENABLED", "").lower() in 
 # `user:` is shared across one user's sessions, and no prefix is session-only.
 # These four were all `app:`, which was wrong in three different ways (proven on
 # test: a turn counter climbed 125→131 across sessions belonging to BOTH
-# yourcompany.com and acmeenergy.com).
+# yourcompany.com and energy.example).
 #   - docs_files / rag_corpus_name / doc_load_error describe ONE USER's private
 #     RAG corpus → `user:`. As `app:` they were a cross-user leak: a user who had
 #     uploaded nothing inherited another user's corpus name, and `search_documents`
@@ -96,12 +98,26 @@ _LARGE_OUTPUT_THRESHOLD = 50_000
 # confusing "Calling transfer_to_agent…" label).
 _INTERNAL_CONTROL_TOOLS = frozenset({"transfer_to_agent"})
 
+# Tools gated on a signed groupTag rather than the email/domain policy in
+# auth.permissions. Kept as a set so the seam generalises: the next
+# role-scoped tool is one entry, not a second mechanism.
+_ROLE_GATED_TOOLS = frozenset({"ask_assistant"})
+
 
 def make_permission_enforcer(
     user_email: str,
     user_domain: str,
+    group_tags: frozenset[str] | None = None,
 ) -> Any:
-    """Return a ``before_tool_callback`` that enforces tool permissions."""
+    """Return a ``before_tool_callback`` that enforces tool permissions.
+
+    ``group_tags`` carries the caller's signed ``groupTags`` claim so per-role
+    tools can be gated here. It defaults to empty, which FAILS CLOSED: a caller
+    built without tags is treated as holding none, so a call site that forgets
+    to pass them denies a role-gated tool rather than granting it.
+    """
+
+    tags = group_tags or frozenset()
 
     def _enforcer(
         tool: BaseTool,
@@ -111,6 +127,31 @@ def make_permission_enforcer(
         tool_name = tool.name
         if tool_name in _INTERNAL_CONTROL_TOOLS:
             return None
+        # v6.40.0 M12/M14: the `resident-user` role is what makes a resident
+        # agent PERSONAL. Without this check the shared-instance path
+        # (RESIDENT_AGENT_PER_USER off) hands ANY caller who can reach the skill
+        # the one shared box — which mounts one person's agent home. The tool
+        # itself cannot do this: `resolve_tools` never receives caller identity,
+        # which is exactly why M12 deferred the gate and why it belongs here,
+        # on the seam that already has the identity.
+        #
+        # Returning a dict short-circuits the tool with this as its result, so
+        # the model gets a readable reason to relay instead of an exception —
+        # same shape `_resolve_agent` uses for its ineligible branch, and
+        # visible to the user rather than a silent absence (principle #8).
+        if tool_name in _ROLE_GATED_TOOLS and not is_resident_user(tags):
+            logger.info(
+                "perm: %s not a resident-user (tool=%s)",
+                user_email,
+                tool_name,
+            )
+            return {
+                "error": (
+                    "You do not have a resident assistant. It is granted per user — "
+                    "ask a platform or tenant administrator for the 'resident-user' role."
+                ),
+                "eligible": False,
+            }
         if not can_use_tool(user_email, user_domain, tool_name):
             logger.info(
                 "perm: blocked %s for %s (tool=%s)",
@@ -118,7 +159,22 @@ def make_permission_enforcer(
                 tool_context.agent_name,
                 tool_name,
             )
-            raise ToolPermissionDenied(user_email, tool_name)
+            # Returning a dict short-circuits the tool with this as its result.
+            # This used to RAISE, which ADK surfaces as a RUN_ERROR that ends
+            # the turn — a prod user hit exactly that on 2026-09-10
+            # (`search_documents` missing from one env's permission list) and
+            # saw a generic failure, not the reason. As the tool's result the
+            # turn stays alive and the model says what was refused and who can
+            # fix it (principle #8).
+            denied = ToolPermissionDenied(user_email, tool_name)
+            return {
+                "error": str(denied),
+                "permitted": False,
+                "hint": (
+                    f"Tool '{tool_name}' is not enabled for this account. A platform or "
+                    "tenant administrator can grant it under Admin → Tool permissions."
+                ),
+            }
 
         # TTFT: emit a STAGE_PROGRESS label per tool call so the UI can
         # show "Calling search…" instead of an indefinite cursor while
@@ -391,21 +447,22 @@ def _resolve_user_id(callback_context: Any, state: Any) -> str:
 
 
 async def _rag_loader(callback_context: Any, state: Any, document_ids: list[str]) -> None:
-    """RAG path for the document loader — imports GCS documents into the user's corpus.
+    """RAG path: import authorised parsed text into the user's text-only corpus.
 
     Replaces the artifact save/orphan-probe path when ``RAG_DOCUMENTS_ENABLED=true``.
-    Idempotent: tracks imported doc ids in ``app:docs_files``; already-imported
-    docs are skipped. Corpus name is cached in ``app:rag_corpus_name`` for the
-    search_documents tool.
+    Durable per-user receipts skip unchanged text; edits replace the prior
+    representation. ``user:docs_files`` records successful current attachments;
+    ``user:rag_corpus_name`` points search_documents at the text-only corpus.
     """
     user_id: str = _resolve_user_id(callback_context, state)
     if not user_id:
         logger.warning("doc loader (RAG): no user_id (invocation or state) — skipping")
         return
 
-    rag_loaded: list[str] = list(state.get(_STATE_DOCS_FILES) or [])
-    rag_loaded_set = set(rag_loaded)
-    to_import = [d for d in document_ids if d and d not in rag_loaded_set]
+    # Legacy source-file markers cannot prove a parsed text import exists.
+    # Check receipts every turn so edits/re-ingests cannot leave stale text.
+    rag_loaded: list[str] = []
+    to_import = list(dict.fromkeys(d for d in document_ids if d))
 
     logger.warning(
         "doc loader (RAG): turn start — document_ids=%s rag_loaded=%s",
@@ -413,7 +470,8 @@ async def _rag_loader(callback_context: Any, state: Any, document_ids: list[str]
         rag_loaded,
     )
 
-    from rag.corpus import get_or_create_user_corpus, import_document_from_gcs
+    from rag.corpus import get_existing_user_corpus, get_or_create_user_corpus
+    from rag.parsed_text import import_parsed_document
 
     # Errors are surfaced to the AI (not just logs) via _inject_rag_doc_id_hint,
     # which reads this same map — "fail loudly to the AI, degrade gracefully to
@@ -423,7 +481,10 @@ async def _rag_loader(callback_context: Any, state: Any, document_ids: list[str]
     errors: dict[str, str] = dict(state.get(_STATE_DOC_LOAD_ERROR) or {})
 
     try:
-        corpus_name = await get_or_create_user_corpus(user_id)
+        corpus_name = await get_or_create_user_corpus(user_id) if to_import else await get_existing_user_corpus(user_id)
+        if not corpus_name:
+            state.pop(_STATE_RAG_CORPUS_NAME, None)
+            return
         state[_STATE_RAG_CORPUS_NAME] = corpus_name
     except Exception as exc:
         # Whole corpus unavailable (e.g. the Vertex RAG service agent can't read
@@ -441,20 +502,12 @@ async def _rag_loader(callback_context: Any, state: Any, document_ids: list[str]
         logger.info("doc loader (RAG): nothing to import — corpus=%s", corpus_name)
         return
 
-    from db.firestore import get_document as _get_fs_doc
-
     for doc_id in to_import:
         try:
-            doc_data = _get_fs_doc("parsed_documents", doc_id) or {}
-            gcs_uri: str | None = doc_data.get("sourceUrl")
-            if not gcs_uri:
-                errors[doc_id] = "no source file recorded — cannot add to document search"
-                logger.warning("doc loader (RAG): no sourceUrl for doc:%s — skipping", doc_id)
-                continue
-            await import_document_from_gcs(corpus_name, gcs_uri)
+            await import_parsed_document(corpus_name, doc_id, caller_uid=user_id)
             rag_loaded.append(doc_id)
             errors.pop(doc_id, None)  # a retry cleared a prior failure
-            logger.info("doc loader (RAG): imported doc:%s from %s", doc_id, gcs_uri)
+            logger.info("doc loader (RAG): parsed text ready for doc:%s", doc_id)
         except Exception as exc:
             # Fail loudly to the AI, degrade gracefully to the user: record WHY
             # this doc couldn't be added to search (surfaced in the id-hint) but
@@ -561,9 +614,14 @@ def make_document_loader() -> Any:
         errors: dict[str, str] = dict(state.get(_STATE_DOC_LOAD_ERROR) or {})
         successfully_loaded: list[str] = []
 
+        # The loader attaches documents the USER selected, but "the UI sent this
+        # id" is not an authorisation — a crafted request carries ids too. Gate
+        # it on the same uid the rest of the turn runs as.
+        loader_uid = _resolve_user_id(callback_context, state)
+
         for doc_id in to_load:
             try:
-                _content, blocks = build_document_context(doc_id, mode="blocks")
+                _content, blocks = build_document_context(doc_id, mode="blocks", caller_uid=loader_uid)
                 if not blocks:
                     errors[doc_id] = (
                         "Document has no parsed content. Re-upload the document to make it available to the AI."
@@ -1111,7 +1169,15 @@ async def _handle_large_output(
     if len(text) <= _LARGE_OUTPUT_THRESHOLD:
         return tool_response
 
-    artifact_name = f"{tool_name}_response_{tool_context.invocation_id}"
+    # The invocation id alone is NOT unique: it is constant for the whole turn, so
+    # two offloads from the same tool in one turn collided on this filename and
+    # produced a BYTE-IDENTICAL pointer string. That is what made the 2026-08-24
+    # retrieve_artifact loop unreadable in the transcript — three calls, three
+    # identical replies, no way to tell progress from a stall. The digest is of the
+    # payload, so a genuinely repeated result still dedupes to one artifact while
+    # two different results stay distinguishable.
+    digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:8]
+    artifact_name = f"{tool_name}_response_{tool_context.invocation_id}_{digest}"
     # Lazy import — avoids pulling google.genai.types at module import time
     # (and keeps the test mock path simple).
     from google.genai import types as genai_types
@@ -1368,3 +1434,141 @@ def make_authored_a2ui_stripper():
                 )
 
     return _after_model
+
+
+def make_fanout_board_emitter(
+    branch_tools: frozenset[str],
+) -> tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any]]:
+    """Return ``(before_tool, after_tool)`` callbacks that draw the fan-out board.
+
+    FANOUT M2. ``branch_tools`` is the set of `AgentTool` delegate names this
+    agent was built with (`DelegateRule.invoke == "tool"`) — a CLOSURE, not a
+    global registry. That is the whole reason this is not a
+    ``a2ui_result_render.register(...)`` mapping: the tool name is the
+    delegate's slug and is only known at agent-build time, and registering it
+    into a module-global registry per request would mutate shared state on the
+    hot path.
+
+    Both callbacks are OBSERVERS: they always return ``None`` so they never
+    rewrite a tool call or its response, and they are fail-open — a rendering
+    bug logs at WARNING and never breaks the turn. A broken board must not cost
+    the user their answer.
+
+    The board is keyed by ADK's ``invocation_id`` so concurrent turns cannot
+    write onto each other's surface, and branches are paired start→end by
+    ``function_call_id``, which is unique per call — pairing on the objective
+    text would collide the moment a model asked two branches the same question.
+    """
+    boards: dict[str, dict[str, Any]] = {}
+
+    def _emit(invocation_id: str) -> None:
+        from adk.a2ui_fanout_render import board_messages
+        from observability.timing import get_current_tracker
+
+        state = boards.get(invocation_id)
+        if not state:
+            return
+        branches = list(state["branches"].values())
+        surface_id = f"fanout:{invocation_id}"
+        state["seq"] += 1
+        get_current_tracker().emit_a2ui_surface(
+            surface_id=surface_id,
+            messages=board_messages(surface_id, branches),
+            # Unique per UPDATE (the frontend dedupes on it) but stable across a
+            # genuine SSE re-delivery of the same one.
+            source_id=f"{surface_id}:{state['seq']}",
+            # Artifact metadata rides EVERY update, but it is the first one that
+            # matters: it is what creates the workbench tab + Workspace index
+            # row, and it has to arrive with the board at ~2s rather than with
+            # the result at the end.
+            artifact={
+                "kind": "fanout",
+                "title": "Research fan-out",
+                "description": state["goal"] or "Parallel research across several objectives",
+            },
+        )
+
+    def _before(tool: BaseTool, args: dict[str, Any], tool_context: ToolContext) -> None:
+        try:
+            if getattr(tool, "name", "") not in branch_tools:
+                return None
+            from adk.a2ui_fanout_render import Branch
+
+            inv = str(getattr(tool_context, "invocation_id", "") or "")
+            call_id = str(getattr(tool_context, "function_call_id", "") or "")
+            state = boards.setdefault(inv, {"branches": {}, "seq": 0, "goal": ""})
+            if not state["goal"]:
+                content = getattr(tool_context, "user_content", None)
+                parts = getattr(content, "parts", None) or []
+                text = " ".join(p.text for p in parts if getattr(p, "text", None))
+                state["goal"] = text[:200]
+            objective = str((args or {}).get("request") or "").strip() or "(no objective)"
+            state["branches"][call_id or f"b{len(state['branches'])}"] = Branch(objective=objective)
+            _emit(inv)
+        except Exception:  # fail-open: the board is never worth the turn
+            logger.warning("fanout board: before_tool render failed", exc_info=True)
+        return None
+
+    def _after(
+        tool: BaseTool,
+        args: dict[str, Any],
+        tool_context: ToolContext,
+        tool_response: Any,
+    ) -> None:
+        try:
+            if getattr(tool, "name", "") not in branch_tools:
+                return None
+            import time as _time
+
+            inv = str(getattr(tool_context, "invocation_id", "") or "")
+            call_id = str(getattr(tool_context, "function_call_id", "") or "")
+            state = boards.get(inv)
+            if not state:
+                return None
+            branch = state["branches"].get(call_id)
+            if branch is None:
+                return None
+            branch.ended = _time.monotonic()
+            # An AgentTool returns the child's final TEXT. Empty text is not a
+            # success: it is the "empty run" failure mode (backend/adk/CLAUDE.md
+            # agent-behaviour gotcha 4) and must show as failed, not as a done
+            # card with nothing behind it.
+            if isinstance(tool_response, dict) and tool_response.get("error"):
+                branch.status = "failed"
+                branch.error = str(tool_response["error"])[:200]
+            elif isinstance(tool_response, str) and tool_response.strip():
+                branch.status = "done"
+            elif tool_response:
+                branch.status = "done"
+            else:
+                branch.status = "failed"
+                branch.error = "the branch returned nothing"
+            _emit(inv)
+        except Exception:
+            logger.warning("fanout board: after_tool render failed", exc_info=True)
+        return None
+
+    def _on_turn_start(callback_context: Any) -> None:
+        """Draw an EMPTY board the moment the turn begins.
+
+        The parent has to think before it can decompose, and that is not quick:
+        measured live on dev, 27s of a 92s turn passed before the first branch
+        call. Emitting here means the tab exists — saying "planning the
+        research…" — from the first second rather than from the first branch,
+        so the user sees the work start instead of a blank pane (rule #8: an
+        IMMEDIATE pending state, not just eventual progress).
+        """
+        try:
+            inv = str(getattr(callback_context, "invocation_id", "") or "")
+            if not inv or inv in boards:
+                return None
+            content = getattr(callback_context, "user_content", None)
+            parts = getattr(content, "parts", None) or []
+            goal = " ".join(p.text for p in parts if getattr(p, "text", None))[:200]
+            boards[inv] = {"branches": {}, "seq": 0, "goal": goal}
+            _emit(inv)
+        except Exception:
+            logger.warning("fanout board: turn-start render failed", exc_info=True)
+        return None
+
+    return _before, _after, _on_turn_start

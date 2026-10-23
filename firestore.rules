@@ -286,5 +286,14 @@ service cloud.firestore {
     match /bot_state/{stateId} {
       allow read, write: if isAdmin();
     }
+
+    // ==================
+    // Personal MCP tokens (auth/mcp_tokens.py) — `mcp_tokens/{sha256(token)}`.
+    // Deny-all, including the owner: only the backend (Admin SDK) reads them,
+    // and the browser manages tokens through /api/mcp/tokens.
+    // ==================
+    match /mcp_tokens/{tokenHash} {
+      allow read, write: if false;
+    }
   }
 }

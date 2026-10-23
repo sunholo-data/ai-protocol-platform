@@ -41,6 +41,13 @@ export const dynamic = "force-dynamic";
 // arrive as "" which `??` doesn't catch (it only falls back on null/undefined).
 const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:1956";
 
+// Tailnet auth mode (backend auth/tailnet_auth.py): when set, every upstream
+// request carries this secret so the backend trusts the Tailscale-User-Login
+// header that `tailscale serve` added. A client-supplied copy is always dropped
+// (BLOCKED_REQUEST_HEADERS) — only this server can vouch. Server-only env, never
+// NEXT_PUBLIC_.
+const TAILNET_PROXY_SECRET = process.env.TAILNET_PROXY_SECRET || "";
+
 // Headers that must not be forwarded upstream: hop-by-hop, Next-internal, or
 // ones that would confuse the upstream server (host rewriting).
 const BLOCKED_REQUEST_HEADERS = new Set([
@@ -58,6 +65,16 @@ const BLOCKED_REQUEST_HEADERS = new Set([
   "x-middleware-invoke",
   "x-invoke-path",
   "x-invoke-query",
+  // Tailnet auth: only this proxy may set it (see TAILNET_PROXY_SECRET)
+  "x-proxy-secret",
+  // The browser's Origin (https://app.example.com) never matches the sidecar's
+  // own (127.0.0.1:1956), and google-adk >= 1.39 refuses any request whose
+  // Origin it does not allow — so every browser write (POST/PATCH/DELETE) came
+  // back 403 on test after the v6.54.0 ADK bump, while CLI checks, which send
+  // no Origin, passed. This proxy IS the sidecar's only client; the origin
+  // Firebase callers supply a Bearer token. Tailnet callers instead carry
+  // ambient identity, so proxy() checks browser writes before dropping Origin.
+  "origin",
 ]);
 
 // HTTP statuses that must not carry a body (per the Fetch spec). The Web
@@ -86,6 +103,9 @@ function filterRequestHeaders(headers: Headers): Headers {
       out.set(key, value);
     }
   });
+  if (TAILNET_PROXY_SECRET) {
+    out.set("x-proxy-secret", TAILNET_PROXY_SECRET);
+  }
   return out;
 }
 
@@ -103,6 +123,26 @@ async function proxy(
   req: NextRequest,
   ctx: { params: Promise<{ path: string[] }> },
 ): Promise<NextResponse> {
+  // Tailscale authenticates the browser's machine, including cross-site form
+  // submissions. Keep that ambient identity from authorizing another site's
+  // writes. Forwarded host reflects the public URL behind a reverse proxy;
+  // native clients without browser headers remain supported.
+  if (TAILNET_PROXY_SECRET && !["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    let allowed = req.headers.get("sec-fetch-site") !== "cross-site";
+    const origin = req.headers.get("origin");
+    if (origin) {
+      const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || req.nextUrl.host;
+      try {
+        const parsed = new URL(origin);
+        allowed = allowed && ["http:", "https:"].includes(parsed.protocol) && parsed.host === host;
+      } catch {
+        allowed = false;
+      }
+    }
+    if (!allowed) {
+      return NextResponse.json({ error: "cross_site_write_forbidden" }, { status: 403 });
+    }
+  }
   const { path } = await ctx.params;
   const url = buildUpstreamUrl(req, path);
 

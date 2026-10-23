@@ -1,4 +1,4 @@
-// ChatShell — the composer wraps long text (2026-08-06 ONE UAT regression).
+// ChatShell — the composer wraps long text (2026-08-06 acceptance testing regression).
 //
 // The composer was a single-line `<input>`. An `<input>` CANNOT wrap: a long
 // prompt scrolls sideways and the user cannot see what they typed. Two users
@@ -106,11 +106,11 @@ async function renderChat() {
 
 /** The composer control, found the way a user finds it — by its placeholder. */
 function composer(): HTMLTextAreaElement {
-  return screen.getByPlaceholderText("Message…") as HTMLTextAreaElement;
+  return screen.getByPlaceholderText(/^Message .*…$/) as HTMLTextAreaElement;
 }
 
 /** A prompt long enough that it could only ever be read if it wraps — the
- * shape of the real ONE prompts that triggered the report. */
+ * shape of the real sample prompts that triggered the report. */
 const LONG_PROMPT =
   "Compare the termination clauses in these two PPA contracts and tell me " +
   "which one is more favourable to the offtaker, with reference to the " +
@@ -123,7 +123,7 @@ beforeEach(() => {
   vi.mocked(useSkillAgent).mockReturnValue(makeReturn());
 });
 
-describe("ChatShell composer — wrapping (2026-08-06 ONE UAT)", () => {
+describe("ChatShell composer — wrapping (2026-08-06 acceptance testing)", () => {
   it("is a textarea, not a single-line input", async () => {
     await renderChat();
     const el = composer();
@@ -192,7 +192,7 @@ describe("ChatShell composer — wrapping (2026-08-06 ONE UAT)", () => {
 
     fireEvent.change(el, { target: { value: "spanish text" } });
     // Enter commits the candidate for CJK/accented input; treating it as
-    // "send" would fire a half-typed message. ONE's users type Spanish.
+    // "send" would fire a half-typed message. the tenant's users type Spanish.
     fireEvent.keyDown(el, { key: "Enter", isComposing: true });
 
     expect(sendMessage).not.toHaveBeenCalled();

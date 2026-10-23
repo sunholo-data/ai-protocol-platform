@@ -97,3 +97,29 @@ cli/aiplatform/config.yaml
 # --force backups of the above
 infrastructure/mcp-toolbox/tools.yaml.bak
 docs/ops/deployed-urls.md.bak
+
+# Local scratch — never committed. Somewhere to drop generated artefacts,
+# customer samples and conversion output while inspecting them by hand.
+.scratch/
+
+# Built by `make loud-template` from the checked-in OOXML parts.
+scripts/fixtures/loud_template/loud-template.docx
+
+# AILANG's per-directory compile cache — a build artefact, never source.
+**/.ailang/cache/
+
+# Local AILANG voice preference (per-machine, not project config)
+.ailang_voice
+
+# Built by `make one-brand-template` from the checked-in OOXML parts.
+# Customer-branded binary — never commit it (the parts are the reviewable source).
+scripts/one-brand-template/*.docx
+
+# User guide bundle — build outputs of scripts/user-guide/bundle.mjs (sources: docs/user-guide/, docs/customers/*/user-guide/)
+/frontend/content/user-guide/
+/frontend/public/help/img/
+/backend/bundled/
+
+# user-guide screenshot harness deps
+/scripts/user-guide/shots/node_modules/
+/scripts/user-guide/shots/package-lock.json

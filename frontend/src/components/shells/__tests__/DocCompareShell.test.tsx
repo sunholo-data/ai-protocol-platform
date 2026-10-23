@@ -64,7 +64,7 @@ import { DocCompareShell } from "@/components/shells/DocCompareShell";
 
 const baseProps = {
   skillId: "skill-1",
-  pathPrefix: "/chat/@owner/one-doc-compare",
+  pathPrefix: "/chat/@owner/demo-doc-compare",
   user: { uid: "u1", displayName: "Mark", email: "mark@x.com", photoURL: null } as never,
 };
 

@@ -1,9 +1,9 @@
-"""Scoped ad-hoc BigQuery results → A2UI result render (v6.23.0 ONE-BQ).
+"""Scoped ad-hoc BigQuery results → A2UI result render (v6.23.0 TENANT-BQ).
 
-Registers a result→A2UI mapping for the ``one-bigquery`` toolset's two query
+Registers a result→A2UI mapping for the ``demo-bigquery`` toolset's two query
 tools on the proven 7.3 path ([a2ui_result_render](a2ui_result_render.py)).
 
-Design: docs/design/v6.23.0/one-bigquery.md
+Design: docs/design/v6.23.0/demo-bigquery.md
 
 ## Why this reuses the `prices` tab instead of adding a component
 
@@ -219,8 +219,8 @@ def _period_parts(dimensions: list[str]) -> list[str]:
     return [c for c in order if c in dimensions]
 
 
-# ── ONE's low / base / high case convention (v6.23.0 ONE-BQ-SHAPES) ──────────
-# ONE's analyst names scenario columns `<measure>_basecase` / `_lowcase` /
+# ── the tenant's low / base / high case convention (v6.23.0 TENANT-BQ-SHAPES) ──────────
+# the tenant's analyst names scenario columns `<measure>_basecase` / `_lowcase` /
 # `_highcase` — verified 2026-08-11 against her four saved queries and the
 # materialised `year_captured_prices_*` tables. A captured-price question
 # therefore returns NINE measures (three technologies x three cases), and the
@@ -271,7 +271,7 @@ def _bands(measures: list[str]) -> tuple[list[str], list[dict[str, str]]]:
 
 # ── One axis, always (data-viz non-negotiable) ───────────────────────────────
 # A dual-scale chart is the single most common charting error, and this dataset
-# invites it: ONE's capture-rate queries return prices (~80 EUR/MWh) and rates
+# invites it: the tenant's capture-rate queries return prices (~80 EUR/MWh) and rates
 # (~0.85) side by side, so the generic logic put both on one axis and the rate
 # lines collapsed flat onto the floor. We chart the dominant group and DECLARE
 # the rest, so the tab can say what it left out rather than dropping it silently
@@ -331,7 +331,7 @@ def _axes(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Derive ``x``, ``y`` and possibly-rewritten rows for the series envelope.
 
     Three rules, each fixing a chart that rendered wrongly in the browser on
-    2026-08-07 (screenshots on the ONE-BQ sprint):
+    2026-08-07 (screenshots on the TENANT-BQ sprint):
 
     1. **A calendar part is a DIMENSION, never a measure.** `year`/`month`/`day`
        were being plotted as series alongside the real value, so a `month` column
@@ -347,7 +347,7 @@ def _axes(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     Returns ``(x, y, rows)`` — rows may carry an added ``period`` column.
 
-    This is the GENERIC derivation and knows nothing about ONE's conventions;
+    This is the GENERIC derivation and knows nothing about the tenant's conventions;
     ``_chart_spec`` layers the domain shapes (bands, scale split) on top.
     """
     columns = _columns(rows)
@@ -377,11 +377,11 @@ def _axes(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _chart_spec(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """``_axes`` plus ONE's domain shapes — bands, one-axis split, ratio format.
+    """``_axes`` plus the tenant's domain shapes — bands, one-axis split, ratio format.
 
-    Every addition is OPTIONAL and additive: a result that uses none of ONE's
+    Every addition is OPTIONAL and additive: a result that uses none of the tenant's
     conventions yields empty ``bands``/``deferred`` and no ``yFormat`` or
-    ``reference``, so it renders exactly as it did before ONE-BQ-SHAPES.
+    ``reference``, so it renders exactly as it did before TENANT-BQ-SHAPES.
     """
     x, y, rows = _axes(rows)
 
@@ -402,7 +402,7 @@ def _chart_spec(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     # A chart of nothing but ratios reads far better as a percentage against a
     # 1.0 reference — that is the whole point of a capture rate or a seasonal
-    # index, and both of ONE's ratio queries produce exactly this shape.
+    # index, and both of the tenant's ratio queries produce exactly this shape.
     if charted and all(_is_ratio(rows, c) for c in charted):
         spec["yFormat"] = "percent"
         spec["reference"] = {"value": 1.0, "label": "Baseload average"}
@@ -530,8 +530,8 @@ def bigquery_rows_to_a2ui(typed_result: Any, tool_context: Any = None) -> list[d
                     "rows": rows,
                     "columns": columns,
                     "rowCount": len(rows),
-                    # ONE-BQ-SHAPES. All four are OPTIONAL and additive: a query
-                    # that uses none of ONE's conventions emits empty lists and
+                    # TENANT-BQ-SHAPES. All four are OPTIONAL and additive: a query
+                    # that uses none of the tenant's conventions emits empty lists and
                     # no format/reference, and renders exactly as it did before.
                     "bands": spec["bands"],
                     "deferred": spec["deferred"],
@@ -619,7 +619,7 @@ def _bigquery_artifact(typed_result: Any, tool_context: Any = None) -> dict[str,
     return {
         "kind": "prices" if _is_worth_a_tab(rows, x, y) else "table",
         "title": marker_title or _title(rows, columns),
-        "description": "Query result from ONE's BigQuery warehouse",
+        "description": "Query result from the tenant's BigQuery warehouse",
     }
 
 

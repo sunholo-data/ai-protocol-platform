@@ -60,7 +60,7 @@ describe("DelegationEditor", () => {
     expect(next.mode).toBe("suggest");
   });
 
-  // Regression: the ONE front door serializes `allow` as {skill, floor} rules,
+  // Regression: the tenant front door serializes `allow` as {skill, floor} rules,
   // not bare strings. Rendering the raw object as a React child crashed Studio
   // ("Objects are not valid as a React child").
   describe("object-form allow ({skill, floor})", () => {

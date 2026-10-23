@@ -112,15 +112,24 @@ export function TenantEditor({
     setNotice(null);
     setValidation(null);
     try {
+      // POST the form's CURRENT values (a dry run — nothing is saved), so a
+      // bucket typed in but not yet saved is checked too. The GET variant only
+      // ever checked the stored config, so Validate looked like it ignored it.
       const r = await fetchWithAuth(
         `/api/proxy/api/admin/tenants/${encodeURIComponent(tenant.domain)}/validate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            documents_bucket: draft.documents_bucket.trim() || null,
+            default_skill: draft.default_skill.trim() || null,
+            enabled_skills: draft.enabled_skills.length ? draft.enabled_skills : null,
+            derived_group_tags: csvToList(draft.derived_group_tags),
+          }),
+        },
       );
       if (r.status === 403) {
         setNotice("You are not an admin for this tenant.");
-        return;
-      }
-      if (r.status === 404) {
-        setNotice("Save the tenant first, then re-validate.");
         return;
       }
       if (!r.ok) {
@@ -194,7 +203,7 @@ export function TenantEditor({
               )}
           </select>
         </Field>
-        <Field label="Documents bucket" hint="Per-tenant GCS bucket. Validate checks SA read access.">
+        <Field label="Documents bucket" hint="Per-tenant GCS bucket. Validate checks the service account can read AND write it (uploads need both).">
           <input
             className="w-full rounded-md border px-3 py-2 text-sm"
             value={draft.documents_bucket}

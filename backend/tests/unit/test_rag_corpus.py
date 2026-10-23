@@ -49,9 +49,9 @@ def _make_retrieval_response(contexts: list) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_get_or_create_returns_existing_corpus():
-    """When profile has ragCorpusName, return it without calling Vertex."""
+    """An existing parsed-text corpus is reused without calling Vertex."""
     with (
-        patch("db.firestore.get_document", return_value={"ragCorpusName": "projects/p/corpora/42"}),
+        patch("db.firestore.get_document", return_value={"ragParsedTextCorpusName": "projects/p/corpora/42"}),
         patch("db.firestore.set_document") as mock_update,
         patch("rag.corpus._create_corpus_sync") as mock_create,
     ):
@@ -62,6 +62,19 @@ async def test_get_or_create_returns_existing_corpus():
     assert result == "projects/p/corpora/42"
     mock_create.assert_not_called()
     mock_update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_legacy_pdf_corpus_is_not_reused_for_parsed_text():
+    with (
+        patch("db.firestore.get_document", return_value={"ragCorpusName": "legacy/pdf-corpus"}),
+        patch("db.firestore.set_document") as saved,
+        patch("rag.corpus._create_corpus_sync", return_value="new/text-corpus"),
+    ):
+        from rag.corpus import get_or_create_user_corpus
+
+        assert await get_or_create_user_corpus("alice") == "new/text-corpus"
+    saved.assert_called_once_with("user_profiles", "alice", {"ragParsedTextCorpusName": "new/text-corpus"}, merge=True)
 
 
 @pytest.mark.asyncio
@@ -79,7 +92,7 @@ async def test_get_or_create_creates_corpus_when_missing():
 
     assert result == corpus_name
     mock_create.assert_called_once_with("user-2")
-    mock_update.assert_called_once_with("user_profiles", "user-2", {"ragCorpusName": corpus_name}, merge=True)
+    mock_update.assert_called_once_with("user_profiles", "user-2", {"ragParsedTextCorpusName": corpus_name}, merge=True)
 
 
 @pytest.mark.asyncio

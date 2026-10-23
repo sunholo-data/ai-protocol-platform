@@ -1,4 +1,4 @@
-"""Tests for tools/extract_ppa_clauses.py (v6.4.0 ONE-DEMO M2).
+"""Tests for tools/extract_ppa_clauses.py (v6.4.0 TENANT-DEMO M2).
 
 Covers:
   - Happy path: valid blocks → Gemini extraction → typed PpaClauses JSON

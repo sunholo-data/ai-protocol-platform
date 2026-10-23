@@ -535,7 +535,7 @@ class TestDocumentInjectorBugF:
 
         with patch(
             "tools.documents.context.build_document_context",
-            side_effect=lambda doc_id, mode="blocks": (None, blocks_by_doc[doc_id]),
+            side_effect=lambda doc_id, mode="blocks", caller_uid=None: (None, blocks_by_doc[doc_id]),
         ):
             # Turn 1: only privacy
             await loader(ctx)
@@ -641,7 +641,7 @@ class TestLoaderTurnOneInvariant:
 
         loader = make_document_loader()
 
-        def _fake_build(doc_id, mode="blocks"):
+        def _fake_build(doc_id, mode="blocks", caller_uid=None):
             if doc_id == "doc-good":
                 return (None, [{"type": "heading", "text": "OK"}])
             raise RuntimeError("Firestore unavailable")
@@ -753,7 +753,7 @@ class TestRagDocumentLoader:
         with (
             patch("adk.callbacks._RAG_DOCUMENTS_ENABLED", True),
             patch("rag.corpus.get_or_create_user_corpus", return_value=corpus),
-            patch("rag.corpus.import_document_from_gcs"),
+            patch("rag.parsed_text.import_parsed_document"),
             patch("db.firestore.get_document", return_value={"sourceUrl": "gs://bucket/doc-a.pdf"}),
         ):
             await loader(ctx)
@@ -762,8 +762,8 @@ class TestRagDocumentLoader:
         assert ctx.state[_STATE_RAG_CORPUS_NAME] == corpus
 
     @pytest.mark.asyncio
-    async def test_rag_loader_idempotent_on_already_loaded_docs(self):
-        """Already-imported doc IDs are not re-imported."""
+    async def test_rag_loader_rechecks_legacy_markers_for_parsed_text(self):
+        """Legacy markers cannot bypass the parsed-text receipt/version check."""
         from adk.callbacks import _STATE_DOCS_FILES, make_document_loader
 
         corpus = "projects/p/locations/l/ragCorpora/1"
@@ -781,16 +781,16 @@ class TestRagDocumentLoader:
         with (
             patch("adk.callbacks._RAG_DOCUMENTS_ENABLED", True),
             patch("rag.corpus.get_or_create_user_corpus", return_value=corpus),
-            patch("rag.corpus.import_document_from_gcs") as mock_import,
+            patch("rag.parsed_text.import_parsed_document") as mock_import,
             patch("db.firestore.get_document", return_value={"sourceUrl": "gs://bucket/doc-a.pdf"}),
         ):
             await loader(ctx)
 
-        mock_import.assert_not_called()
+        mock_import.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_rag_loader_skips_doc_with_no_source_url(self):
-        """Docs with no sourceUrl in Firestore are skipped without raising."""
+    async def test_rag_loader_skips_missing_parsed_document(self):
+        """A missing parse is surfaced; the original file is never imported."""
         from adk.callbacks import _STATE_DOCS_FILES, make_document_loader
 
         ctx = MagicMock()
@@ -803,8 +803,8 @@ class TestRagDocumentLoader:
         with (
             patch("adk.callbacks._RAG_DOCUMENTS_ENABLED", True),
             patch("rag.corpus.get_or_create_user_corpus", return_value="projects/p/corpora/1"),
-            patch("rag.corpus.import_document_from_gcs") as mock_import,
-            patch("db.firestore.get_document", return_value={}),
+            patch("rag.corpus._upload_file_sync") as mock_import,
+            patch("tools.documents.parsed_text.get_document", return_value=None),
         ):
             await loader(ctx)
 

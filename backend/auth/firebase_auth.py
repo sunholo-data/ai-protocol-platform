@@ -52,6 +52,11 @@ class User(BaseModel):
     empty string otherwise. Carrying it on User (rather than as a
     side-channel) keeps the permission system and observability hooks
     type-safe.
+
+    `email_verified` mirrors the Firebase claim. Firebase lets anyone
+    self-register an email/password account for ANY address, so `email` alone
+    proves nothing about mailbox ownership until this is True. Defaults to
+    False (fail closed) for every path that doesn't read it from Firebase.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -62,6 +67,16 @@ class User(BaseModel):
     group_tags: frozenset[str] = Field(default_factory=frozenset)
     auth_mode: str = "firebase"
     group_id: str = ""
+    email_verified: bool = False
+    # Human-readable name when the auth mode knows one (tailnet principals'
+    # `displayName`); empty otherwise. Presentation only — never an identity key.
+    display_name: str = ""
+    # Shared machine threads: emails of the humans who may read AND reply in
+    # this principal's chat threads (copied onto each new session as
+    # `collaborators`), and the AILANG inbox to ping when one of them replies.
+    # Only machine principals set these today (auth/tailnet_auth.py).
+    supervisors: tuple[str, ...] = ()
+    notify_inbox: str = ""
 
 
 def _extract_domain(email: str) -> str:
@@ -81,6 +96,7 @@ def _user_from_decoded_token(decoded: dict[str, Any]) -> User:
         email=email,
         domain=_extract_domain(email),
         group_tags=group_tags,
+        email_verified=decoded.get("email_verified") is True,
     )
 
 
@@ -126,7 +142,7 @@ async def get_current_user(request: Request) -> User:
 def _apply_derived_group_tags(user: User) -> User:
     """Union per-domain derived tags from clients/{domain} into user.group_tags.
 
-    Lets a deployment grant a tag (e.g. `ONE`) to every user from a customer's
+    Lets a deployment grant a tag (e.g. `example-team`) to every user from a customer's
     email domain without an admin calling `set_custom_user_claims` per signup.
     Returns the user unchanged when there is no derived-tag config (the common
     case for internal yourcompany.com users).
@@ -184,6 +200,13 @@ def resolve_user_by_uid(uid: str) -> User | None:
     therefore takes up to that long to take effect on channels; call
     `clear_user_cache()` to apply one immediately.
     """
+    # Tailnet auth mode has no Firebase accounts: the principals config is the
+    # authority, exactly as it is at request time (auth/tailnet_auth.py).
+    from auth.tailnet_auth import is_tailnet_mode, resolve_user_by_uid_tailnet
+
+    if is_tailnet_mode():
+        return resolve_user_by_uid_tailnet(uid)
+
     now = time.monotonic()
     cached = _user_cache.get(uid)
     if cached is not None and now - cached[0] < _USER_CACHE_TTL_SEC:
@@ -207,7 +230,13 @@ def resolve_user_by_uid(uid: str) -> User | None:
             logger.warning("auth: uid=%s has a non-iterable groupTags claim; ignoring", uid)
             group_tags = frozenset()
         user = _apply_derived_group_tags(
-            User(uid=uid, email=email, domain=_extract_domain(email), group_tags=group_tags)
+            User(
+                uid=uid,
+                email=email,
+                domain=_extract_domain(email),
+                group_tags=group_tags,
+                email_verified=getattr(record, "email_verified", False) is True,
+            )
         )
 
     _user_cache[uid] = (now, user)

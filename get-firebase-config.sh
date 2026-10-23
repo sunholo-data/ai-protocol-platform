@@ -17,7 +17,7 @@ gcloud secrets versions access latest --secret=FIREBASE_ENV --project $_PROJECT_
 # Pre-fix: docker_args contained `--build-arg KEY=VALUE`, and the build step
 # did `docker build $$ARGS ...`. When a value had spaces, the shell tokenised
 # them as separate words, breaking `docker build` with "requires exactly 1
-# argument" (v6.4.0 ONE-DEMO M1 found this when adding spaced BRAND values).
+# argument" (v6.4.0 TENANT-DEMO M1 found this when adding spaced BRAND values).
 KEYS=$(grep -E "^(NEXT_PUBLIC_|MAILGUN_WEBHOOK_SECRET)" .env.local | cut -d= -f1 | sort -u)
 DOCKER_ARGS=""
 for k in $KEYS; do

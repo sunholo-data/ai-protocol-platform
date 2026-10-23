@@ -1,7 +1,7 @@
 """Unit tests for the named-tier layer on top of the model registry.
 
-v6.6.0 ONE-FORK-CONVERGENCE M1: a skill may reference a logical tier
-(`lite`, `smart`) instead of a raw model id. `lite` is ONE's day-to-day
+v6.6.0 TENANT-FORK-CONVERGENCE M1: a skill may reference a logical tier
+(`lite`, `smart`) instead of a raw model id. `lite` is the tenant's day-to-day
 default (fast Gemini); `smart` is the deep-work tier delegated to sub-skills
 (Anthropic). Raw ids and registry ids must keep resolving for back-compat.
 """
@@ -88,8 +88,8 @@ class TestApiNameFor:
         assert api_name_for("smart") == resolve_tier("smart").api_name
 
     def test_registry_id_maps_to_its_api_name(self):
-        # gemini-2-5-flash (registry id) -> gemini-2.5-flash (api_name)
-        assert api_name_for("gemini-2-5-flash") == "gemini-2.5-flash"
+        # gemini-3-5-flash-eu (registry id) -> gemini-3.5-flash (api_name)
+        assert api_name_for("gemini-3-5-flash-eu") == "gemini-3.5-flash"
 
     def test_raw_api_name_passes_through(self):
         # Back-compat: a raw provider id we don't know about is returned as-is.

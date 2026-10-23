@@ -1,5 +1,5 @@
 /**
- * ONE landing right-column visual.
+ * tenant landing right-column visual.
  *
  * A single vertical trace of what the platform actually does end-to-end on
  * any contract: a real clause excerpt → the obligation terms extracted from

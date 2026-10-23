@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # model-fallback-e2e.sh — acceptance harness for cross-provider model fallback
 # (v6.13.0). Streams a complex prompt against a DEPLOYED env, to a skill whose
-# thinking tier is Claude (one-ppa-expert, thinking=claude-opus). When the
+# thinking tier is Claude (demo-ppa-expert, thinking=claude-opus). When the
 # Anthropic provider is down (the org usage cap), the turn must FALL BACK to
 # Gemini and still ANSWER — no `tool_call_id` cross-provider crash.
 #
@@ -32,7 +32,7 @@ export GCP_PROJECT="${PROJECT}" GOOGLE_CLOUD_PROJECT="${PROJECT}"
 eval "$(bash "${MINT}" 2>/dev/null)"
 [ -z "${AIPLATFORM_ID_TOKEN:-}" ] && { echo "FATAL: token mint failed for ${PROJECT}" >&2; exit 1; }
 
-SKILL_SLUG="${SKILL_SLUG:-one-ppa-expert}"   # thinking tier = claude-opus (Anthropic)
+SKILL_SLUG="${SKILL_SLUG:-demo-ppa-expert}"   # thinking tier = claude-opus (Anthropic)
 SKILL_ID="$(curl -s "${HOST}/api/proxy/api/skills/by-slug/aitana-platform/${SKILL_SLUG}" \
   -H "Authorization: Bearer ${AIPLATFORM_ID_TOKEN}" 2>/dev/null \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('skillId') or d.get('id') or '')" 2>/dev/null || true)"

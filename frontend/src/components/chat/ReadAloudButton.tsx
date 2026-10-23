@@ -5,8 +5,7 @@
  *
  * v6.6.0 M2 (ported from the AIPLA fork). Each assistant turn in the chat
  * renders one of these. Click to hear the message spoken; click again to
- * stop. This is a CLICK-TO-PLAY control only — it never auto-speaks on
- * mount (the fork's auto-read-on-mount behaviour was intentionally dropped).
+ * stop. Auto-read is explicitly enabled only for newly completed replies.
  *
  * Two synthesis paths:
  *  - provider === "browser": speak locally via window.speechSynthesis.
@@ -42,6 +41,8 @@ interface ReadAloudButtonProps {
   skillId?: string;
   /** Optional className to control sizing / colour from the parent. */
   className?: string;
+  /** Only newly completed live replies may opt into automatic playback. */
+  autoSpeakOnMount?: boolean;
 }
 
 function isSpeechSynthesisAvailable(): boolean {
@@ -159,7 +160,9 @@ export function ReadAloudButton({
   voice = null,
   skillId,
   className,
+  autoSpeakOnMount = false,
 }: ReadAloudButtonProps) {
+  const autoPlayed = useRef(false);
   const useGCP = provider !== "browser";
   // We only need Web Speech availability for the browser-native path. The
   // GCP path uses the standard Audio() element, available everywhere.
@@ -217,10 +220,6 @@ export function ReadAloudButton({
     window.addEventListener("aitana:voice.cancel", onCancel);
     return () => window.removeEventListener("aitana:voice.cancel", onCancel);
   }, []);
-
-  if (!available) {
-    return null;
-  }
 
   function stopAll() {
     // Cancel the chunked pipeline first, then unblock the play-await.
@@ -370,6 +369,16 @@ export function ReadAloudButton({
     speakViaBrowser(plainTextForSpeech(text));
   }
 
+  useEffect(() => {
+    if (autoSpeakOnMount && available && !autoPlayed.current && text.trim()) {
+      autoPlayed.current = true;
+      handleClick();
+    }
+    // Playback is triggered once by a completed reply, not by every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSpeakOnMount, available, text]);
+
+  if (!available) return null;
   const label = isSpeaking ? "Stop reading aloud" : "Read aloud";
   const Icon = isSpeaking ? VolumeX : VoiceIcon;
   return (

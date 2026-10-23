@@ -56,6 +56,29 @@ class TestStreaming:
     """`send_streaming` consumes AG-UI events and live-edits the placeholder."""
 
     @pytest.mark.asyncio
+    async def test_long_link_survives_chunked_streaming(self, channel, monkeypatch):
+        """A long prefilled link (e.g. a one-click GitHub issue) must never be cut in two."""
+        link = "[Open the proposal](https://github.com/example/repo/issues/new?body=" + "Draft%20" * 180 + ")"
+        text = "Here is your proposal. " * 60 + link + "\nReview, then submit."
+        assert len(text) > 2000
+        fake_channel, placeholder = _wire_fake_channel(channel)
+        monkeypatch.setattr("channels.discord.time.monotonic", lambda: 0.0)
+        await channel.send_streaming(
+            "12345",
+            _events(
+                [
+                    {"type": "TEXT_MESSAGE_CONTENT", "delta": text},
+                    {"type": "RUN_FINISHED"},
+                ]
+            ),
+        )
+        delivered = [placeholder.edit.await_args_list[-1].kwargs["content"]]
+        delivered.extend(call.args[0] for call in fake_channel.send.await_args_list[1:])
+        assert all(len(chunk) <= 2000 for chunk in delivered)
+        assert sum(link in chunk for chunk in delivered) == 1
+        assert "".join(delivered) == text
+
+    @pytest.mark.asyncio
     async def test_initial_placeholder_sent(self, channel: DiscordChannel) -> None:
         fake_channel, _placeholder = _wire_fake_channel(channel)
 
@@ -133,9 +156,13 @@ class TestStreaming:
         assert len(last_edit.kwargs["content"]) <= 2000
 
     @pytest.mark.asyncio
-    async def test_tool_call_appends_progress_note(
+    async def test_tool_progress_is_transient_and_never_in_the_reply(
         self, channel: DiscordChannel, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Progress used to be spliced into the reply as ``_Working with
+        ai_search..._`` — it stayed in the final answer and raw tool names
+        broke Discord's italics (repo rule #9, friendly names). Now it's a
+        transient status on the placeholder, replaced by the answer."""
         _fake_channel, placeholder = _wire_fake_channel(channel)
         monkeypatch.setattr("channels.discord.time.monotonic", lambda: 0.0)
 
@@ -152,7 +179,24 @@ class TestStreaming:
         await channel.send_streaming("12345", _events(events))
 
         final = placeholder.edit.await_args_list[-1]
-        assert "ai_search" in final.kwargs["content"]
+        assert final.kwargs["content"] == "let me check — done."
+        assert all("ai_search" not in c.kwargs.get("content", "") for c in placeholder.edit.await_args_list)
+
+    @pytest.mark.asyncio
+    async def test_progress_before_any_text_shows_a_friendly_status(
+        self, channel: DiscordChannel, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _fake_channel, placeholder = _wire_fake_channel(channel)
+        monkeypatch.setattr("channels.discord.time.monotonic", lambda: 0.0)
+        events = [
+            {"type": "TOOL_CALL_START", "toolCallId": "c1", "toolCallName": "transfer_to_agent"},
+            {"type": "TEXT_MESSAGE_CONTENT", "delta": "Here you go."},
+            {"type": "RUN_FINISHED"},
+        ]
+        await channel.send_streaming("12345", _events(events))
+        contents = [c.kwargs.get("content") for c in placeholder.edit.await_args_list]
+        assert "-# ⏳ Handing over to a specialist…" in contents
+        assert contents[-1] == "Here you go."
 
     @pytest.mark.asyncio
     async def test_run_error_replaces_placeholder(

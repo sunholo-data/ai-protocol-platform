@@ -9,7 +9,7 @@
 // message was sent.
 //
 // Why the hook parses SSE itself instead of routing through `HttpAgent`:
-// the @ag-ui/client `HttpAgent` is wired to ONE URL (the chat stream
+// the @ag-ui/client `HttpAgent` is wired to the tenant URL (the chat stream
 // endpoint) and updates ONE agent's `messages`/`state` arrays. The
 // action-triggered endpoint is a different URL and we explicitly do NOT
 // want to write a fake chat message into the agent's `messages` array
@@ -478,8 +478,8 @@ export function useActionDrivenAgent({
               });
               break;
             }
-            // Model-B skills (a2ui.enabled: false — one-doc-compare,
-            // one-ppa-expert) do NOT call send_a2ui_json_to_client; their
+            // Model-B skills (a2ui.enabled: false — demo-doc-compare,
+            // demo-ppa-expert) do NOT call send_a2ui_json_to_client; their
             // surface arrives as an out-of-model A2UI_SURFACE CUSTOM event
             // from the backend result→A2UI emitter. Handle it identically to
             // the chat path's WorkspaceA2uiEventRouter (ChatShell.tsx) so a

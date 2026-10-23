@@ -20,6 +20,7 @@
 
 "use client";
 
+import { withBasicCatalogAliases } from "@/components/protocols/basicCatalogAliases";
 import {
   A2uiSurface,
   basicCatalog,
@@ -32,6 +33,8 @@ import {
   type SurfaceModel,
 } from "@a2ui/web_core/v0_9";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { logger } from "@/lib/logger";
+import { markdownCatalog } from "@/components/protocols/a2uiMarkdownCatalog";
 
 let stylesInjected = false;
 function ensureStyles() {
@@ -88,7 +91,7 @@ export function A2UIRenderer({ messages, fallbackSurfaceId, onAction }: A2UIRend
   const [error, setError] = useState<string | null>(null);
 
   const processor = useMemo(
-    () => new MessageProcessor<ReactComponentImplementation>([basicCatalog]),
+    () => new MessageProcessor<ReactComponentImplementation>(withBasicCatalogAliases(markdownCatalog)),
     // One processor per renderer instance; the bubble keys the renderer.
     // We intentionally do NOT depend on `messages` here.
     [],
@@ -136,16 +139,11 @@ export function A2UIRenderer({ messages, fallbackSurfaceId, onAction }: A2UIRend
 
     try {
       if (!firstHasCreate && !exists) {
-        if (process.env.NODE_ENV !== "production") {
-          console.warn(
-            `[A2UIRenderer] inline surface "${surfaceId}" received update ` +
-              `without prior createSurface — auto-creating with basicCatalog.`,
-          );
-        }
+        logger.warn("inline_surface_autocreated_without_create", { surfaceId });
         processor.processMessages([
           {
             version: "v0.9",
-            createSurface: { surfaceId, catalogId: basicCatalog.id },
+            createSurface: { surfaceId, catalogId: markdownCatalog.id },
           } as A2uiMessage,
         ]);
       }

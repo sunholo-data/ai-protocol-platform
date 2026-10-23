@@ -54,6 +54,21 @@ Score each axiom per [Product Axioms](../../../docs/product-axioms.md). Net scor
 **Conflict Justifications:**
 - [If any axiom scored -1, explain why the tradeoff is acceptable for this feature]
 
+## Repo Routing
+
+<!-- MANDATORY when this repo merges from an upstream; delete the section if it
+     does not. Decide it HERE — once code exists the choice is already made.
+     A single feature routinely straddles both repos. -->
+
+| Work item | Repo | Why |
+|-----------|------|-----|
+| [e.g. guard in a shared tool] | upstream | platform code — every fork should get it |
+| [e.g. the prompt change in our skill] | here | deployment-specific |
+
+**Prototyping location:** [e.g. "prototype here — the bug is only reproducible
+against the customer's data — then port the platform items up before merging."
+Saying this explicitly is a valid routing decision; silence is the failure mode.]
+
 ## Design
 
 ### Overview
@@ -150,6 +165,36 @@ Score each axiom per [Product Axioms](../../../docs/product-axioms.md). Net scor
 - [ ] [Key scenario 1]
 - [ ] [Key scenario 2]
 - [ ] [Edge case to verify]
+
+## Self-Verification
+
+> **Required section.** Every design names the single command that proves the
+> built thing actually works, runnable on demand — by an operator *or by the
+> agent that built it* — against the deployed system, with no second system
+> needing to be up. A claim that cannot be re-run is an assertion, not evidence.
+> Delete this blockquote, not the section.
+
+**The command**
+
+```bash
+# e.g. ./scripts/<thing>.sh verify --name <x>
+```
+
+**Positive assertions** — what it proves works:
+- [ ] [The thing does its job end to end, not just answers a health check]
+
+**Negative assertions** — the failures that would otherwise look healthy:
+- [ ] [The guard that fails open if it regresses, e.g. an unauthenticated
+      request is refused; an unregistered input is rejected rather than
+      silently downgraded]
+
+A suite that only ever sends valid input cannot see the bugs that matter. If
+this list is empty, the section is not finished.
+
+**Out of scope** — what a green run does *not* prove:
+- [What still needs a human, a soak, or a different environment]
+
+**Where it runs:** [CI step / post-deploy gate / operator-invoked]
 
 ## Security Considerations
 

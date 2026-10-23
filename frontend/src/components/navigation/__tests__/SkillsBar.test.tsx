@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { SkillsBar } from "../SkillsBar";
+import { ShellActionsProvider, useRegisterSidebarToggle } from "@/components/shells/ShellActionsContext";
 import type { Skill } from "@/types/skill";
 
 vi.mock("next/navigation", () => ({
@@ -156,8 +157,12 @@ describe("SkillsBar", () => {
         onNewConversation={handleNew}
       />,
     );
-    await userEvent.click(screen.getByLabelText(/start a new conversation/i));
-    expect(handleNew).toHaveBeenCalledTimes(1);
+    // One button per layout (phone icon at the far right, desktop next to the
+    // switcher); CSS shows one at a time. Both must start a new conversation.
+    const buttons = screen.getAllByLabelText(/start a new conversation/i);
+    expect(buttons).toHaveLength(2);
+    for (const b of buttons) await userEvent.click(b);
+    expect(handleNew).toHaveBeenCalledTimes(2);
   });
 
   it("hides the config gear when there is no active skill", () => {
@@ -173,5 +178,50 @@ describe("SkillsBar", () => {
       />,
     );
     expect(screen.queryByLabelText(/configure this skill/i)).toBeNull();
+  });
+
+  it("shows the product name beside the mark", () => {
+    render(
+      <SkillsBar
+        skills={[makeSkill()]}
+        activeSkillId="skill-1"
+        isLoading={false}
+        onCreateClick={vi.fn()}
+        onConfigureClick={vi.fn()}
+        onNewConversation={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "Home" })).toHaveTextContent("Sunholo");
+  });
+
+  it("shows the sidebar toggle only when a shell body registers one", async () => {
+    const toggle = vi.fn();
+    function Body() {
+      useRegisterSidebarToggle(false, toggle);
+      return null;
+    }
+    const bar = (
+      <SkillsBar
+        skills={[makeSkill()]}
+        activeSkillId="skill-1"
+        isLoading={false}
+        onCreateClick={vi.fn()}
+        onConfigureClick={vi.fn()}
+        onNewConversation={vi.fn()}
+      />
+    );
+    const { rerender } = render(<ShellActionsProvider>{bar}</ShellActionsProvider>);
+    expect(screen.queryByRole("button", { name: /sidebar/i })).not.toBeInTheDocument();
+
+    rerender(
+      <ShellActionsProvider>
+        {bar}
+        <Body />
+      </ShellActionsProvider>,
+    );
+    const button = await screen.findByRole("button", { name: "Show conversations and files" });
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(button);
+    expect(toggle).toHaveBeenCalled();
   });
 });

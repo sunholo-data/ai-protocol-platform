@@ -1,6 +1,6 @@
 """Voice provider Protocols.
 
-Defines the narrow interface that every TTS provider implements. Two
+Defines the narrow interface that voice providers implement. Two
 methods total. Provider-specific quirks pass through the opaque
 `extras: dict` parameter so the interface stays stable when we add
 Gemini-TTS prompting, Studio prosody, etc.
@@ -9,8 +9,7 @@ Mirrors the model-selection pattern in `adk/agent.py`: an env /
 skill-config / default chain picks the implementation, and the rest of
 the codebase only sees the Protocol.
 
-Ported from the AIPLA fork (voice-provider-abstraction). STT was
-intentionally dropped in v6 M2 — read-aloud (TTS) only.
+Ported from the AIPLA fork: read-aloud and one-shot dictation.
 """
 
 from typing import Protocol, TypedDict, runtime_checkable
@@ -71,3 +70,14 @@ class TTSProvider(Protocol):
     def describe(self) -> VoiceCapabilities:
         """Report what this provider can do. Pure; no I/O."""
         ...
+
+
+@runtime_checkable
+class STTProvider(Protocol):
+    """One-shot audio transcription. No continuous/live connection."""
+
+    name: str
+
+    async def transcribe(self, audio: bytes, mime: str, lang: str, extras: dict | None) -> str: ...
+
+    def describe(self) -> VoiceCapabilities: ...

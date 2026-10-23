@@ -63,14 +63,14 @@ class TestSourcesFromGrounding:
     def test_gcs_source_enriched_remapped_and_decoded(self, monkeypatch):
         monkeypatch.setenv("AI_SEARCH_SOURCE_BUCKET_OVERRIDE", "dev-bucket")
         # Vertex gives a prod-bucket, percent-encoded URI and no title.
-        gm = _grounding([_rc_chunk("gs://prod-bucket/aitana3/cases/EU%20Regulation/Report%202024.pdf", None)])
+        gm = _grounding([_rc_chunk("gs://prod-bucket/example-datastore/cases/EU%20Regulation/Report%202024.pdf", None)])
         assert sources_from_grounding(gm) == [
             {
                 "title": "Report 2024.pdf",  # falls back to filename when datastore gives none
-                "uri": "gs://dev-bucket/aitana3/cases/EU%20Regulation/Report%202024.pdf",  # bucket remapped
+                "uri": "gs://dev-bucket/example-datastore/cases/EU%20Regulation/Report%202024.pdf",  # bucket remapped
                 "kind": "gcs",
                 "bucket": "dev-bucket",
-                "object": "aitana3/cases/EU Regulation/Report 2024.pdf",  # decoded for import-by-reference
+                "object": "example-datastore/cases/EU Regulation/Report 2024.pdf",  # decoded for import-by-reference
                 "filename": "Report 2024.pdf",
                 "snippet": "",
             }
@@ -80,7 +80,7 @@ class TestSourcesFromGrounding:
         # Phase B resolution returns None (IAM/missing) → Phase A fallback: labelled
         # from the retrieved text, snippet captured, raw resource name never shown.
         monkeypatch.setattr("adk.a2ui_sources_render.resolve_vertex_document", lambda rn: None)
-        rn = "projects/32509213101/locations/eu/collections/default_collection/dataStores/aitana3/branches/0/documents/abc123"
+        rn = "projects/32509213101/locations/eu/collections/default_collection/dataStores/example-datastore/branches/0/documents/abc123"
         gm = _grounding(
             [_rc_chunk("", None, document_name=rn, text="German BESS capacity grew sharply in 2025.\nMore.")]
         )
@@ -97,20 +97,28 @@ class TestSourcesFromGrounding:
         # source becomes an openable gcs doc (bucket/object populated), snippet kept.
         monkeypatch.setattr(
             "adk.a2ui_sources_render.resolve_vertex_document",
-            lambda rn: ("gs://prod-bucket/aitana3/docs/Report.pdf", "Q1 Market Report"),
+            lambda rn: ("gs://prod-bucket/example-datastore/docs/Report.pdf", "Q1 Market Report"),
         )
-        rn = "projects/p/locations/eu/collections/default_collection/dataStores/aitana3/branches/0/documents/x"
+        rn = (
+            "projects/p/locations/eu/collections/default_collection/dataStores/example-datastore/branches/0/documents/x"
+        )
         gm = _grounding([_rc_chunk("", None, document_name=rn, text="snippet body")])
         out = sources_from_grounding(gm)
         assert len(out) == 1
         src = out[0]
-        assert src["kind"] == "gcs" and src["bucket"] == "prod-bucket" and src["object"] == "aitana3/docs/Report.pdf"
+        assert (
+            src["kind"] == "gcs"
+            and src["bucket"] == "prod-bucket"
+            and src["object"] == "example-datastore/docs/Report.pdf"
+        )
         assert src["title"] == "Q1 Market Report"
         assert src["snippet"] == "snippet body"
 
     def test_two_resource_name_sources_do_not_collapse(self, monkeypatch):
         monkeypatch.setattr("adk.a2ui_sources_render.resolve_vertex_document", lambda rn: None)
-        base = "projects/p/locations/eu/collections/default_collection/dataStores/aitana3/branches/0/documents/"
+        base = (
+            "projects/p/locations/eu/collections/default_collection/dataStores/example-datastore/branches/0/documents/"
+        )
         gm = _grounding(
             [
                 _rc_chunk("", None, document_name=base + "aaa", text="First result."),
@@ -121,7 +129,7 @@ class TestSourcesFromGrounding:
 
 
 class TestResolveVertexDocument:
-    _RN = "projects/p/locations/eu/collections/default_collection/dataStores/aitana3/branches/0/documents/x"
+    _RN = "projects/p/locations/eu/collections/default_collection/dataStores/example-datastore/branches/0/documents/x"
 
     def _doc(self, uri="", title="", struct=None):
         doc = MagicMock()
@@ -178,7 +186,10 @@ class TestRemapSourceBucket:
 
     def test_swaps_bucket_preserving_object(self, monkeypatch):
         monkeypatch.setenv("AI_SEARCH_SOURCE_BUCKET_OVERRIDE", "dev-bucket")
-        assert remap_source_bucket("gs://prod-bucket/aitana3/c/x%20y.pdf") == "gs://dev-bucket/aitana3/c/x%20y.pdf"
+        assert (
+            remap_source_bucket("gs://prod-bucket/example-datastore/c/x%20y.pdf")
+            == "gs://dev-bucket/example-datastore/c/x%20y.pdf"
+        )
 
     def test_non_gs_uri_untouched(self, monkeypatch):
         monkeypatch.setenv("AI_SEARCH_SOURCE_BUCKET_OVERRIDE", "dev-bucket")

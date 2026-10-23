@@ -5,7 +5,7 @@
 // `parseProposals` extracts those blocks; `applyProposal` maps ONE proposal onto
 // a NEW draft SkillConfig object (immutable — never mutates its input).
 //
-// The 9 kinds and their draft-patch semantics are pinned here (see
+// The 10 kinds and their draft-patch semantics are pinned here (see
 // docs/design/v6.6.0/one-app-fork-convergence-sprint.md M3). This is the single
 // source of truth the AuthoringCopilot and the Studio form share.
 
@@ -16,7 +16,7 @@ import type {
   WelcomeConfig,
 } from "@/types/skill";
 
-/** The nine proposal kinds the authoring copilot may emit. */
+/** The ten proposal kinds the authoring copilot may emit. */
 export type ProposalKind =
   | "set_display_name"
   | "set_description"
@@ -26,7 +26,8 @@ export type ProposalKind =
   | "set_tools"
   | "set_persona"
   | "add_a2ui_surface"
-  | "set_welcome";
+  | "set_welcome"
+  | "set_knowledge_bases";
 
 /** A single authoring proposal. `value` xor `spec` carries the payload
  * depending on `kind` (string / string[] for value-kinds; a partial object
@@ -189,6 +190,22 @@ export function applyProposal(draft: StudioDraft, proposal: Proposal): StudioDra
             ...next.skillMetadata?.toolConfigs,
             a2ui: { default_surface: value, default_update_mode: "replace" },
           },
+        };
+      }
+      return next;
+
+    case "set_knowledge_bases":
+      // `value`: knowledge-base names or ids (the server resolves friendly →
+      // id). Enables knowledge_search and replaces its bound list. Skill
+      // Studio's picker then shows each one and runs the access check.
+      if (Array.isArray(value)) {
+        const tools = next.skillMetadata?.tools ?? [];
+        const configs = next.skillMetadata?.toolConfigs ?? {};
+        const current = (configs.knowledge_search ?? {}) as Record<string, unknown>;
+        next.skillMetadata = {
+          ...next.skillMetadata,
+          tools: tools.includes("knowledge_search") ? [...tools] : [...tools, "knowledge_search"],
+          toolConfigs: { ...configs, knowledge_search: { ...current, knowledge_bases: [...value] } },
         };
       }
       return next;

@@ -54,10 +54,12 @@ UI capability declaration (M2B-BACKEND, MCP-APP-INTEGRATIONS):
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
 import time
+from contextlib import asynccontextmanager
 from typing import Any
 
 from google.adk.agents.readonly_context import ReadonlyContext
@@ -68,8 +70,21 @@ from google.adk.tools.mcp_tool.mcp_session_manager import (
 from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
 
 from db.firestore import get_document
+from tools.mcp.id_token_cache import IdTokenUnavailable, get_id_token
 
 log = logging.getLogger(__name__)
+
+# Seconds to wait for an MCP server to accept a session. The SDK default of 5.0
+# is below a Cloud Run cold start; see the note in `_build_toolset`. Raising it
+# costs nothing when the server is warm.
+MCP_CONNECT_TIMEOUT_SECONDS = float(os.environ.get("MCP_CONNECT_TIMEOUT_SECONDS", "30"))
+# Seconds a single MCP request may wait for its response (ADK's
+# `sse_read_timeout`, default 300). A safety net: a request whose answer can
+# never arrive (the shared-close bug above; a server that drops the stream) waits
+# this long before failing. Kept at ADK's 300 by default because some tools
+# legitimately run long (browser flows, big queries) — a deployment lowers it via
+# env, a server via `read_timeout_seconds` on its registry row.
+MCP_READ_TIMEOUT_SECONDS = float(os.environ.get("MCP_READ_TIMEOUT_SECONDS", "300"))
 
 _MCP_COLLECTION = "mcp_servers"
 
@@ -155,6 +170,107 @@ UI_CAPABILITY_HEADER = "x-aitana-mcp-ui-supported"
 UI_CAPABILITY_MIME_TYPE = "text/html;profile=mcp-app"
 
 
+def _is_loopback_http(url: str) -> bool:
+    """True for ``http://`` to a loopback host — a same-machine, IAM-less server."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    return parsed.scheme == "http" and (parsed.hostname or "") in ("127.0.0.1", "localhost", "::1")
+
+
+def _build_header_provider(server_id: str, config: dict, user_email: str = "", user_domain: str = ""):
+    """Return a per-call header provider, or None for a statically-configured server.
+
+    THE reason this exists (verified against ADK 1.31.1 on 2026-09-02): the
+    static `${ENV_VAR}` headers above are resolved ONCE at toolset construction.
+    That cannot carry two things an IAM-gated, per-user MCP server needs:
+
+      1. A Google ID token, which is audience-scoped and expires hourly. Baked
+         in at construction — with the 60s config cache and the v6.14.0 agent
+         cache keeping the instance alive across turns — it goes stale and the
+         toolset 401s indefinitely.
+      2. The CALLING USER's identity. Static headers carry none, so a per-user
+         MCP server cannot tell who it is acting for.
+
+    ADK's answer is `header_provider`, which it invokes per tool call with a
+    live `ReadonlyContext` (``mcp_tool.py:361-364``); ``ReadonlyContext.user_id``
+    is a documented property. The provider is SYNCHRONOUS, which is why the
+    token comes from a cache rather than a blocking mint.
+
+    Enabled by ``auth: "google_id_token"`` on the Firestore server config.
+    """
+    if (config.get("auth") or "").strip().lower() != "google_id_token":
+        return None
+
+    audience = (config.get("audience") or config.get("url") or "").strip()
+    # The audience is the SERVICE root, not the /mcp path — Cloud Run validates
+    # the token against the service URL.
+    if audience.endswith("/mcp"):
+        audience = audience[: -len("/mcp")]
+    audience = audience.rstrip("/")
+    # A self-hosted deployment runs the service on plain http://127.0.0.1 — no
+    # IAM edge to present a token to, and a USER credential (ADC on a laptop)
+    # can't mint an ID token anyway, so minting would fail every call. The
+    # identity headers and the gate below still apply; a shared-secret static
+    # header (``${ENV}`` in the row's ``headers``) authenticates the caller.
+    mint_token = not _is_loopback_http(config.get("url") or "")
+
+    def _provider(ctx) -> dict:
+        headers: dict[str, str] = {}
+        if mint_token:
+            try:
+                headers["Authorization"] = f"Bearer {get_id_token(audience)}"
+            except IdTokenUnavailable as exc:
+                # Loud, not silent. Without this the call reaches Cloud Run's edge
+                # with no credential and comes back as an opaque 403.
+                log.error("mcp_registry: %s (server=%s)", exc, server_id)
+                raise
+
+        # THE EMAIL, not ReadonlyContext.user_id. ADK's user_id is the Firebase
+        # UID (adk/agui.py:123), and every policy on this platform — the
+        # allowlist here, tool_permissions, access control — is keyed on email
+        # and domain. Feeding a UID to an email-keyed allowlist can never match,
+        # which is exactly how the first deployed attempt failed: the gate
+        # denied, the header was dropped, and the browser service answered
+        # "could not tell which user this request is for".
+        #
+        # So the identity is closed over at agent-build time, where the
+        # authenticated User already is — the same way make_permission_enforcer
+        # gets it. Nothing is read out of the model-visible context.
+        identity = user_email or getattr(ctx, "user_id", "") or ""
+
+        # POLICY DECISION POINT. The browser service holds zero project roles by
+        # design and cannot read the allowlist itself — see
+        # tools/browser_allowlist.py. The gate has to be here, on the only
+        # principal IAM lets near that service.
+        #
+        # A denial PROPAGATES. It used to be caught by a broad `except` and
+        # logged, which left the call going out with no identity and produced a
+        # confusing "could not tell which user" instead of "you are not on the
+        # allowlist" — a CLAUDE.md #8 violation in the code meant to enforce it.
+        gate = (config.get("gate") or "").strip().lower()
+        if gate == "browser_allowlist":
+            from tools.browser_allowlist import assert_allowed
+
+            assert_allowed(identity)
+
+        # Identity travels in a HEADER, never a tool argument: the model never
+        # sees it and so cannot forge it by writing a different value.
+        if identity:
+            headers["X-Aitana-User"] = str(identity)
+
+        try:
+            session_id = getattr(getattr(ctx, "session", None), "id", None)
+            if session_id:
+                headers["X-Aitana-Session"] = str(session_id)
+        except Exception as exc:  # pragma: no cover - session id is best-effort
+            log.debug("mcp_registry: no session id on context for %s: %s", server_id, exc)
+
+        return headers
+
+    return _provider
+
+
 class TaggedMcpToolset(McpToolset):
     """McpToolset subclass that tags every produced MCPTool with its server_id.
 
@@ -165,6 +281,11 @@ class TaggedMcpToolset(McpToolset):
     attribute on each tool keeps the LLM-visible surface unchanged and
     gives observability callbacks a clean way to recover the server_id.
     """
+
+    # Class-level defaults so the in-flight lease also works on instances built
+    # without __init__ (test stubs, subclasses); __init__ resets them per instance.
+    _inflight: int = 0
+    _close_deferred: bool = False
 
     # Per-instance cache of the resolved tool list. `get_tools()` otherwise opens
     # a fresh MCP session + `tools/list` handshake to the server on EVERY call —
@@ -180,6 +301,43 @@ class TaggedMcpToolset(McpToolset):
         super().__init__(**kwargs)
         self._aitana_server_id = server_id
         self._tools_cache: tuple[float, list] | None = None
+        # Shared-instance close guard (2026-09-30, 300s MCP hang). The agent
+        # cache shares this toolset between CONCURRENT turns, and every turn's
+        # Runner.close() (ag_ui_adk, in its finally) closes every toolset in
+        # the agent tree. Closing tears down the pooled ClientSession under a
+        # call another turn still has in flight; the MCP SDK's "connection
+        # closed" error fan-out runs inside the cancelled task group, so the
+        # waiter is never woken and hangs for the full sse_read_timeout (300s).
+        # So: count in-flight MCP calls and defer close() until the last drains.
+        self._inflight = 0
+        self._close_deferred = False
+
+    @asynccontextmanager
+    async def _lease(self):
+        self._inflight += 1
+        try:
+            yield
+        finally:
+            self._inflight -= 1
+            if self._inflight == 0 and self._close_deferred:
+                self._close_deferred = False
+                await super().close()
+
+    async def close(self) -> None:  # type: ignore[override]
+        if self._inflight:
+            # Another turn is mid-call; the last call out closes (see _lease).
+            self._close_deferred = True
+            log.debug("mcp_registry: close of %s deferred (%d in flight)", self._aitana_server_id, self._inflight)
+            return
+        await super().close()
+
+    def _leased(self, run_async):
+        @functools.wraps(run_async)
+        async def _run(*args: Any, **kwargs: Any) -> Any:
+            async with self._lease():
+                return await run_async(*args, **kwargs)
+
+        return _run
 
     @property
     def aitana_server_id(self) -> str:
@@ -189,8 +347,10 @@ class TaggedMcpToolset(McpToolset):
         cached = self._tools_cache
         if cached is not None and (time.monotonic() - cached[0]) < self._TOOLS_CACHE_TTL:
             return cached[1]
-        tools = await super().get_tools(readonly_context=readonly_context)
+        async with self._lease():
+            tools = await super().get_tools(readonly_context=readonly_context)
         for tool in tools:
+            tool.run_async = self._leased(tool.run_async)
             try:
                 setattr(tool, SERVER_ID_ATTR, self._aitana_server_id)
             except Exception as exc:  # pragma: no cover - defensive
@@ -199,7 +359,7 @@ class TaggedMcpToolset(McpToolset):
         return tools
 
 
-def get_mcp_tools(server_ids: list[str]) -> list[McpToolset]:
+def get_mcp_tools(server_ids: list[str], user_email: str = "", user_domain: str = "") -> list[McpToolset]:
     """Return McpToolset instances for the given server IDs.
 
     Reads each server's config from Firestore `mcp_servers/{server_id}`.
@@ -217,11 +377,13 @@ def get_mcp_tools(server_ids: list[str]) -> list[McpToolset]:
     Returns:
         List of McpToolset instances ready to add to an agent's tools list.
     """
-    resolved, _missing = get_mcp_tools_with_status(server_ids)
+    resolved, _missing = get_mcp_tools_with_status(server_ids, user_email, user_domain)
     return resolved
 
 
-def get_mcp_tools_with_status(server_ids: list[str]) -> tuple[list[McpToolset], list[str]]:
+def get_mcp_tools_with_status(
+    server_ids: list[str], user_email: str = "", user_domain: str = ""
+) -> tuple[list[McpToolset], list[str]]:
     """Resolve server IDs to toolsets AND track which ones failed.
 
     G42 (template-mcp-strict-resolution.md): the agent-build path needs
@@ -255,7 +417,7 @@ def get_mcp_tools_with_status(server_ids: list[str]) -> tuple[list[McpToolset], 
             missing.append(server_id)
             continue
 
-        toolset = _build_toolset(server_id, config)
+        toolset = _build_toolset(server_id, config, user_email, user_domain)
         if toolset is None:
             # _build_toolset already logged the reason (missing url, etc).
             missing.append(server_id)
@@ -316,7 +478,7 @@ def _merge_ui_capability_header(headers: dict) -> dict:
     return merged
 
 
-def _build_toolset(server_id: str, config: dict) -> McpToolset | None:
+def _build_toolset(server_id: str, config: dict, user_email: str = "", user_domain: str = "") -> McpToolset | None:
     """Build a McpToolset from a Firestore server config dict.
 
     Always declares UI extension capability via ``UI_CAPABILITY_HEADER`` so
@@ -340,9 +502,38 @@ def _build_toolset(server_id: str, config: dict) -> McpToolset | None:
         return None
     headers = _merge_ui_capability_header(server_headers)
 
-    if transport == "sse":
-        connection = SseConnectionParams(url=url, headers=headers)
-    else:
-        connection = StreamableHTTPConnectionParams(url=url, headers=headers)
+    # CONNECT TIMEOUT. The MCP SDK's default is **5 seconds**, which is shorter
+    # than a Cloud Run cold start, so the FIRST call to any scale-to-zero MCP
+    # server fails — and fails in the worst possible way. ADK logs "Failed to
+    # get tools from toolset", the toolset yields NO tools, and the agent then
+    # tells the user the capability does not exist and answers from memory
+    # instead. A missing tool is indistinguishable from a tool that was never
+    # configured (CLAUDE.md #8: never silent).
+    #
+    # Measured on test, 2026-09-03, platform-browser at min_instances=0:
+    #   13:19:34.7  cold instance starts
+    #   13:19:39.7  backend gives up  <-- 5.0s, the default
+    #   13:19:40.1  browser finishes starting, 0.4s too late
+    # The next request, against the now-warm instance, succeeded in 38 ms.
+    #
+    # So this is a timeout that is only ever hit on a cold start, and the cost
+    # of raising it is nothing on a warm one. Per-server override via
+    # `timeout_seconds` for a server that genuinely should fail fast.
+    timeout = float(config.get("timeout_seconds") or MCP_CONNECT_TIMEOUT_SECONDS)
 
-    return TaggedMcpToolset(server_id=server_id, connection_params=connection)
+    read_timeout = float(config.get("read_timeout_seconds") or MCP_READ_TIMEOUT_SECONDS)
+
+    if transport == "sse":
+        connection = SseConnectionParams(url=url, headers=headers, timeout=timeout, sse_read_timeout=read_timeout)
+    else:
+        connection = StreamableHTTPConnectionParams(
+            url=url, headers=headers, timeout=timeout, sse_read_timeout=read_timeout
+        )
+
+    header_provider = _build_header_provider(server_id, config, user_email, user_domain)
+
+    return TaggedMcpToolset(
+        server_id=server_id,
+        connection_params=connection,
+        header_provider=header_provider,
+    )

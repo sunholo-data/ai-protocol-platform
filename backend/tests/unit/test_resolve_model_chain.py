@@ -102,7 +102,9 @@ def test_gemini_3_5_flash_eu_gets_cross_region_rung():
     assert isinstance(model, ResilientLlm)
     regional = [m for m in model.chain if isinstance(m, RegionalGemini)]
     assert regional, "expected a cross-region rung in the gemini-3-5-flash-eu chain"
-    assert all(loc.startswith("europe-") for loc in [m.location for m in regional])
+    # Every regional rung stays EU: a europe-* region, or the "eu" multi-region
+    # (the rung that replaced the retired 2.5-flash sibling, 2026-10-16).
+    assert all(loc == "eu" or loc.startswith("europe-") for loc in [m.location for m in regional])
 
 
 # --- eu-strict enforcement ------------------------------------------------------
@@ -116,11 +118,11 @@ def test_pinned_non_eu_primary_raises_under_eu_strict(monkeypatch):
 
 def test_non_eu_fallback_dropped_under_eu_strict(monkeypatch, caplog):
     monkeypatch.setenv("MODEL_RESIDENCY_POLICY", "eu-strict")
-    fallback = FallbackConfig(models=["gemini-2-5-flash", "claude-sonnet-4-6"], allow_cross_provider=True)
-    model = resolve_model_chain("gemini-2-5-pro", fallback)
+    fallback = FallbackConfig(models=["gemini-3-5-flash-eu", "claude-sonnet-4-6"], allow_cross_provider=True)
+    model = resolve_model_chain("gemini-3-8-flash-eu", fallback)
     chain = _models(model)
     assert not any("claude" in m for m in chain)
-    assert any("gemini-2.5-flash" in m for m in chain)
+    assert any("gemini-3.5-flash" in m for m in chain)
     # Dropping is loud: allow_cross_provider CANNOT override deployment policy.
     assert any("residency" in rec.message.lower() for rec in caplog.records)
 

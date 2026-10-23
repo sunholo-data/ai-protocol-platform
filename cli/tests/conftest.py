@@ -21,3 +21,8 @@ def _fake_token(monkeypatch: pytest.MonkeyPatch) -> None:
         "AIPLATFORM_API_URL_LOCAL",
     ):
         os.environ.pop(key, None)
+    # Deterministic GCP projects for `deploy` — the same test must pass against
+    # this deployment's real config.yaml AND the shipped example (which is all
+    # CI and upstream have), and a placeholder project is refused at runtime.
+    for env in ("dev", "test", "prod"):
+        monkeypatch.setenv(f"AIPLATFORM_PROJECT_{env.upper()}", f"test-project-{env}")

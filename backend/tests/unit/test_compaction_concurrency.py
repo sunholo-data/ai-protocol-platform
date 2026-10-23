@@ -24,6 +24,7 @@ import pytest
 from google.adk.apps.compaction import _events_to_compact_for_token_threshold
 from google.adk.events.event import Event
 from google.adk.events.event_actions import EventActions, EventCompaction
+from google.adk.models.llm_response import LlmResponse
 from google.genai import types
 
 from adk.compaction_summarizer import FidelityEventSummarizer
@@ -113,11 +114,9 @@ class TestConcurrentSummarisers:
 
             async def generate_content_async(self, _req, stream=False):
                 await asyncio.sleep(0.05)  # overlap the two calls
-                yield type(
-                    "R",
-                    (),
-                    {"content": types.Content(role="model", parts=[types.Part(text="summary")])},
-                )()
+                # A real `LlmResponse`: ADK 1.39's summarizer reads
+                # `usage_metadata` off it, which a duck-typed stub lacks.
+                yield LlmResponse(content=types.Content(role="model", parts=[types.Part(text="summary")]))
 
         s = FidelityEventSummarizer(llm=_SlowLlm())
         a, b = await asyncio.gather(

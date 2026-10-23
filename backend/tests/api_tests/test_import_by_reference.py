@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 from auth import User, get_current_user
 
 _USER = User(uid="user1", email="alice@example.com", domain="example.com")
-_GS_BUCKET = "multivac-acme-energy-bucket"
+_GS_BUCKET = "example-customer-documents"
 _GS_OBJECT = "PPAs/longform/example-A-fixed-pap.pdf"
 _GS_URL = f"gs://{_GS_BUCKET}/{_GS_OBJECT}"
 
@@ -36,7 +36,7 @@ def client() -> TestClient:
 
 
 def _body() -> dict:
-    return {"bucket": _GS_BUCKET, "object": _GS_OBJECT, "skillId": "one-ppa-expert"}
+    return {"bucket": _GS_BUCKET, "object": _GS_OBJECT, "skillId": "demo-ppa-expert"}
 
 
 class TestImportByReferenceCacheCascade:
@@ -87,7 +87,7 @@ class TestImportByReferenceCacheCascade:
             "folderId": None,
             "sourceUrl": _GS_URL,
             "userId": "aitana-platform",
-            "skillId": "one-ppa-expert",
+            "skillId": "demo-ppa-expert",
             "sourceFormat": "pdf",
         }
         stored = []
@@ -154,7 +154,7 @@ class TestImportByReferenceCacheCascade:
         assert len(stored) == 1
         _, store_kwargs = stored[0]
         assert store_kwargs["user_id"] == _USER.uid
-        assert store_kwargs["skill_id"] == "one-ppa-expert"
+        assert store_kwargs["skill_id"] == "demo-ppa-expert"
         assert store_kwargs["gs_url"] == _GS_URL
         # No folder for imported-by-reference docs — they don't live in a user folder
         assert store_kwargs["folder_id"] is None
@@ -185,7 +185,7 @@ class TestImportByReferenceCacheCascade:
             "folderId": None,
             "sourceUrl": _GS_URL,
             "userId": "aitana-platform",
-            "skillId": "one-ppa-expert",
+            "skillId": "demo-ppa-expert",
             "sourceFormat": "pdf",
         }
         stored = []

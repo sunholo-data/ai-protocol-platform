@@ -15,6 +15,7 @@ owner_id=PLATFORM_OWNER_UID and accessControl={type: public}.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -69,6 +70,48 @@ DEMO_SKILL_NAMES: frozenset[str] = frozenset(
 )
 
 
+# Provider → the env var whose presence means the provider is enabled here.
+# Mirrors adk.agent._PROVIDER_KEY_ENVS: cloudbuild mounts the key only when
+# _ENABLE_ANTHROPIC / _ENABLE_OPENAI is "true", so key presence IS the flag.
+_PROVIDER_KEY_ENVS: dict[str, str] = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
+
+
+def _pinned_provider(metadata: dict[str, Any]) -> str | None:
+    """Provider of the skill's pinned ``metadata.model`` (None if unpinned).
+
+    Registry ids and tier names resolve via the model registry; raw api names
+    fall back to prefix inference, the same way the runtime does.
+    """
+    ref = metadata.get("model")
+    if not ref:
+        return None
+    from config.models import api_name_for, entry_for
+
+    entry = entry_for(str(ref))
+    if entry is not None:
+        return entry.provider
+    api = api_name_for(str(ref))
+    if api.startswith("claude-"):
+        return "anthropic"
+    if api.startswith(("gpt-", "o3")):
+        return "openai"
+    return "google"
+
+
+def _disabled_provider(metadata: dict[str, Any]) -> str | None:
+    """The pinned provider if its key isn't mounted in this env, else None.
+
+    A skill pinned to a disabled provider would silently fall back to Gemini
+    while its name and description still claim Claude/GPT —
+    so the seeder skips it rather than ship a skill that misdescribes itself.
+    """
+    provider = _pinned_provider(metadata)
+    key_env = _PROVIDER_KEY_ENVS.get(provider or "")
+    if key_env and not os.environ.get(key_env):
+        return provider
+    return None
+
+
 def _include_demo_skills() -> bool:
     """Return True iff the inherited demo bundle should be seeded.
 
@@ -79,6 +122,82 @@ def _include_demo_skills() -> bool:
     """
     raw = os.environ.get("_INCLUDE_DEMO_SKILLS", "true").strip().lower()
     return raw in ("1", "true", "yes", "on")
+
+
+def _json_env(name: str) -> Any:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{name} is not valid JSON: {exc}") from exc
+
+
+def _seed_default_access() -> dict:
+    """Access for a template skill whose SKILL.md declares none.
+
+    ``PLATFORM_SEED_DEFAULT_ACCESS`` (JSON accessControl) — e.g.
+    ``{"type": "private"}`` for a deployment where nothing should be visible
+    until an operator grants it. Unset keeps the legacy ``public``.
+    """
+    return _json_env("PLATFORM_SEED_DEFAULT_ACCESS") or {"type": "public"}
+
+
+def _seed_access_overrides() -> dict[str, dict]:
+    """Per-skill access set by the deployment, keyed by skill ``name``.
+
+    ``PLATFORM_SEED_ACCESS_OVERRIDES`` (JSON ``{name: accessControl}``) wins over
+    the SKILL.md frontmatter on create AND on every refresh, so a fork can decide
+    who sees a template skill without editing the template file.
+    """
+    overrides = _json_env("PLATFORM_SEED_ACCESS_OVERRIDES") or {}
+    if not isinstance(overrides, dict) or not all(isinstance(v, dict) for v in overrides.values()):
+        raise ValueError("PLATFORM_SEED_ACCESS_OVERRIDES must map skill names to accessControl objects")
+    return overrides
+
+
+def _seed_avatar_overrides() -> dict[str, str]:
+    """Per-skill avatar set by the deployment, keyed by skill ``name``.
+
+    ``PLATFORM_SEED_AVATAR_OVERRIDES`` (JSON ``{name: "/path/under/public.webp"}``)
+    wins over the SKILL.md ``avatar`` on create AND refresh, so a fork can brand
+    the template's skills without editing them (pairs with the theme hook).
+    """
+    overrides = _json_env("PLATFORM_SEED_AVATAR_OVERRIDES") or {}
+    if not isinstance(overrides, dict) or not all(isinstance(v, str) and v for v in overrides.values()):
+        raise ValueError("PLATFORM_SEED_AVATAR_OVERRIDES must map skill names to non-empty avatar paths")
+    return overrides
+
+
+def _declared_avatar(parsed: dict) -> str:
+    """The deployment's avatar for this skill, else its frontmatter's, else ""."""
+    return _seed_avatar_overrides().get(parsed["name"]) or parsed.get("avatar") or ""
+
+
+class AccessUnresolved(ValueError):
+    """A template's ``tags_from`` resolved to no tags on this deployment."""
+
+
+def _resolve_tags_from(access: dict | None) -> dict | None:
+    """``{type: tagged, tags_from: <name>}`` → ``{type: tagged, tags: [...]}`` with
+    the tags a private package supplies (``extensions.access_tags``), or the
+    template's explicit fallback tags. A skill whose tags can't be resolved is
+    NOT seeded, rather than seeded public or tag-less."""
+    if not access or "tags_from" not in access:
+        return access
+    import extensions
+
+    name = str(access.get("tags_from") or "")
+    tags = extensions.access_tags(name) or access.get("tags")
+    if not tags:
+        raise AccessUnresolved(f"access tags_from {name!r} resolved to no tags on this deployment")
+    return {**{k: v for k, v in access.items() if k != "tags_from"}, "type": "tagged", "tags": tags}
+
+
+def _declared_access(parsed: dict) -> dict | None:
+    """The deployment override for this skill, else its frontmatter, else None."""
+    return _seed_access_overrides().get(parsed["name"]) or parsed.get("access_control")
 
 
 @dataclass
@@ -97,6 +216,18 @@ class SeedSummary:
     # build (G42). The Cloud Build seed step FAILS THE BUILD on it.
     mcp_missing: list[str] = field(default_factory=list)
     mcp_warnings: list[str] = field(default_factory=list)
+    # Skills pinned to a provider whose key isn't mounted. Never
+    # created; an existing template-managed row is deleted.
+    skipped_disabled_provider: list[str] = field(default_factory=list)
+    # Templates this fork has opted out of (templates/.fork-skip) — removed
+    # from the marketplace and excluded from the MCP-registry gate.
+    skipped_by_fork: list[str] = field(default_factory=list)
+    # Why a template was skipped when it wasn't a demo, e.g. its `tags_from`
+    # resolved to nothing on this deployment (NEVER SILENT).
+    notes: list[str] = field(default_factory=list)
+    # Reports from private packages' after-seed hooks (extensions.after_seed),
+    # e.g. {"user_guide": {"state": "queued", ...}}.
+    extensions: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -109,6 +240,10 @@ class SeedSummary:
             "preserved": self.preserved,
             "mcp_missing": self.mcp_missing,
             "mcp_warnings": self.mcp_warnings,
+            "skipped_disabled_provider": self.skipped_disabled_provider,
+            "skipped_by_fork": self.skipped_by_fork,
+            "notes": self.notes,
+            "extensions": self.extensions,
         }
 
 
@@ -204,6 +339,16 @@ def _purge_stale_owner_skills(previous_uids: list[str], dry_run: bool = False) -
     for uid in previous_uids:
         configs = skill_config.list_skills(owner_id=uid, limit=200)
         for cfg in configs:
+            # Only template rows are re-created under the new owner, so only
+            # they are safe to delete. A durably-managed (in-product-edited)
+            # skill has no template to come back from — keep it and say so.
+            if getattr(cfg, "managed_by", None) == "firestore":
+                logger.warning(
+                    "platform_seed: NOT purging durable skill %r owned by previous owner %s — migrate it by hand",
+                    cfg.name,
+                    uid,
+                )
+                continue
             if dry_run:
                 logger.info("platform_seed: [dry-run] would purge stale skill %r (previous_owner=%s)", cfg.name, uid)
                 purged += 1
@@ -267,6 +412,24 @@ def _resolve_owner_email() -> str:
     )
 
 
+FORK_SKIP_FILE = ".fork-skip"
+
+
+def _fork_skipped_skills(root: Path) -> frozenset[str]:
+    """Template names this fork never offers, one per line in
+    ``<templates>/.fork-skip`` (``#`` comments allowed).
+
+    A fork can't delete an upstream template directory without conflicting on
+    every sync (and upstream constants/tests name them), so it lists them
+    instead — e.g. skills whose MCP services this deployment doesn't run.
+    """
+    path = root / FORK_SKIP_FILE
+    if not path.exists():
+        return frozenset()
+    names = (line.split("#", 1)[0].strip() for line in path.read_text().splitlines())
+    return frozenset(n for n in names if n)
+
+
 def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSummary:
     """Seed platform skills from disk templates. Idempotent by `name`.
 
@@ -300,6 +463,7 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
 
     existing_by_name = _existing_platform_skill_by_name()
     include_demos = _include_demo_skills()
+    fork_skipped = _fork_skipped_skills(root)
 
     for child in sorted(root.iterdir()):
         if not child.is_dir():
@@ -320,6 +484,40 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
         except Exception as e:
             logger.warning("platform_seed: failed to parse %s: %s", skill_md, e)
             summary.failed.append(child.name)
+            continue
+        try:
+            parsed["access_control"] = _resolve_tags_from(parsed.get("access_control"))
+        except AccessUnresolved as e:
+            logger.warning("platform_seed: skipping %s: %s", parsed["name"], e)
+            summary.skipped += 1
+            summary.notes.append(f"{parsed['name']}: skipped — {e}")
+            continue
+
+        disabled = _disabled_provider(parsed["metadata"])
+        by_fork = child.name in fork_skipped or parsed["name"] in fork_skipped
+        if disabled or by_fork:
+            if by_fork:
+                logger.info("platform_seed: skipping %r — listed in %s", parsed["name"], FORK_SKIP_FILE)
+                summary.skipped_by_fork.append(parsed["name"])
+            else:
+                logger.info(
+                    "platform_seed: skipping %r — pinned to %s, which is not enabled in this env",
+                    parsed["name"],
+                    disabled,
+                )
+                summary.skipped_disabled_provider.append(parsed["name"])
+            stale = existing_by_name.get(parsed["name"])
+            # Remove a previously-seeded row so it leaves the marketplace, but
+            # never a durably-managed (in-product-edited) skill.
+            if stale is not None and getattr(stale, "managed_by", None) != "firestore":
+                if dry_run:
+                    logger.info("platform_seed: [dry-run] would delete %r", parsed["name"])
+                elif skill_config.delete_skill(stale.skill_id):
+                    logger.info(
+                        "platform_seed: deleted %r (%s)",
+                        parsed["name"],
+                        "fork opted out" if by_fork else "provider disabled",
+                    )
             continue
 
         # G16 Phase 2 — refresh template fields on existing skills.
@@ -351,16 +549,17 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
                 refresh_payload["welcome"] = parsed["welcome"]
             if parsed.get("shell") is not None:
                 refresh_payload["shell"] = parsed["shell"]
-            if parsed.get("access_control") is not None:
-                refresh_payload["accessControl"] = parsed["access_control"]
+            declared_access = _declared_access(parsed)
+            if declared_access is not None:
+                refresh_payload["accessControl"] = declared_access
             if parsed.get("initial_message"):
                 refresh_payload["initialMessage"] = parsed["initial_message"]
             if parsed.get("display_name"):
                 refresh_payload["displayName"] = parsed["display_name"]
             if parsed.get("tags"):
                 refresh_payload["tags"] = parsed["tags"]
-            if parsed.get("avatar"):
-                refresh_payload["avatar"] = parsed["avatar"]
+            if _declared_avatar(parsed):
+                refresh_payload["avatar"] = _declared_avatar(parsed)
             # Backfill slug for skills created before slug-at-create existed. The
             # refresh path historically never set it, so a pre-slug skill stayed
             # slug-less forever → skillHref emits its bare-id `/chat/{id}` URL,
@@ -398,7 +597,7 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
                 "instructions": parsed["instructions"],
                 "owner_id": PLATFORM_OWNER_UID,
                 "owner_email": owner_email,
-                "accessControl": parsed.get("access_control") or {"type": "public"},
+                "accessControl": _declared_access(parsed) or _seed_default_access(),
                 "skillMetadata": parsed["metadata"],
                 "slug": slug,
                 # v6.9.0 9.2: seeded-from-disk provenance (vs durable "firestore").
@@ -414,8 +613,8 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
                 create_kwargs["displayName"] = parsed["display_name"]
             if parsed.get("tags"):
                 create_kwargs["tags"] = parsed["tags"]
-            if parsed.get("avatar"):
-                create_kwargs["avatar"] = parsed["avatar"]
+            if _declared_avatar(parsed):
+                create_kwargs["avatar"] = _declared_avatar(parsed)
             if not dry_run:
                 skill_config.create_skill(**create_kwargs)
             summary.created += 1
@@ -433,7 +632,10 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
         from admin.mcp_registry_check import verify_mcp_registry
 
         check = verify_mcp_registry(root)
-        summary.mcp_missing = check["mcp_missing"]
+        # A skill the fork doesn't seed can't hard-500 — don't gate on it.
+        summary.mcp_missing = [
+            m for m in check["mcp_missing"] if m.split(" -> ", 1)[0] not in set(summary.skipped_by_fork)
+        ]
         summary.mcp_warnings = check["mcp_warnings"]
         if summary.mcp_missing:
             logger.error(
@@ -447,4 +649,9 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
         logger.warning("platform_seed: mcp registry check crashed: %s", e)
         summary.mcp_warnings = [f"mcp-registry check crashed (verification skipped): {e}"]
 
+    # Private packages' post-seed work (e.g. the user-guide KB sync). Runs on
+    # every deploy and promotion, in the image being deployed. Never fatal.
+    import extensions
+
+    summary.extensions = extensions.after_seed(dry_run=dry_run)
     return summary

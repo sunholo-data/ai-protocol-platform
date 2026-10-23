@@ -32,20 +32,20 @@ def test_slugify_basic(name: str, expected: str) -> None:
 
 
 def test_slugify_empty_falls_back() -> None:
-    assert slugify("") == "skill"
+    assert slugify("") == "untitled-skill"
 
 
 def test_slugify_only_punctuation_falls_back() -> None:
-    assert slugify("!!!") == "skill"
+    assert slugify("!!!") == "untitled-skill"
 
 
 def test_slugify_only_emoji_falls_back() -> None:
-    assert slugify("🎉🚀") == "skill"
+    assert slugify("🎉🚀") == "untitled-skill"
 
 
 def test_slugify_too_short_falls_back() -> None:
     # Single char input becomes a 1-char trimmed result, below the 3-char min.
-    assert slugify("a") == "skill"
+    assert slugify("a") == "untitled-skill"
 
 
 def test_slugify_truncates_at_max_length() -> None:
@@ -122,3 +122,11 @@ def test_unique_slug_truncates_to_fit_with_suffix() -> None:
         result = unique_slug("user-1", base)
     assert len(result) <= 60
     assert result.endswith("-2")
+
+
+def test_fallback_is_not_a_reserved_slug():
+    """The fallback must itself be storable — "skill" is reserved, so a
+    one-character name used to fail at SkillConfig validation (a 500)."""
+    from db.models import RESERVED_SLUGS
+
+    assert slugify("x") not in RESERVED_SLUGS

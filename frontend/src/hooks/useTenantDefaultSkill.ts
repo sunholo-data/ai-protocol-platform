@@ -8,7 +8,7 @@ import type { Skill } from "@/types/skill";
  * v6.11.0 — resolve the tenant's default skill id for the skill dropdown.
  *
  * The default is stored tenant-side as `clients/me.default_skill` (a SLUG, e.g.
- * "one-assistant"); this hook fetches it once and maps it back to the concrete
+ * "demo-assistant"); this hook fetches it once and maps it back to the concrete
  * skillId within the caller's `skills` list. The dropdown pins + highlights
  * that skill at the top. Friendly→id resolution (slug→skillId) happens here so
  * the presentation layer only ever deals in the canonical id (CLAUDE.md #9).

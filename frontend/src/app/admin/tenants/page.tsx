@@ -17,6 +17,7 @@ import { TenantEditor } from "@/components/admin/TenantEditor";
 import { TenantOnboardWizard } from "@/components/admin/TenantOnboardWizard";
 import type { ClientConfig, SkillOption, TenantValidation } from "@/components/admin/tenantAdmin";
 import { HealthBadge, type HealthState, ReachDot } from "@/components/admin/tenantHealth";
+import { PLATFORM_OWNER_UID } from "@/lib/platformOwner";
 
 // The subset of a /api/skills entry this page needs.
 interface SkillLite {
@@ -24,8 +25,6 @@ interface SkillLite {
   displayName?: string;
   name?: string;
 }
-
-const PLATFORM_OWNER_UID = "aitana-platform";
 
 type Status =
   | { kind: "loading" }

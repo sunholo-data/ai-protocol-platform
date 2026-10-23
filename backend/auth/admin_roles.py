@@ -20,7 +20,7 @@ backend-admin can no longer drift:
                                   platform admin.
   - ``one-admin``               — folded in as a scoped SKILL-admin capability
                                   (edit/delete skills you don't own), NOT a
-                                  platform admin. Retained so ONE's admin team
+                                  platform admin. Retained so the tenant's admin team
                                   keeps working; new grants should prefer
                                   ``aitana-admin`` + ownership.
 
@@ -36,12 +36,26 @@ from collections.abc import Iterable
 # Platform super-admin — unrestricted across every tenant.
 PLATFORM_ADMIN_TAG = "aitana-admin"
 
-# Prefix for the per-tenant admin claim shape, e.g. ``tenant-admin:acmeenergy.com``.
+# Prefix for the per-tenant admin claim shape, e.g. ``tenant-admin:energy.example``.
 TENANT_ADMIN_PREFIX = "tenant-admin:"
 
 # Tags that grant skill-management (edit/delete a skill you don't own). A
 # platform admin qualifies; ``one-admin`` is the folded legacy skill-admin tag.
 SKILL_ADMIN_TAGS = frozenset({PLATFORM_ADMIN_TAG, "one-admin"})
+
+# Eligibility for a resident agent instance (v6.40.0 P1). Holding it means the
+# user MAY have a long-lived agent of their own: a dedicated Cloud Run instance,
+# its own service account, and a monthly model budget.
+#
+# CODE-DEFINED, like the structural admin tags, rather than registry-managed.
+# The backend branches on this tag, so a registry-only definition would let a
+# typo'd entry fail silently — the grant would appear to succeed and the
+# capability would never arrive.
+#
+# It is deliberately NOT admin-conferring: it lets its holder administer nobody,
+# and a tenant admin granting it to their own users is the intended workflow,
+# not an escalation. See ``is_admin_conferring_tag``.
+RESIDENT_USER_TAG = "resident-user"
 
 
 def _as_set(group_tags: Iterable[str] | None) -> frozenset[str]:
@@ -85,6 +99,17 @@ def is_tenant_admin(group_tags: Iterable[str] | None, domain: str) -> bool:
     return f"{TENANT_ADMIN_PREFIX}{domain}" in tags
 
 
+def is_resident_user(group_tags: Iterable[str] | None) -> bool:
+    """True iff the caller may have a resident agent instance.
+
+    Eligibility only — it says nothing about whether one has been provisioned
+    yet. A holder with no instance is a normal state (they have simply not asked
+    for anything yet), and the two must stay distinguishable so "you may not
+    have one" never reads the same as "yours is still starting".
+    """
+    return RESIDENT_USER_TAG in _as_set(group_tags)
+
+
 def is_skill_admin(group_tags: Iterable[str] | None) -> bool:
     """True iff the caller may manage skills they do not own (platform or ``one-admin``)."""
     return bool(_as_set(group_tags) & SKILL_ADMIN_TAGS)
@@ -113,10 +138,12 @@ def is_admin_conferring_tag(tag: str) -> bool:
 
 __all__ = [
     "PLATFORM_ADMIN_TAG",
+    "RESIDENT_USER_TAG",
     "SKILL_ADMIN_TAGS",
     "TENANT_ADMIN_PREFIX",
     "is_admin_conferring_tag",
     "is_platform_admin",
+    "is_resident_user",
     "is_skill_admin",
     "is_tenant_admin",
     "tenant_admin_domains",

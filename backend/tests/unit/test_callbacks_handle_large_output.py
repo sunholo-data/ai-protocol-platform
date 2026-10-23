@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -125,9 +126,53 @@ async def test_offload_roundtrip_save_then_load_real_artifact_service():
 
     # The artifact MUST actually be retrievable — this is the assertion that
     # fails if save_artifact isn't awaited (the coroutine never runs).
-    loaded = await tool_context.load_artifact(filename=f"get_document_content_response_{tool_context.invocation_id}")
+    # Read the name back OUT of the pointer rather than reconstructing it: the
+    # name gained a payload digest (M2) and this test should verify the roundtrip,
+    # not the naming scheme. Parsing it also checks the pointer names something real.
+    artifact_name = re.search(r"artifact '([^']+)'", pointer).group(1)
+    loaded = await tool_context.load_artifact(filename=artifact_name)
     assert loaded is not None, "artifact was not saved — save_artifact was not awaited"
     assert loaded.text == big
+
+
+async def test_two_different_offloads_in_one_turn_get_distinct_names():
+    """REGRESSION (2026-08-24 retrieve_artifact loop): the name was tool + invocation
+    id, and invocation_id is constant across a turn — so two offloads collided and
+    produced a BYTE-IDENTICAL pointer. Three calls looked like one stalled call, in
+    the transcript and to the model. Distinct payloads must be distinguishable."""
+    from google.adk.agents import LlmAgent
+    from google.adk.agents.invocation_context import InvocationContext
+    from google.adk.artifacts import InMemoryArtifactService
+    from google.adk.sessions import InMemorySessionService
+    from google.adk.tools.tool_context import ToolContext
+
+    session_service = InMemorySessionService()
+    session = await session_service.create_session(app_name="t", user_id="u", session_id="s")
+    ictx = InvocationContext(
+        session_service=session_service,
+        artifact_service=InMemoryArtifactService(),
+        invocation_id="inv-same",
+        agent=LlmAgent(name="probe", model="gemini-2.5-flash", description="d", instruction="i"),
+        session=session,
+    )
+    tool_context = ToolContext(ictx)
+    tool = SimpleNamespace(name="get_document_content")
+
+    first = await _handle_large_output(tool=tool, args={}, tool_context=tool_context, tool_response="A" * 60_000)
+    second = await _handle_large_output(tool=tool, args={}, tool_context=tool_context, tool_response="B" * 60_000)
+
+    assert first != second, "two different payloads produced an identical pointer"
+
+    # Both must still resolve to their OWN content — distinct names, no clobber.
+    name_a = re.search(r"artifact '([^']+)'", first).group(1)
+    name_b = re.search(r"artifact '([^']+)'", second).group(1)
+    assert (await tool_context.load_artifact(filename=name_a)).text == "A" * 60_000
+    assert (await tool_context.load_artifact(filename=name_b)).text == "B" * 60_000
+
+    # An identical repeated payload should NOT spawn a second artifact — the digest
+    # makes a genuine repeat idempotent, which is the useful half of the collision.
+    repeat = await _handle_large_output(tool=tool, args={}, tool_context=tool_context, tool_response="A" * 60_000)
+    assert repeat == first
 
 
 # --- make_before_agent ---

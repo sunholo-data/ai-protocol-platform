@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ChatMarkdown } from "../ChatMarkdown";
 import { hastText, hastLanguage } from "../CodeBlock";
 
-// The ONE Data Analyst shows the SQL behind every number, and the next thing a
+// The Example Data Analyst shows the SQL behind every number, and the next thing a
 // user does with it is run it elsewhere. These tests pin the part that is easy
 // to get silently wrong: what actually lands on the clipboard.
 

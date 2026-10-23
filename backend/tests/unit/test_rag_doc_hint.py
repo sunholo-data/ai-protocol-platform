@@ -105,6 +105,21 @@ def test_rag_hint_no_warning_when_loads_clean():
 
 
 @pytest.mark.asyncio
+async def test_rag_loader_does_not_provision_a_corpus_without_attachments():
+    from adk.callbacks import _STATE_RAG_CORPUS_NAME, _rag_loader
+
+    state = {_STATE_RAG_CORPUS_NAME: "legacy/pdf-corpus"}
+    cc = SimpleNamespace(state=state, _invocation_context=SimpleNamespace(user_id="alice"), session=None)
+    with (
+        patch("rag.corpus.get_existing_user_corpus", new=AsyncMock(return_value=None)),
+        patch("rag.corpus.get_or_create_user_corpus", new=AsyncMock()) as create,
+    ):
+        await _rag_loader(cc, state, [])
+    create.assert_not_called()
+    assert _STATE_RAG_CORPUS_NAME not in state
+
+
+@pytest.mark.asyncio
 async def test_rag_loader_records_error_and_never_raises_on_import_failure():
     """A RAG import 403 (Vertex RAG SA can't read the source bucket) must be
     caught, recorded for the AI, and NOT propagate — the turn continues and
@@ -115,7 +130,7 @@ async def test_rag_loader_records_error_and_never_raises_on_import_failure():
     cc = SimpleNamespace(state=state, _invocation_context=SimpleNamespace(user_id="u1"), session=None)
     with (
         patch("rag.corpus.get_or_create_user_corpus", new=AsyncMock(return_value="corpus/1")),
-        patch("rag.corpus.import_document_from_gcs", new=AsyncMock(side_effect=Exception("403 denied on bucket"))),
+        patch("rag.parsed_text.import_parsed_document", new=AsyncMock(side_effect=Exception("403 denied on bucket"))),
         patch("db.firestore.get_document", return_value={"sourceUrl": "gs://b/x.pdf"}),
     ):
         await _rag_loader(cc, state, ["doc-A"])  # must not raise
@@ -149,7 +164,7 @@ async def test_rag_loader_clears_stale_error_on_successful_retry():
     cc = SimpleNamespace(state=state, _invocation_context=SimpleNamespace(user_id="u1"), session=None)
     with (
         patch("rag.corpus.get_or_create_user_corpus", new=AsyncMock(return_value="corpus/1")),
-        patch("rag.corpus.import_document_from_gcs", new=AsyncMock(return_value=None)),
+        patch("rag.parsed_text.import_parsed_document", new=AsyncMock(return_value=None)),
         patch("db.firestore.get_document", return_value={"sourceUrl": "gs://b/x.pdf"}),
     ):
         await _rag_loader(cc, state, ["doc-A"])

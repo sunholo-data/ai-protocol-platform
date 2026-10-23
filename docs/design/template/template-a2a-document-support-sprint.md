@@ -81,7 +81,7 @@ Tasks:
 1. Create `cli/aitana/a2a.py` (or extend existing CLI group). Two Click commands:
    - `aiplatform a2a probe-org-bucket` — checks env on deployed service, runs SA-authed list call, prints object count + first 5 names
    - `aiplatform a2a send-file <local-path> --skill <skill-id>` — POSTs message/send with FilePart to local `/a2a`, prints doc_ids + agent reply
-2. Edit `cloudbuild.yaml` (root, the frontend deploy): add `ENABLE_A2A_FILE_INPUT=true` + `A2A_AGENT_DOCUMENTS_BUCKET=gs://aitana-public-bucket/demo/` (or pick a sensible Sunholo bucket). Keep `\` line continuation pattern from G45-PARSE-FIX.
+2. Edit `cloudbuild.yaml` (root, the frontend deploy): add `ENABLE_A2A_FILE_INPUT=true` + `A2A_AGENT_DOCUMENTS_BUCKET=gs://example-public-documents/demo/` (or pick a sensible Sunholo bucket). Keep `\` line continuation pattern from G45-PARSE-FIX.
 3. Grant frontend SA `roles/storage.objectViewer` on the chosen bucket (manual via `gcloud projects add-iam-policy-binding` OR Terraform if standard pattern).
 4. Push, wait deploy, verify env vars landed (lesson from G45-PARSE-FIX), run `aiplatform a2a probe-org-bucket` against deployed.
 

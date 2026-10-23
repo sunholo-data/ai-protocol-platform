@@ -20,9 +20,9 @@ def client() -> TestClient:
 
 def _body() -> dict:
     return {
-        "bucket": "multivac-acme-energy-bucket",
+        "bucket": "example-customer-documents",
         "object": "PPAs/longform/example-A.pdf",
-        "skillId": "one-ppa-expert",
+        "skillId": "demo-ppa-expert",
         "originalFilename": "example-A.pdf",
         "sourceFormat": "pdf",
         "blocks": [
@@ -49,7 +49,7 @@ class TestPrewarmFromBlocks:
         assert resp.status_code == 200
         body = resp.json()
         assert body["ownerUid"] == "aitana-platform"
-        assert body["sourceUrl"] == "gs://multivac-acme-energy-bucket/PPAs/longform/example-A.pdf"
+        assert body["sourceUrl"] == "gs://example-customer-documents/PPAs/longform/example-A.pdf"
         assert body["blockCount"] == 2
         assert len(stored) == 1
         _, kwargs = stored[0]

@@ -11,6 +11,14 @@ from fastapi.testclient import TestClient
 
 from auth import User, get_current_user
 
+
+@pytest.fixture(autouse=True)
+def _no_version_store():
+    """Keep the version store (GCS) out of unit tests."""
+    with patch("tools.documents.ingest._save_version", return_value=None):
+        yield
+
+
 _USER = User(uid="user1", email="alice@example.com", domain="example.com")
 
 
@@ -36,10 +44,10 @@ class TestUploadBucketResolution:
             captured["bucket"] = bucket_name
 
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="example-documents"),
-            patch("tools.documents.upload._upload_to_gcs", side_effect=fake_gcs_upload),
-            patch("tools.documents.upload._run_parse", return_value=("parsed", [], 10, None)),
-            patch("tools.documents.upload._store_document"),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="example-documents"),
+            patch("tools.documents.ingest._upload_to_gcs", side_effect=fake_gcs_upload),
+            patch("tools.documents.ingest._run_parse", return_value=("parsed", [], 10, None)),
+            patch("tools.documents.ingest._store_document"),
             patch("db.folders.ensure_default_folder", return_value="folder1"),
         ):
             resp = client.post("/api/documents/upload", files=_file())
@@ -54,10 +62,10 @@ class TestUploadBucketResolution:
             captured["path"] = path
 
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="example-documents"),
-            patch("tools.documents.upload._upload_to_gcs", side_effect=fake_gcs_upload),
-            patch("tools.documents.upload._run_parse", return_value=("parsed", [], 10, None)),
-            patch("tools.documents.upload._store_document"),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="example-documents"),
+            patch("tools.documents.ingest._upload_to_gcs", side_effect=fake_gcs_upload),
+            patch("tools.documents.ingest._run_parse", return_value=("parsed", [], 10, None)),
+            patch("tools.documents.ingest._store_document"),
             patch("db.folders.ensure_default_folder", return_value="folder1"),
         ):
             resp = client.post("/api/documents/upload", files=_file())
@@ -74,10 +82,10 @@ class TestUploadBucketResolution:
                 immediate_writes.append(doc_id)
 
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="bucket"),
-            patch("tools.documents.upload._upload_to_gcs"),
-            patch("tools.documents.upload._run_parse", return_value=("parsed", [], 10, None)),
-            patch("tools.documents.upload._store_document", side_effect=fake_store),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="bucket"),
+            patch("tools.documents.ingest._upload_to_gcs"),
+            patch("tools.documents.ingest._run_parse", return_value=("parsed", [], 10, None)),
+            patch("tools.documents.ingest._store_document", side_effect=fake_store),
             patch("db.folders.ensure_default_folder", return_value="folder1"),
         ):
             client.post("/api/documents/upload", files=_file())
@@ -92,10 +100,10 @@ class TestUploadBucketResolution:
             return "auto-folder"
 
         with (
-            patch("tools.documents.upload.resolve_documents_bucket", return_value="bucket"),
-            patch("tools.documents.upload._upload_to_gcs"),
-            patch("tools.documents.upload._run_parse", return_value=("parsed", [], 10, None)),
-            patch("tools.documents.upload._store_document"),
+            patch("tools.documents.ingest.resolve_documents_bucket", return_value="bucket"),
+            patch("tools.documents.ingest._upload_to_gcs"),
+            patch("tools.documents.ingest._run_parse", return_value=("parsed", [], 10, None)),
+            patch("tools.documents.ingest._store_document"),
             patch("db.folders.ensure_default_folder", side_effect=capture_ensure),
         ):
             resp = client.post("/api/documents/upload", files=_file())
@@ -104,6 +112,6 @@ class TestUploadBucketResolution:
         assert calls == ["user1"]
 
     def test_unsupported_extension_returns_400(self, client: TestClient):
-        with patch("tools.documents.upload.resolve_documents_bucket", return_value="bucket"):
+        with patch("tools.documents.ingest.resolve_documents_bucket", return_value="bucket"):
             resp = client.post("/api/documents/upload", files=_file("test.exe"))
         assert resp.status_code == 400

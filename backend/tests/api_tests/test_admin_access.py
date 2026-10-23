@@ -69,12 +69,12 @@ def test_access_check_tag_union_provenance(admin_client: TestClient) -> None:
         patch("admin.access_routes._fb_auth", return_value=fb),
         patch("admin.access_routes.resolve_derived_group_tags", return_value=frozenset({"DERIVED", "SHARED"})),
     ):
-        resp = admin_client.post("/api/admin/access/check", json={"email": "alice@one.com"})
+        resp = admin_client.post("/api/admin/access/check", json={"email": "alice@customer.example"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["user_found"] is True
     assert body["uid"] == "u1"
-    assert body["domain"] == "one.com"
+    assert body["domain"] == "customer.example"
     by_tag = {t["tag"]: t["provenances"] for t in body["tags"]}
     assert by_tag["DIRECT"] == ["direct"]
     assert by_tag["DERIVED"] == ["domain-derived"]
@@ -86,7 +86,7 @@ def test_access_check_tool_permission_user_level(admin_client: TestClient) -> No
 
     def _get_doc(collection, doc_id):
         # user-level allow doc wins (mirrors can_use_tool order).
-        if doc_id == "alice@one.com":
+        if doc_id == "alice@customer.example":
             return {"type": "user", "tools": ["search"]}
         return None
 
@@ -95,7 +95,9 @@ def test_access_check_tool_permission_user_level(admin_client: TestClient) -> No
         patch("admin.access_routes.resolve_derived_group_tags", return_value=frozenset()),
         patch("admin.access_routes.fs.get_document", side_effect=_get_doc),
     ):
-        resp = admin_client.post("/api/admin/access/check", json={"email": "alice@one.com", "toolName": "search"})
+        resp = admin_client.post(
+            "/api/admin/access/check", json={"email": "alice@customer.example", "toolName": "search"}
+        )
     assert resp.status_code == 200
     tp = resp.json()["tool_permission"]
     assert tp["tool"] == "search"
@@ -111,7 +113,9 @@ def test_access_check_tool_permission_default_deny(admin_client: TestClient) -> 
         patch("admin.access_routes.resolve_derived_group_tags", return_value=frozenset()),
         patch("admin.access_routes.fs.get_document", return_value=None),
     ):
-        resp = admin_client.post("/api/admin/access/check", json={"email": "alice@one.com", "toolName": "search"})
+        resp = admin_client.post(
+            "/api/admin/access/check", json={"email": "alice@customer.example", "toolName": "search"}
+        )
     assert resp.status_code == 200
     tp = resp.json()["tool_permission"]
     assert tp["allowed"] is False
@@ -125,7 +129,7 @@ def test_access_check_unknown_user_degrades(admin_client: TestClient) -> None:
         patch("admin.access_routes._fb_auth", return_value=fb),
         patch("admin.access_routes.resolve_derived_group_tags", return_value=frozenset({"DERIVED"})),
     ):
-        resp = admin_client.post("/api/admin/access/check", json={"email": "ghost@one.com"})
+        resp = admin_client.post("/api/admin/access/check", json={"email": "ghost@customer.example"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["user_found"] is False

@@ -17,20 +17,20 @@ BASE = "http://localhost:1956"
 def test_skill_set_merges_model_into_metadata_and_puts() -> None:
     """`skill set X --model-tier smart` GETs then PUTs skillMetadata.model=smart,
     preserving other skillMetadata fields, and prints the resulting model."""
-    respx.get(f"{BASE}/api/skills/one-ppa-expert").mock(
+    respx.get(f"{BASE}/api/skills/demo-ppa-expert").mock(
         return_value=httpx.Response(
             200,
             json={
-                "id": "one-ppa-expert",
+                "id": "demo-ppa-expert",
                 "skillMetadata": {"model": "lite", "temperature": 0.2},
             },
         )
     )
-    put_route = respx.put(f"{BASE}/api/skills/one-ppa-expert").mock(
+    put_route = respx.put(f"{BASE}/api/skills/demo-ppa-expert").mock(
         return_value=httpx.Response(
             200,
             json={
-                "id": "one-ppa-expert",
+                "id": "demo-ppa-expert",
                 "skillMetadata": {"model": "smart", "temperature": 0.2},
             },
         )
@@ -38,7 +38,7 @@ def test_skill_set_merges_model_into_metadata_and_puts() -> None:
     runner = CliRunner()
     result = runner.invoke(
         main,
-        ["--env", "local", "skill", "set", "one-ppa-expert", "--model-tier", "smart"],
+        ["--env", "local", "skill", "set", "demo-ppa-expert", "--model-tier", "smart"],
     )
     assert result.exit_code == 0, result.output
     assert put_route.called

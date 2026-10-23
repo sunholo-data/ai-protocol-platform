@@ -57,7 +57,7 @@ class TestAdminConferringTags:
     def test_conferring_tags_identified(self, tag):
         assert is_admin_conferring_tag(tag) is True
 
-    @pytest.mark.parametrize("tag", ["ONE", "beta-tester", "", "  ", "tenant-admin"])
+    @pytest.mark.parametrize("tag", ["example-team", "beta-tester", "", "  ", "tenant-admin"])
     def test_ordinary_tags_are_not_conferring(self, tag):
         # bare "tenant-admin" (no colon) is not the claim shape, so not conferring
         assert is_admin_conferring_tag(tag) is False
@@ -169,7 +169,8 @@ class TestTagMembersScoping:
 
     def _fb_with_users(self, *emails):
         recs = [
-            SimpleNamespace(uid=f"u{i}", email=e, custom_claims={"groupTags": ["ONE"]}) for i, e in enumerate(emails)
+            SimpleNamespace(uid=f"u{i}", email=e, custom_claims={"groupTags": ["example-team"]})
+            for i, e in enumerate(emails)
         ]
         fb = MagicMock()
         fb.list_users.return_value = SimpleNamespace(iterate_all=lambda: iter(recs))
@@ -179,14 +180,14 @@ class TestTagMembersScoping:
         """Unscoped, this endpoint is a directory of every tenant's users."""
         fb = self._fb_with_users("a1@a.com", "b1@b.com", "a2@a.com")
         with patch("admin.group_tags_routes._fb_auth", return_value=fb):
-            r = self._members_app(_TENANT_A).get("/api/admin/groups/ONE/members")
+            r = self._members_app(_TENANT_A).get("/api/admin/groups/example-team/members")
         assert r.status_code == 200
         assert [m["email"] for m in r.json()["members"]] == ["a1@a.com", "a2@a.com"]
 
     def test_platform_sees_all_holders(self):
         fb = self._fb_with_users("a1@a.com", "b1@b.com")
         with patch("admin.group_tags_routes._fb_auth", return_value=fb):
-            r = self._members_app(_PLATFORM).get("/api/admin/groups/ONE/members")
+            r = self._members_app(_PLATFORM).get("/api/admin/groups/example-team/members")
         assert {m["email"] for m in r.json()["members"]} == {"a1@a.com", "b1@b.com"}
 
     def test_scanned_count_stays_truthful_under_filtering(self):
@@ -194,7 +195,7 @@ class TestTagMembersScoping:
         count instead would make that warning wrong."""
         fb = self._fb_with_users("a1@a.com", "b1@b.com", "c1@c.com")
         with patch("admin.group_tags_routes._fb_auth", return_value=fb):
-            r = self._members_app(_TENANT_A).get("/api/admin/groups/ONE/members")
+            r = self._members_app(_TENANT_A).get("/api/admin/groups/example-team/members")
         body = r.json()
         assert body["scanned"] == 3
         assert len(body["members"]) == 1

@@ -34,7 +34,7 @@ _GROUNDING_STATE_KEY = "temp:_adk_grounding_metadata"
 
 # v6.15.0 search-sources-openable-documents: enterprise (Vertex AI Search)
 # grounding cites gs:// URIs into the datastore's SOURCE bucket. That datastore
-# (aitana3) indexes the PROD llmops bucket, so its URIs are prod even on dev.
+# (example-datastore) indexes the PROD llmops bucket, so its URIs are prod even on dev.
 # When this env var is set (dev/test), we rewrite the bucket component of every
 # gs:// source URI to the local env's llmops bucket — the docs are duplicated at
 # IDENTICAL object paths — so import/preview reads the env's own bucket (a

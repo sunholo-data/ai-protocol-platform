@@ -32,9 +32,9 @@ describe("DocTabsBar", () => {
     expect(screen.getByText("gamma.xlsx")).toBeInTheDocument();
   });
 
-  it("shows 'No open documents' when tabs is empty", () => {
-    renderBar({ tabs: [] });
-    expect(screen.getByText(/no open documents/i)).toBeInTheDocument();
+  it("renders nothing when no document is open", () => {
+    const { container } = renderBar({ tabs: [] });
+    expect(container).toBeEmptyDOMElement();
   });
 
   it("clicking a tab calls onSelect with its id", async () => {
@@ -43,10 +43,9 @@ describe("DocTabsBar", () => {
     expect(props.onSelect).toHaveBeenCalledWith("d2");
   });
 
-  it("calls onToggleBrowser when toggle button clicked", async () => {
-    const { props } = renderBar();
-    await userEvent.click(screen.getByLabelText(/sidebar/i));
-    expect(props.onToggleBrowser).toHaveBeenCalled();
+  it("no longer carries the sidebar toggle (it moved to the header)", () => {
+    renderBar();
+    expect(screen.queryByLabelText(/sidebar/i)).not.toBeInTheDocument();
   });
 
   it("does not render an upload button", () => {

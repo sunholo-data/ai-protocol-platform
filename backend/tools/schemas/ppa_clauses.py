@@ -1,4 +1,4 @@
-"""Structured PPA clause schema (v6.4.0 ONE-DEMO M2).
+"""Structured PPA clause schema (v6.4.0 TENANT-DEMO M2).
 
 Single Pydantic schema drives:
   1. extract_ppa_clauses(doc_id) -> PpaClauses  — single-doc extraction

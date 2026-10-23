@@ -24,6 +24,8 @@
 
 ### Milestone 1: [Name]
 **Scope:** frontend | backend | fullstack
+**Repo:** upstream | here  <!-- omit if this repo has no upstream; a milestone
+                                spanning both should usually be split -->
 **Goal:** [What this milestone achieves]
 **Estimated:** [LOC] implementation + [LOC] tests = [total LOC]
 **Duration:** [days]

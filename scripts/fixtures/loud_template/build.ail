@@ -1,0 +1,53 @@
+-- build.ail — zip the hand-written OOXML parts into loud-template.docx.
+--
+-- A .docx is a zip of XML parts, so building one needs no document library:
+-- read the parts, write the archive. `[Content_Types].xml` goes first because
+-- that is the order a real Word package uses.
+--
+-- Run:  ailang run --caps FS --entry main scripts/fixtures/loud_template/build.ail
+
+module scripts/fixtures/loud_template/build
+
+import std/fs (readFile, writeFile, fileExists)
+import std/io (println)
+import std/zip (createArchive)
+import std/result (Result)
+
+-- Parts in package order. `[Content_Types].xml` MUST be first.
+export func partNames() -> list[string] {
+  ["[Content_Types].xml",
+   "_rels/.rels",
+   "docProps/core.xml",
+   "docProps/app.xml",
+   "word/document.xml",
+   "word/_rels/document.xml.rels",
+   "word/styles.xml",
+   "word/theme/theme1.xml",
+   "word/header1.xml",
+   "word/footer1.xml"]
+}
+
+export func entryFor(root: string, part: string) -> { name: string, content: string } ! {FS} {
+  { name: part, content: readFile("${root}/parts/${part}") }
+}
+
+export func main() -> () ! {FS, IO} {
+  let root = "scripts/fixtures/loud_template";
+  let out = "${root}/loud-template.docx";
+  let entries = [
+    entryFor(root, "[Content_Types].xml"),
+    entryFor(root, "_rels/.rels"),
+    entryFor(root, "docProps/core.xml"),
+    entryFor(root, "docProps/app.xml"),
+    entryFor(root, "word/document.xml"),
+    entryFor(root, "word/_rels/document.xml.rels"),
+    entryFor(root, "word/styles.xml"),
+    entryFor(root, "word/theme/theme1.xml"),
+    entryFor(root, "word/header1.xml"),
+    entryFor(root, "word/footer1.xml")
+  ];
+  match createArchive(out, entries) {
+    Ok(_) => println("wrote ${out}"),
+    Err(e) => println("FAILED: ${e}")
+  }
+}

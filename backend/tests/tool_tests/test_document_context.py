@@ -6,6 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
+from tools.documents.context import UNCHECKED_INTERNAL
+
 _SAMPLE_BLOCKS = [
     {"type": "heading", "text": "Introduction", "level": 1},
     {"type": "paragraph", "text": "This is a paragraph."},
@@ -114,7 +116,7 @@ class TestBuildDocumentContext:
         from tools.documents.context import build_document_context
 
         with patch("tools.documents.context.get_document", return_value=self._fake_firestore_doc()):
-            content, blocks = build_document_context("doc123", mode="markdown")
+            content, blocks = build_document_context("doc123", mode="markdown", caller_uid=UNCHECKED_INTERNAL)
         assert "report.docx" in content
         assert "Introduction" in content
         assert blocks is None
@@ -125,7 +127,7 @@ class TestBuildDocumentContext:
         from tools.documents.context import build_document_context
 
         with patch("tools.documents.context.get_document", return_value=self._fake_firestore_doc()):
-            content, blocks = build_document_context("doc123", mode="blocks")
+            content, blocks = build_document_context("doc123", mode="blocks", caller_uid=UNCHECKED_INTERNAL)
         parsed = json.loads(content)
         assert parsed["docId"] == "doc123"
         assert isinstance(parsed["blocks"], list)
@@ -136,21 +138,57 @@ class TestBuildDocumentContext:
 
         with patch("tools.documents.context.get_document", return_value=None):
             with pytest.raises(KeyError, match="doc999"):
-                build_document_context("doc999")
+                build_document_context("doc999", caller_uid=UNCHECKED_INTERNAL)
 
     def test_section_filter(self):
         from tools.documents.context import build_document_context
 
         with patch("tools.documents.context.get_document", return_value=self._fake_firestore_doc()):
-            content, _ = build_document_context("doc123", mode="markdown", section="Introduction")
+            content, _ = build_document_context(
+                "doc123", mode="markdown", section="Introduction", caller_uid=UNCHECKED_INTERNAL
+            )
         assert "Introduction" in content
         # Data section should not appear
         assert "Data" not in content
+
+    def test_missing_section_refuses_instead_of_returning_an_empty_document(self):
+        """A section that matches nothing must SAY so (PRECUT-HARDENING M2).
+
+        The heading scan falls back to a keyword scrape, and when that also misses
+        it yielded ``[]`` — which renders as an empty document, indistinguishable
+        from "this section exists and is blank". Same silent-substitution shape as
+        the wrong-document bug: a plausible-looking answer standing in for "not
+        found". CLAUDE.md #8 — the failure has to be visible.
+        """
+        from tools.documents.context import build_document_context
+
+        with patch("tools.documents.context.get_document", return_value=self._fake_firestore_doc()):
+            content, blocks = build_document_context(
+                "doc123", mode="markdown", section="Termination for Convenience", caller_uid=UNCHECKED_INTERNAL
+            )
+
+        assert "Termination for Convenience" in content
+        assert "no section" in content.lower() or "not found" in content.lower()
+        assert blocks is None
+
+    def test_missing_section_refuses_in_blocks_mode_too(self):
+        from tools.documents.context import build_document_context
+
+        with patch("tools.documents.context.get_document", return_value=self._fake_firestore_doc()):
+            content, blocks = build_document_context(
+                "doc123", mode="blocks", section="Nonexistent Clause", caller_uid=UNCHECKED_INTERNAL
+            )
+
+        assert "Nonexistent Clause" in content
+        assert blocks is None
+        # Must NOT be a well-formed document payload with an empty blocks list —
+        # that is precisely the shape the model reads as "the section is empty".
+        assert '"blocks": []' not in content
 
     def test_metadata_in_markdown(self):
         from tools.documents.context import build_document_context
 
         with patch("tools.documents.context.get_document", return_value=self._fake_firestore_doc()):
-            content, _ = build_document_context("doc123", mode="markdown")
+            content, _ = build_document_context("doc123", mode="markdown", caller_uid=UNCHECKED_INTERNAL)
         assert "Jane" in content
         assert "5" in content  # page count

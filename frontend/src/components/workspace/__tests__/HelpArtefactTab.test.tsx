@@ -107,3 +107,26 @@ describe("HelpArtefactTab", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("HelpArtefactTab with a translation", () => {
+  it("shows the page in the reader's language when /help-content has it, else the source", async () => {
+    const { LocaleProvider } = await import("@/i18n");
+    const page = {
+      ...PAGES.skills,
+      translations: { xx: { title: "Xx skills", summary: "", body: "## Xx share\n\nXx click." } },
+    };
+    fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify(page)));
+    dataRoot = { help: [{ slug: "skills", anchor: "xx-share", title: "Xx skills › Xx share" }] };
+    const { unmount } = render(
+      <LocaleProvider locale="xx" defaultLocale="en">
+        <HelpArtefactTab surfaceId="knowledge_sources" />
+      </LocaleProvider>,
+    );
+    expect(await screen.findByRole("heading", { name: "Xx skills" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Xx share" })).toHaveAttribute("id", "xx-share");
+    unmount();
+    clearHelpPageCache();
+    render(<HelpArtefactTab surfaceId="knowledge_sources" />);
+    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
+  });
+});

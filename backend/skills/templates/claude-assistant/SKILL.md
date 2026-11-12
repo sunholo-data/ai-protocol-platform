@@ -21,6 +21,8 @@ metadata:
   # deploys only (Aitana dev): eu-strict rejects a pinned non-EU model at
   # resolve_model_chain — use `model: <a gemini tier>` for an EU-portable assistant.
   model: claude-sonnet-5-5
+  # Model menu (adk.model_choice): named for its model, so a pick must not swap it.
+  modelChoice: false
   tools:
     - google_search
     - url_processing

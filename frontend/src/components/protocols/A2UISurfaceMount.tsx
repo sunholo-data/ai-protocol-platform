@@ -34,13 +34,16 @@ import { A2uiSurface } from "@a2ui/react/v0_9";
 import { fetchWithAuth } from "@/lib/apiClient";
 import { useActionDrivenAgent } from "@/hooks/useActionDrivenAgent";
 import { emitSkillSwitchIntent } from "@/lib/skillSwitch";
+import { FOCUS_ACTION_PREFIX, requestWorkbenchFocus } from "@/lib/workbenchFocus";
 import { SurfaceErrorBoundary } from "./SurfaceErrorBoundary";
 import { logger } from "@/lib/logger";
+import { emitWorkbenchConfirmation } from "@/lib/workbenchConfirmation";
 import {
   type SurfacePolicy,
   useSurfaceRegistry,
   useSurfaceState,
 } from "@/providers/SurfaceRegistry";
+import { Spinner } from "@/components/ui/spinner";
 
 export interface A2UISurfaceMountProps {
   surfaceId: string;
@@ -150,6 +153,8 @@ export function A2UISurfaceMount({
   // pointer events, making the busy state obvious. Ref = correctness (the
   // real guard), state = feedback (the visible cue). Both flip together.
   const actionInFlightRef = useRef(false);
+  const directGenerationRef = useRef(0);
+  const autoRefreshSequenceRef = useRef(0);
   const [isRunning, setIsRunning] = useState(false);
   // NEVER SILENT (#8): a failed action-triggered run (RUN_ERROR / gate reject /
   // network) MUST show the user something, not just console.warn. This is the
@@ -169,14 +174,70 @@ export function A2UISurfaceMount({
     kind: "working" | "ok" | "error";
     text: string;
   } | null>(null);
+  const [refreshError, setRefreshError] = useState(false);
+  const refreshAction = state?.artifact?.autoRefresh?.action;
+  const refreshSeconds = state?.artifact?.autoRefresh?.intervalSeconds ?? 15;
+  useEffect(() => {
+    if (!state?.surface || !sessionId || !refreshAction?.startsWith("direct:") ||
+        registry.getPolicy(surfaceId).modelExport === false) return;
+    let active = true;
+    let inFlight = false;
+    let controller: AbortController | undefined;
+    const update = async () => {
+      // Hidden tabs and backgrounded phones should neither poll nor flash UI.
+      if (!active || inFlight || actionInFlightRef.current || document.visibilityState !== "visible" ||
+          !ref.current?.getClientRects().length) return;
+      inFlight = true;
+      const generation = directGenerationRef.current;
+      controller = new AbortController();
+      const timeout = setTimeout(() => controller?.abort(), 20000);
+      try {
+        const response = await fetchWithAuth(`/api/proxy/api/sessions/${encodeURIComponent(sessionId)}/surface-action-direct`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+          body: JSON.stringify({ surfaceId, automatic: true, action: { name: refreshAction, context: {} } }),
+        });
+        const body = await response.json();
+        if (!active || generation !== directGenerationRef.current || actionInFlightRef.current) return;
+        if (!response.ok || body?.status !== "ok") { setRefreshError(true); return; }
+        if (Array.isArray(body.messages) && body.messages.length) {
+          registry.appendMessages(surfaceId, body.messages,
+            `automatic:${surfaceId}:${++autoRefreshSequenceRef.current}`);
+        }
+        setRefreshError(false);
+      } catch {
+        if (active && generation === directGenerationRef.current) setRefreshError(true);
+      } finally { clearTimeout(timeout); inFlight = false; }
+    };
+    void update();
+    const timer = setInterval(() => void update(), Math.max(5, Math.min(refreshSeconds, 120)) * 1000);
+    const resume = () => void update();
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("focus", resume);
+    const observer = typeof IntersectionObserver !== "undefined" ? new IntersectionObserver(resume) : null;
+    if (ref.current) observer?.observe(ref.current);
+    return () => {
+      active = false; controller?.abort(); clearInterval(timer);
+      observer?.disconnect();
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("focus", resume);
+    };
+  }, [state?.surface, sessionId, surfaceId, refreshAction, refreshSeconds, registry]);
 
   // Subscribe to surface actions and route each one through the
   // configured dispatch path. Re-subscribes whenever the SurfaceModel
   // identity changes (clearSurface → new createSurface).
   useEffect(() => {
     if (!state?.surface) return;
-    if (!sessionId) return;
+    // A private (display-only) surface, or one with no session, takes only the
+    // client-side tab switch; every other action needs both.
+    const clientOnly = !sessionId || registry.getPolicy(surfaceId).modelExport === false;
+    let active = true;
     const sub = state.surface.onAction.subscribe(async (action) => {
+      if (String(action.name).startsWith(FOCUS_ACTION_PREFIX)) {
+        requestWorkbenchFocus(String(action.name).slice(FOCUS_ACTION_PREFIX.length));
+        return;
+      }
+      if (clientOnly) return;
       // chat:send — a surface Button asks to post a chat message (e.g. a diff
       // card's "Explain this difference", whose action carries a ready-built
       // prompt in `context.prompt`). Route to the chat composer so the agent's
@@ -223,6 +284,7 @@ export function A2UISurfaceMount({
       // click, then the message or a visible error.
       if (String(action.name).startsWith("direct:")) {
         if (actionInFlightRef.current) return;
+        directGenerationRef.current++;
         actionInFlightRef.current = true;
         setActionError(null);
         setIsRunning(true);
@@ -246,18 +308,29 @@ export function A2UISurfaceMount({
           );
           const body = (await res.json().catch(() => null)) as {
             status?: string;
+            confirmation?: { id: string; content: string } | null;
             message?: string;
             messages?: unknown[];
+            private_surfaces?: Array<{
+              surface_id: string;
+              messages: Parameters<typeof registry.appendPrivateMessages>[1];
+              artifact?: Parameters<typeof registry.appendPrivateMessages>[3];
+            }>;
             detail?: unknown;
           } | null;
+          // Session changes/unmounts dispose details and invalidate in-flight responses.
+          if (!active) return;
           if (!res.ok) {
-            setDirectStatus({
-              kind: "error",
-              text:
-                typeof body?.detail === "string"
-                  ? body.detail
-                  : `That action was refused (HTTP ${res.status}).`,
+            const text =
+              typeof body?.detail === "string"
+                ? body.detail
+                : `That action was refused (HTTP ${res.status}).`;
+            // The status bar is the only other place this would appear: report
+            // it so a failure the user cannot reproduce can still be read back.
+            logger.warn("surface_direct_action_failed", {
+              surfaceId, sessionId, kind: action.name, status: res.status, errorMessage: text,
             });
+            setDirectStatus({ kind: "error", text });
             return;
           }
           if (Array.isArray(body?.messages) && body.messages.length > 0) {
@@ -267,12 +340,30 @@ export function A2UISurfaceMount({
               `direct:${surfaceId}:${action.timestamp ?? Date.now()}`,
             );
           }
-          setDirectStatus(
-            body?.status === "ok"
-              ? { kind: "ok", text: body.message || "Done." }
-              : { kind: "error", text: body?.message || "That didn't work." },
-          );
-        } catch {
+          for (const detail of body?.private_surfaces ?? []) {
+            if (!detail.surface_id.startsWith(`private:${surfaceId}:`)) continue;
+            registry.appendPrivateMessages(
+              detail.surface_id, detail.messages,
+              `private:${surfaceId}:${action.timestamp ?? Date.now()}`, detail.artifact,
+            );
+          }
+          if (body?.confirmation && typeof body.confirmation.id === "string" && typeof body.confirmation.content === "string") {
+            emitWorkbenchConfirmation({ sessionId, ...body.confirmation });
+          }
+          if (body?.status === "ok") {
+            setDirectStatus({ kind: "ok", text: body.message || "Done." });
+          } else {
+            const text = body?.message || "That didn't work.";
+            logger.warn("surface_direct_action_failed", {
+              surfaceId, sessionId, kind: action.name, status: res.status, errorMessage: text,
+            });
+            setDirectStatus({ kind: "error", text });
+          }
+        } catch (err) {
+          logger.warn("surface_direct_action_failed", {
+            surfaceId, sessionId, kind: action.name, errorName: err instanceof Error ? err.name : "unknown",
+            errorMessage: err instanceof Error ? err.message : String(err),
+          });
           setDirectStatus({ kind: "error", text: "Couldn't reach the server. Try again." });
         } finally {
           actionInFlightRef.current = false;
@@ -390,13 +481,14 @@ export function A2UISurfaceMount({
         }
       }
     });
-    return () => sub.unsubscribe();
+    return () => { active = false; sub.unsubscribe(); };
   }, [state?.surface, surfaceId, sessionId, triggerOnAction, triggerAction, skillId, onChatMessage, registry]);
 
   return (
     <div ref={ref} className={className} data-surface={surfaceId}>
       {state?.surface && (
         <div className="relative">
+          {refreshError && <p role="status" className="mb-2 text-xs text-muted-foreground">Status update unavailable. Showing the last saved result; checking again automatically.</p>}
           {directStatus && (
             <div
               role={directStatus.kind === "error" ? "alert" : "status"}
@@ -469,26 +561,7 @@ export function A2UISurfaceMount({
               data-testid="a2ui-surface-running"
             >
               <span className="inline-flex items-center gap-2 rounded-full border bg-background/90 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur-sm">
-                <svg
-                  className="h-3 w-3 animate-spin"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
-                </svg>
+                <Spinner size="xs" />
                 Working…
               </span>
             </div>

@@ -25,6 +25,8 @@ metadata:
   # v6.11.0 — skill-dropdown grouping (presentation only). See SkillSwitcher.
   category: tool
   model: lite
+  # Model menu (adk.model_choice): mechanical extraction tuned on lite with thinking off.
+  modelChoice: false
   thinking: "off"   # QUOTED — bare `off` is YAML boolean False
   tools:
     - structured_extraction

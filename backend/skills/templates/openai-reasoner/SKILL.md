@@ -23,6 +23,8 @@ metadata:
   # backend/cloudbuild.yaml. Unrestricted deploys only (Aitana dev): under
   # eu-strict a pinned non-EU provider is rejected at resolve_model_chain.
   model: gpt-6-1-sol
+  # Model menu (adk.model_choice): named for its model, so a pick must not swap it.
+  modelChoice: false
   tools:
     - google_search
     - url_processing

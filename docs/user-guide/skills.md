@@ -8,7 +8,7 @@ surfaces:
   - frontend/src/components/navigation/SkillsBar.tsx
   - frontend/src/app/skills/studio/
   - frontend/src/components/studio/
-reviewed: 2026-10-16
+reviewed: 2026-10-27
 ---
 
 A skill is an assistant set up for one kind of job: its instructions, the language model it uses, the tools it may call (web search, your documents, knowledge bases…) and who may use it. The skill you're chatting with is named at the top of the page.
@@ -25,12 +25,12 @@ Skills are grouped: **Your skills** are the ones you made or copied; the rest ar
 
 ## See how a skill is set up
 
-1. Click **Configure this skill**: the sliders button at the top right. On a phone it's in the menu.
+1. Open the skill switcher (the skill's name at the top), then choose **Edit the … skill** at the bottom of the list.
 2. Skill Studio opens with the skill's instructions, model, tools and who can use it.
 
-The **Create a new skill** button next to it starts an empty skill instead.
+**Create a skill**, just below it, starts an empty skill instead.
 
-![The two buttons at the top right of the page: Configure this skill (sliders) and Create a new skill (plus).](img/skills/02-header-buttons.png "Configure this skill, and Create a new skill.")
+![The account menu open at the top right, with Edit this skill and Create a new skill at the top.](img/skills/02-account-menu.png "Edit this skill, and Create a new skill.")
 
 ## Built-in skills
 
@@ -40,7 +40,7 @@ Some skills come with {{appName}} — they're kept up to date for everyone and m
 
 ## Make your own copy of a skill
 
-1. Open the skill with **Configure this skill**.
+1. Open the skill with **Edit the … skill** at the bottom of the skill switcher.
 2. Click **Fork to customize**.
 3. Your copy opens in Skill Studio, named "… (Fork)": same instructions and tools, private to you. Change what you like and click **Save**.
 
@@ -57,7 +57,7 @@ Adding one of your folders to a skill you can't change makes the copy for you in
 
 ## Create a new skill
 
-1. Click **Create a new skill** (the plus button at the top right).
+1. Open the skill switcher at the top, then choose **Create a skill** at the bottom of the list.
 2. Give it a **Name (lowercase-kebab id)**, for example `meeting-notes`, a **Display name** people will see, and a one-line **Description**.
 3. Fill in its instructions, model and tools (below), then click **Save**.
 
@@ -79,7 +79,7 @@ The **Instructions** are what the skill is told before every chat. Every part is
 
 ### Choose the model and tools
 
-- **Language model**: pick a tier — best, pro or lite. Faster, cheaper models suit simple skills; the most capable ones suit hard reasoning.
+- **Language model**: pick a tier under **Tiers (recommended)**: best, pro or lite. A tier chooses a suitable model for you. Faster, cheaper models suit simple skills; the most capable ones suit hard reasoning. You can instead pick one specific model from the lists below the tiers, but a specific model won't run where a stricter data-residency policy applies.
 - **Category** decides which group the skill appears under in the switcher.
 - **Tools** are what the skill can do beyond chatting: search the web, read a web page, read your documents, create a Word document, run code, search knowledge bases. Tick only what it needs.
 
@@ -94,6 +94,16 @@ The **Instructions** are what the skill is told before every chat. Every part is
 The box checks straight away that everyone who can use the skill may search what you picked. To make one of your folders searchable first, see [Make a folder searchable](folders.md#make-a-folder-searchable).
 
 ![The Knowledge bases this skill searches box with Each user's own searchable folders and Team handbook ticked, and a check that everyone who can use this skill may search these.](img/skills/08-studio-knowledge-bases.png "Knowledge bases for the skill.")
+
+### Show it in other languages
+
+When your workspace offers more than one language, Skill Studio shows a tab for each one beside **Original**. The **Original** tab is the editor described above.
+
+1. Click a language's tab.
+2. Fill in any of **Display name**, **Description** and **Greeting**. Each empty box shows the original text greyed out, and that's what people using the language see until you fill it in.
+3. Click **Save**.
+
+The instructions are the same in every language, so they're only on the **Original** tab.
 
 ## Share your skill
 

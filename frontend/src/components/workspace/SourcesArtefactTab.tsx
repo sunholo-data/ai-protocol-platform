@@ -15,6 +15,7 @@
 import { useCallback, useState } from "react";
 
 import { useSurfaceState } from "@/providers/SurfaceRegistry";
+import { Spinner as UiSpinner } from "@/components/ui/spinner";
 
 interface Source {
   title?: string;
@@ -26,6 +27,18 @@ interface Source {
   // The grounding snippet the answer was built on. Present for enterprise-search
   // sources; makes a link-less datastore result useful even when it can't be opened.
   snippet?: string;
+  status?: string;
+  version?: string;
+  date?: string;
+  source?: string;
+}
+
+function SourceMetadata({ source }: { source: Source }) {
+  const labels = Array.from(new Set([source.status, source.version, source.date, source.source].filter(Boolean)));
+  if (!labels.length) return null;
+  return <span className="mt-1 flex flex-wrap gap-1">
+    {labels.map((label) => <span key={label} className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">{label}</span>)}
+  </span>;
 }
 
 function isOpenableDoc(src: Source): src is Source & { bucket: string; object: string } {
@@ -65,18 +78,7 @@ function DocGlyph() {
 
 function Spinner() {
   return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      aria-hidden="true"
-      className="shrink-0 animate-spin text-muted-foreground/70"
-    >
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
+    <UiSpinner className="text-muted-foreground/70" />
   );
 }
 
@@ -158,6 +160,7 @@ export function SourcesArtefactTab({
                       <span className="block truncate text-sm font-medium text-foreground group-hover:text-primary">
                         {label}
                       </span>
+                      <SourceMetadata source={src} />
                       {isError ? (
                         <span className="block truncate text-xs text-destructive">
                           Couldn&apos;t open this document — you may not have access.
@@ -206,6 +209,7 @@ export function SourcesArtefactTab({
                   <span className="block truncate text-sm font-medium text-foreground group-hover:text-primary">
                     {label}
                   </span>
+                  <SourceMetadata source={src} />
                   {snippet && (
                     // Enterprise snippets can be arbitrarily large (whole
                     // grounding chunks). Cap the height and scroll WITHIN the

@@ -83,6 +83,12 @@ def materialize_to_dir(config: SkillConfig, base_dir: Path | None = None) -> Pat
         frontmatter["metadata"]["tools"] = metadata.tools
     if metadata.tool_configs:
         frontmatter["metadata"]["toolConfigs"] = metadata.tool_configs
+    # v6.43.0 MULTI-LANG M3: keep the per-locale text so a written SKILL.md
+    # re-seeds with its translations. Front matter only — never the body, which
+    # is the instruction and is not localised. (skill_from_config, the runtime
+    # path, leaves it out: the agent has no use for display text.)
+    if config.locales:
+        frontmatter["locales"] = config.locales
 
     # Write SKILL.md
     skill_md = f"---\n{yaml.dump(frontmatter, default_flow_style=False).strip()}\n---\n\n{config.instructions}\n"

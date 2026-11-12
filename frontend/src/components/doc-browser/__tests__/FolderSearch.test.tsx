@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Folder } from "@/hooks/useDocBrowser";
 import type { KnowledgeBaseInfo } from "@/hooks/useKnowledgeBases";
 import { DocListFolder, searchBadge } from "../DocListFolder";
+import { ConfirmProvider } from "@/components/ui/confirm";
 
 vi.mock("@/lib/apiClient", () => ({ fetchWithAuth: vi.fn() }));
 vi.mock("@/lib/documentEvents", () => ({ notifyDocumentsChanged: vi.fn(), subscribeDocumentsChanged: vi.fn() }));
@@ -22,6 +23,7 @@ const kb: KnowledgeBaseInfo = { kbId: "llm-abc123", name: "llm", documentCount: 
 function renderFolder(folder: Folder, over: Partial<React.ComponentProps<typeof DocListFolder>> = {}) {
   return render(
     <DocListFolder folder={folder} documents={[]} isActive={false} onSelect={vi.fn()} onDocClick={vi.fn()} {...over} />,
+    { wrapper: ConfirmProvider },
   );
 }
 
@@ -70,7 +72,7 @@ describe("searchable folders", () => {
     expect(screen.queryByRole("menuitem", { name: "Make searchable" })).toBeNull();
     await userEvent.click(screen.getByRole("menuitem", { name: "Stop searching" }));
     expect(mockFetch).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Stop searching" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Stop searching" }));
     expect(mockFetch).toHaveBeenCalledWith("/api/proxy/api/knowledge-bases/llm-abc123", { method: "DELETE" });
   });
 

@@ -43,11 +43,17 @@ def assert_caller_is_task_queue(request: Request) -> str:
 
     Raises HTTPException(403) on every failure path, uniformly.
     """
-    expected_sa = _expected_sa()
-    expected_aud = _expected_audience()
+    return verify_google_oidc(request, _expected_sa(), _expected_audience())
+
+
+def verify_google_oidc(request: Request, expected_sa: str, expected_aud: str) -> str:
+    """The gate itself, for any Google-signed caller pinned to one service
+    account and one audience (the Cloud Tasks queue here; Cloud Scheduler for
+    ``sources.scheduler``). Returns the caller's email; 403 on every failure.
+    """
     if not expected_sa or not expected_aud:
         # Unconfigured = closed. Never fall back to "any Google-signed token".
-        logger.warning("internal_tasks: OIDC gate unconfigured (SA or audience env missing); rejecting")
+        logger.warning("internal OIDC gate unconfigured (SA or audience env missing); rejecting")
         raise HTTPException(status_code=403, detail="Not authorized")
 
     header = request.headers.get("Authorization", "")

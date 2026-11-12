@@ -21,6 +21,7 @@ Returns 422 with parseError detail when AILANG Parse fails.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -33,6 +34,7 @@ from pydantic import BaseModel, Field
 from auth import User, get_current_user
 from db.firestore import query_documents
 from skills.platform import PLATFORM_OWNER_UID
+from tools.documents.block_store import load_blocks
 
 from .upload import (
     _COLLECTION,
@@ -58,6 +60,32 @@ class ImportByReferenceRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+async def _is_stale_scan(record: dict, gs_url: str) -> bool:
+    """A ``parsed`` PDF record holding a scan's empty text layer (pre-vision).
+
+    Best-effort: blocks that cannot be read (an error, or none came back) keep
+    the record as it is. Only a stored text layer that IS readable and IS a
+    scan's sends the import back through the parse.
+    """
+    from tools.documents.vision_parse import stored_scan_needs_reparse
+
+    if not gs_url.lower().endswith(".pdf"):
+        return False
+    try:
+        from tools.documents.block_store import load_blocks
+
+        blocks = await asyncio.to_thread(load_blocks, record.get("__id", ""), record)
+        if not blocks:
+            return False
+        stale = await stored_scan_needs_reparse(gs_url, blocks)
+        if stale:
+            log.info("import_by_reference: stored parse of %s is a scan's text layer — re-reading", gs_url)
+        return stale
+    except Exception as exc:
+        log.debug("import_by_reference: stale-scan check skipped for %s: %s", gs_url, exc)
+        return False
+
+
 @router.post("/import-by-reference")
 async def import_by_reference(
     req: ImportByReferenceRequest,
@@ -81,7 +109,7 @@ async def import_by_reference(
         filters=[("userId", "==", user.uid), ("sourceUrl", "==", gs_url)],
         limit=1,
     )
-    if self_hits and self_hits[0].get("parseStatus") == "parsed":
+    if self_hits and self_hits[0].get("parseStatus") == "parsed" and not await _is_stale_scan(self_hits[0], gs_url):
         log.info("import_by_reference: l2_hit user=%s gs=%s", user.uid, gs_url)
         return _to_response(self_hits[0])
     if self_hits:
@@ -167,7 +195,8 @@ def _clone_sentinel_to_user(
     doc_id = doc_id_override or str(uuid.uuid4())
     filename = sentinel.get("originalFilename") or PurePosixPath(object_path).name
     source_format = sentinel.get("sourceFormat") or PurePosixPath(object_path).suffix.lstrip(".")
-    blocks = sentinel.get("blocks") or []
+    # A large sentinel keeps its blocks in chunks; the clone re-chunks them.
+    blocks = load_blocks(str(sentinel.get("__id") or ""), sentinel)
     parsed_ms = sentinel.get("parsedMs")
     _store_document(
         doc_id,

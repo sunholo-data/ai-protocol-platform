@@ -227,6 +227,26 @@ class TestAfterToolCallback:
 
 
 class TestCallbackComposition:
+    @pytest.mark.parametrize("has_mutator", [False, True])
+    async def test_async_observers_finish_before_the_result_is_returned(self, has_mutator):
+        from adk.mcp_observability import compose_after_tool_callbacks
+
+        seen = []
+
+        async def observe(tool, args, tool_context, tool_response):
+            seen.append(tool_response)
+
+        existing = (lambda **kwargs: {"rewritten": True}) if has_mutator else None
+        composed = compose_after_tool_callbacks(existing, observe)
+        result = composed(tool=_plain_tool(), args={}, tool_context=MagicMock(), tool_response={"original": True})
+        import inspect
+
+        if inspect.isawaitable(result):
+            result = await result
+        expected = {"rewritten": True} if has_mutator else {"original": True}
+        assert result == expected
+        assert seen == [expected]
+
     def test_compose_before_runs_existing_then_mcp(self):
         """``compose_before_tool_callback(existing, mcp)`` runs both. If the
         existing callback returns a dict (short-circuit/override behaviour),

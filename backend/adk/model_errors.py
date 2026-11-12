@@ -37,6 +37,11 @@ CODE_UNAVAILABLE = "MODEL_UNAVAILABLE"
 CODE_AUTH_FAILED = "MODEL_AUTH_FAILED"
 CODE_REQUEST_INVALID = "MODEL_REQUEST_INVALID"
 CODE_SILENT_STALL = "MODEL_SILENT_STALL"
+CODE_TOOL_CALL_INVALID = "MODEL_TOOL_CALL_INVALID"
+
+
+class EmptyModelResponseError(Exception):
+    """A completed model call supplied neither an answer nor a tool call."""
 
 
 @dataclass(frozen=True)
@@ -66,6 +71,10 @@ class SilentStallError(Exception):
         super().__init__(f"no token from {model} within {deadline_s:.0f}s")
         self.deadline_s = deadline_s
         self.model = model
+
+
+class MalformedFunctionCallError(Exception):
+    """The model generated an invalid function call, rather than rejecting a request."""
 
 
 class ModelTurnError(Exception):
@@ -194,6 +203,14 @@ def classify(exc: Exception) -> ErrorClass:
 def _classify_known(exc: Exception) -> ErrorClass | None:
     message = str(exc)[:500]
 
+    if isinstance(exc, EmptyModelResponseError):
+        # A deterministic empty adapter response should not be replayed three
+        # times. Try the next configured model, or surface a typed failure.
+        return ErrorClass(transient=False, fallbackable=True, code=CODE_UNAVAILABLE, message=message)
+
+    if isinstance(exc, MalformedFunctionCallError):
+        return ErrorClass(transient=True, fallbackable=False, code=CODE_TOOL_CALL_INVALID, message=message)
+
     if isinstance(exc, SilentStallError):
         # A stall is a bad draw, not a bad model: retry the same member once
         # (bounded by max_retries), then fall back like any transient failure.
@@ -213,6 +230,10 @@ def _classify_known(exc: Exception) -> ErrorClass | None:
         import litellm
 
         provider = getattr(exc, "llm_provider", None) or "litellm"
+        if isinstance(exc, litellm.exceptions.MidStreamFallbackError):
+            # The streaming bridge wraps a rate-limit exception in this 503
+            # subclass but preserves its original HTTP status (e.g. 429).
+            return _classify_status(getattr(exc, "status_code", None), provider, message, exc)
         if isinstance(exc, litellm.exceptions.RateLimitError):
             return _classify_status(429, provider, message, exc)
         if isinstance(exc, litellm.exceptions.AuthenticationError | litellm.exceptions.PermissionDeniedError):

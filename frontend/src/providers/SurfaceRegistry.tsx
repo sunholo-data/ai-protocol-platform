@@ -58,6 +58,8 @@ export interface SurfacePolicy {
   persistence: "turn-scoped" | "session-scoped" | "indefinite";
   /** Modal-style surfaces refuse agent-initiated emits without a user gesture. */
   requiresUserGesture: boolean;
+  /** False for browser-only details: never snapshot to the model or dispatch actions. */
+  modelExport?: boolean;
 }
 
 /** One A2UI v0.9 message, opaque to the registry — passed straight to the SDK. */
@@ -79,6 +81,9 @@ export interface A2uiArtifact {
   replayed?: boolean;
   title?: string;
   description?: string;
+  /** Opt-in background status read. The server separately checks its handler
+   * is registered for automatic read-only use; this can never approve a write. */
+  autoRefresh?: { action: string; intervalSeconds?: number };
   /**
    * Where this artifact renders. Default (`undefined` / `"workbench"`) → its own
    * workbench tab. `"chat"` → rendered inline in the chat thread as an
@@ -146,6 +151,10 @@ export interface SurfaceRegistryAPI {
     sourceToolCallId: string,
     artifact?: A2uiArtifact | null,
     createdAtOverride?: number,
+  ): void;
+  appendPrivateMessages(
+    surfaceId: string, messages: A2uiV09Message[], sourceId: string,
+    artifact?: A2uiArtifact | null,
   ): void;
   /**
    * Every active artifact surface (has content AND artifact metadata), ordered
@@ -251,7 +260,9 @@ class SurfaceStore {
     if (!entry) {
       entry = {
         mountRef: null,
-        policy: defaultPolicyFor(surfaceId),
+        policy: surfaceId.startsWith("private:")
+          ? { ...defaultPolicyFor(surfaceId), modelExport: false, persistence: "session-scoped" }
+          : defaultPolicyFor(surfaceId),
         state: null,
         processor: null,
         consumedToolCallIds: new Set(),
@@ -315,6 +326,9 @@ class SurfaceStore {
     entry.policy = {
       ...defaultPolicyFor(surfaceId),
       ...(policyOverride ?? {}),
+      // The reserved namespace is an immutable privacy boundary. A mount or
+      // later ordinary patch cannot turn details into model-readable state.
+      ...(surfaceId.startsWith("private:") ? { modelExport: false, persistence: "session-scoped" as const } : {}),
     };
     if (!wasMounted) this.notifyMount(surfaceId);
   }
@@ -333,7 +347,9 @@ class SurfaceStore {
   getPolicy(surfaceId: string): SurfacePolicy {
     const entry = this.entries.get(surfaceId);
     if (entry) return entry.policy;
-    return defaultPolicyFor(surfaceId);
+    return surfaceId.startsWith("private:")
+      ? { ...defaultPolicyFor(surfaceId), modelExport: false, persistence: "session-scoped" }
+      : defaultPolicyFor(surfaceId);
   }
 
   // — State mutation —
@@ -401,7 +417,8 @@ class SurfaceStore {
     // now, not wait on a download. See lib/a2uiAuthImages.ts.
     if (findAuthImages(toProcess).length > 0) {
       void resolveAuthImages(surfaceId, toProcess).then(({ patches }) => {
-        if (patches.length === 0) return;
+        // A late image fetch must not resurrect a cleared/session-switched detail.
+        if (patches.length === 0 || entry.processor !== processor) return;
         // A DIFFERENT sourceToolCallId: appendMessages is idempotent on it, so
         // reusing the original would make the patch a silent no-op.
         this.appendMessages(surfaceId, patches as A2uiV09Message[], `${sourceToolCallId}:img`);
@@ -441,6 +458,17 @@ class SurfaceStore {
     this.notifyState(entry);
   }
 
+  appendPrivateMessages(
+    surfaceId: string, messages: A2uiV09Message[], sourceId: string,
+    artifact?: A2uiArtifact | null,
+  ): void {
+    if (!surfaceId.startsWith("private:")) throw new Error("Private surface namespace required");
+    // A review response is a fresh display, not a partial merge with older
+    // confidential fields from a previously selected request.
+    this.clearSurface(surfaceId);
+    this.appendMessages(surfaceId, messages, sourceId, artifact);
+  }
+
   listArtifacts(): A2uiArtifactEntry[] {
     const out: A2uiArtifactEntry[] = [];
     for (const [id, entry] of this.entries) {
@@ -458,7 +486,7 @@ class SurfaceStore {
     const snapshot: Record<string, { catalogId: string; dataModel: unknown }> = {};
     for (const [id, entry] of this.entries) {
       const surface = entry.state?.surface;
-      if (!surface) continue;
+      if (!surface || entry.policy.modelExport === false || id.startsWith("private:")) continue;
       let dataModelValue: unknown;
       try {
         dataModelValue = surface.dataModel.get("/");
@@ -575,6 +603,7 @@ export function SurfaceRegistryProvider({ children }: { children: ReactNode }) {
       getPolicy: (id) => store.getPolicy(id),
       appendMessages: (id, msgs, src, artifact, createdAtOverride) =>
         store.appendMessages(id, msgs, src, artifact, createdAtOverride),
+      appendPrivateMessages: (id, msgs, src, artifact) => store.appendPrivateMessages(id, msgs, src, artifact),
       listArtifacts: () => store.listArtifacts(),
       readA2uiSurfaceState: () => store.readA2uiSurfaceState(),
       clearSurface: (id) => store.clearSurface(id),

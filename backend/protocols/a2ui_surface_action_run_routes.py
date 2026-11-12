@@ -54,8 +54,9 @@ from ag_ui.core import RunAgentInput, UserMessage
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from google.adk.events import Event, EventActions
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from adk.a2ui_privacy import public_surface_snapshot
 from adk.agent import (
     _HeuristicRouter,
     create_agent_with_thinking,
@@ -104,6 +105,14 @@ class SurfaceActionRunRequest(BaseModel):
     """
 
     surface_id: str = Field(alias="surfaceId", min_length=1, max_length=128)
+
+    @field_validator("surface_id")
+    @classmethod
+    def public_control_surface(cls, value: str) -> str:
+        if value.startswith("private:"):
+            raise ValueError("Private surfaces are display-only; use the stashed control surface")
+        return value
+
     action: SurfaceActionRunPayload
     forwarded_props: dict[str, Any] | None = Field(default=None, alias="forwardedProps")
 
@@ -275,7 +284,7 @@ def _build_run_input(session_id: str, body: SurfaceActionRunRequest) -> RunAgent
     synthetic message just gives ADK something to run.
     """
     surface_snapshot = (body.forwarded_props or {}).get("a2ui_surface_state")
-    surface_state: dict[str, Any] = surface_snapshot if isinstance(surface_snapshot, dict) else {}
+    surface_state = public_surface_snapshot(surface_snapshot)
 
     action_trigger: dict[str, Any] = {
         "surfaceId": body.surface_id,

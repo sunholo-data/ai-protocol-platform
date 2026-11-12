@@ -512,9 +512,10 @@ async def test_a_persistent_stall_falls_back_down_the_chain(_clean_slate, _short
     out = await _run(wrapper)
 
     assert [r.content.parts[0].text for r in out] == ["ok"]
-    assert primary.calls == 2  # first try + one retry, then the chain moved on
-    assert [name for name, _ in events] == [rl.MODEL_RETRY_EVENT, rl.MODEL_FALLBACK_EVENT]
-    assert events[1][1]["code"] == "MODEL_SILENT_STALL"
+    assert primary.calls == 1  # its deadline is already spent; use the alternative immediately
+    assert primary.closed == 1
+    assert [name for name, _ in events] == [rl.MODEL_FALLBACK_EVENT]
+    assert events[0][1]["code"] == "MODEL_SILENT_STALL"
 
 
 @pytest.mark.asyncio
@@ -640,3 +641,310 @@ async def test_a_request_that_needs_slightly_longer_than_the_deadline_answers_on
     assert [r.content.parts[0].text for r in out] == ["answer"]
     assert llm.calls == 2
     assert [name for name, _ in events] == [rl.MODEL_RETRY_EVENT]
+
+
+# --- Activity progress: which model the turn is waiting on -------------------
+# A 2026-10-30 Severa turn spent ~6 minutes across 15 model calls with nothing in
+# Activity to say so, and its log named the front door's model instead of the
+# transferred specialist's. These pin the progress signals that fix both.
+
+
+@pytest.fixture
+def _bound_tracker(monkeypatch):
+    from observability import timing
+
+    monkeypatch.setattr(timing, "_ENABLED", True, raising=True)
+    monkeypatch.setattr(timing, "_FULL", True, raising=True)
+    tracker = timing.LatencyTracker(skill_id="s", session_id="sess", user_id="u")
+    token = timing.set_current_tracker(tracker)
+    yield tracker
+    timing.reset_current_tracker(token)
+
+
+def _drained(tracker) -> list[tuple[str, dict]]:
+    return [(e.name, e.value) for e in tracker.drain_stage_events()]
+
+
+@pytest.mark.asyncio
+async def test_each_attempt_announces_its_model_and_deadline(_clean_slate, _short_deadline, _bound_tracker):
+    primary = _StallingLlm("m1", [[_Stall()]])
+    fallback = _ScriptedLlm("m2", [[_text("ok", partial=False)]])
+    wrapper = ResilientLlm(chain=[primary, fallback], max_retries_per_model=1)
+
+    await _run(wrapper)
+
+    events = _drained(_bound_tracker)
+    calls = [v for name, v in events if name == rl.MODEL_CALL_EVENT]
+    assert [c["model"] for c in calls] == ["m1", "m2"]
+    assert calls[0]["deadline_s"] is not None
+    fallback_event = next(v for name, v in events if name == rl.MODEL_FALLBACK_EVENT)
+    # How long the stalled request was waited on — what the Activity row reports.
+    assert fallback_event["waited_s"] >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_the_answering_member_becomes_the_turns_model(_clean_slate, _short_deadline, _bound_tracker):
+    _bound_tracker.set_model("front-door-lite", "single")
+    _drained(_bound_tracker)
+    primary = _StallingLlm("m1", [[_Stall()]])
+    fallback = _ScriptedLlm("m2", [[_text("ok", partial=False)]])
+    wrapper = ResilientLlm(chain=[primary, fallback], max_retries_per_model=1)
+
+    await _run(wrapper)
+
+    resolved = [v["model"] for name, v in _drained(_bound_tracker) if name == "MODEL_RESOLVED"]
+    assert resolved == ["m2"]
+    assert _bound_tracker._model_used == "m2"  # the timing log names the model that ran
+
+
+@pytest.mark.asyncio
+async def test_housekeeping_chain_stays_out_of_activity(_clean_slate, _bound_tracker):
+    _bound_tracker.set_model("front-door-lite", "single")
+    _drained(_bound_tracker)
+    wrapper = ResilientLlm(chain=[_ScriptedLlm("summariser", [[_text("sum", partial=False)]])])
+    wrapper.reports_model = False
+
+    await _run(wrapper)
+
+    assert _drained(_bound_tracker) == []
+    assert _bound_tracker._model_used == "front-door-lite"
+
+
+@pytest.mark.asyncio
+async def test_progress_signals_never_reach_the_reliability_sink(_clean_slate, _bound_tracker):
+    wrapper, events = _wrap(_ScriptedLlm("m1", [[_text("ok", partial=False)]]))
+
+    await _run(wrapper)
+
+    assert events == []
+    assert _drained(_bound_tracker) == []
+
+
+# --- Per-attempt latency log (event="model_call") ----------------------------
+# The turn's ttft line could not compare models: first_model_token is the first
+# TEXT on the wire (so a tool-using turn's "ttft" is the whole tool loop), and a
+# stall or retry on the way there was invisible in the log. One structured line
+# per attempt fixes both; these pin its shape.
+
+
+def _model_call_lines(caplog) -> list[dict]:
+    return [
+        r.json_fields
+        for r in caplog.records
+        if isinstance(getattr(r, "json_fields", None), dict) and r.json_fields.get("event") == rl.MODEL_CALL_LOG_EVENT
+    ]
+
+
+def _with_usage(response: LlmResponse, *, prompt: int, out: int, thoughts: int) -> LlmResponse:
+    response.usage_metadata = types.GenerateContentResponseUsageMetadata(
+        prompt_token_count=prompt, candidates_token_count=out, thoughts_token_count=thoughts
+    )
+    return response
+
+
+@pytest.mark.asyncio
+async def test_each_attempt_writes_one_model_call_line(_clean_slate, _short_deadline, _bound_tracker, caplog):
+    caplog.set_level("INFO", logger=rl.logger.name)
+    primary = _StallingLlm("m1", [[_Stall()]])
+    fallback = _ScriptedLlm(
+        "m2", [[_thought("hmm"), _with_usage(_text("ok", partial=False), prompt=900, out=3, thoughts=40)]]
+    )
+    wrapper = ResilientLlm(chain=[primary, fallback], max_retries_per_model=1)
+
+    await _run(wrapper)
+
+    lines = _model_call_lines(caplog)
+    assert [(x["model"], x["outcome"], x.get("code"), x.get("action")) for x in lines] == [
+        ("m1", "error", "MODEL_SILENT_STALL", "fallback"),
+        ("m2", "ok", None, None),
+    ]
+    stalled, answered = lines
+    assert stalled["first_chunk_ms"] is None and stalled["duration_ms"] >= 0
+    assert answered["chain_index"] == 1 and answered["role"] == "turn"
+    # The thought arrives first: first_chunk precedes (or equals) first_visible.
+    assert answered["first_chunk_ms"] <= answered["first_visible_ms"] <= answered["duration_ms"]
+    assert (answered["prompt_tokens"], answered["output_tokens"], answered["thinking_tokens"]) == (900, 3, 40)
+    assert answered["skill_id"] == "s" and answered["session_id"] == "sess"
+
+
+@pytest.mark.asyncio
+async def test_the_turn_line_counts_calls_and_failures(_clean_slate, _short_deadline, _bound_tracker):
+    primary = _StallingLlm("m1", [[_Stall()]])
+    fallback = _ScriptedLlm("m2", [[_text("ok", partial=False)]])
+    wrapper = ResilientLlm(chain=[primary, fallback], max_retries_per_model=1)
+
+    await _run(wrapper)
+
+    payload = _bound_tracker.report_payload()
+    assert payload["model_calls"] == 2
+    assert payload["model_call_failures"] == ["m1:MODEL_SILENT_STALL:fallback"]
+    # The model's own first output, not the first text on the wire.
+    assert payload["first_model_output_ms"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_a_retry_is_logged_not_just_signalled(_clean_slate, caplog):
+    caplog.set_level("INFO", logger=rl.logger.name)
+    llm = _ScriptedLlm("m1", [[_rate_limit()], [_text("ok", partial=False)]])
+    wrapper, _ = _wrap(llm)
+
+    await _run(wrapper)
+
+    lines = _model_call_lines(caplog)
+    assert [(x["attempt"], x["outcome"], x.get("action")) for x in lines] == [(0, "error", "retry"), (1, "ok", None)]
+
+
+@pytest.mark.asyncio
+async def test_housekeeping_calls_are_logged_but_not_counted(_clean_slate, _bound_tracker, caplog):
+    caplog.set_level("INFO", logger=rl.logger.name)
+    wrapper = ResilientLlm(chain=[_ScriptedLlm("summariser", [[_text("sum", partial=False)]])])
+    wrapper.reports_model = False
+
+    await _run(wrapper)
+
+    assert [x["role"] for x in _model_call_lines(caplog)] == ["housekeeping"]
+    assert _bound_tracker.report_payload()["model_calls"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_consumer_that_stops_after_output_is_closed_not_failed(_clean_slate, _bound_tracker, caplog):
+    """ADK stops reading once a transfer_to_agent call is made; on live every
+    delegated turn logged its router as a failure until this (2026-11-05)."""
+    caplog.set_level("INFO", logger=rl.logger.name)
+    wrapper = ResilientLlm(chain=[_ScriptedLlm("m1", [[_text("a"), _text("b"), _text("c", partial=False)]])])
+
+    gen = wrapper.generate_content_async(llm_request=None, stream=True)
+    await gen.__anext__()
+    await gen.aclose()
+
+    lines = _model_call_lines(caplog)
+    assert [(x["outcome"], x["first_visible_ms"] is not None) for x in lines] == [("closed", True)]
+    assert _bound_tracker.report_payload()["model_call_failures"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_consumer_that_walks_away_before_output_is_cancelled(_clean_slate, _bound_tracker, caplog):
+    caplog.set_level("INFO", logger=rl.logger.name)
+    wrapper = ResilientLlm(chain=[_ScriptedLlm("m1", [[_thought("hmm"), _text("late", partial=False)]])])
+
+    gen = wrapper.generate_content_async(llm_request=None, stream=True)
+    await gen.__anext__()  # only the thought
+    await gen.aclose()
+
+    lines = _model_call_lines(caplog)
+    assert [(x["outcome"], x["first_visible_ms"]) for x in lines] == [("cancelled", None)]
+    assert _bound_tracker.report_payload()["model_call_failures"] == ["m1:cancelled"]
+
+
+@pytest.mark.asyncio
+async def test_a_benched_member_is_logged_as_skipped(_clean_slate, caplog):
+    caplog.set_level("INFO", logger=rl.logger.name)
+    for _ in range(rl.COOLDOWN_THRESHOLD):
+        rl._record_failure("fake")
+    primary = _ScriptedLlm("m1", [[_text("never")]])
+    fallback = _ScriptedLlm("m2", [[_text("ok", partial=False)]], provider_hint="other")
+    wrapper, _ = _wrap(primary, fallback)
+
+    await _run(wrapper)
+
+    lines = _model_call_lines(caplog)
+    assert [(x["model"], x["outcome"], x.get("action")) for x in lines] == [
+        ("m1", "skipped", "fallback"),
+        ("m2", "ok", None),
+    ]
+
+
+# --- 8. Cross-provider turns (Sunholo, 2026-11-09) ----------------------------
+#
+# claude-haiku-5-5 took longer than the Gemini-sized 11.7 s deadline to start on
+# a 172K-character project chat, the turn fell straight back to Gemini 3.5 Flash
+# Lite, and Gemini refused the history: "Function call is missing a
+# thought_signature" (the calls were Claude's). The turn died.
+
+
+def test_claude_gets_more_time_than_gemini_for_the_same_prompt(monkeypatch):
+    monkeypatch.delenv(rl.FIRST_TOKEN_DEADLINE_ENV, raising=False)
+    gemini = rl.first_token_deadline_for(172_066, provider="gemini")
+    claude = rl.first_token_deadline_for(172_066, provider="anthropic")
+    assert gemini == pytest.approx(11.72, abs=0.01)  # what fired on Sunholo
+    assert claude == pytest.approx(25.32, abs=0.01)  # its observed 8 s first chunk fits with room
+    assert rl.first_token_deadline_for(172_066, stalls=1, provider="anthropic") == pytest.approx(50.64, abs=0.01)
+    assert rl.first_token_deadline_for(5_000_000, provider="anthropic") == rl.FIRST_TOKEN_DEADLINE_MAX_S
+
+
+@pytest.mark.asyncio
+async def test_a_stall_is_retried_once_before_moving_to_another_provider(_clean_slate, _short_deadline, monkeypatch):
+    monkeypatch.setitem(rl.SLOW_PREFILL_PROVIDERS, "anthropic", (0.0, 0.0))  # keep the 0.05 s test deadline
+    primary = _StallingLlm("claude", [[_Stall()], [_text("ok", partial=False)]], provider_hint="anthropic")
+    other = _ScriptedLlm("gemini", [[_text("fallback", partial=False)]], provider_hint="gemini")
+    wrapper, events = _wrap(primary, other)
+
+    out = await _run(wrapper)
+
+    assert [r.content.parts[0].text for r in out] == ["ok"]
+    assert primary.calls == 2 and other.calls == 0
+    assert [name for name, _ in events] == [rl.MODEL_RETRY_EVENT]
+
+
+@pytest.mark.asyncio
+async def test_a_second_stall_does_move_to_another_provider(_clean_slate, _short_deadline, monkeypatch):
+    monkeypatch.setitem(rl.SLOW_PREFILL_PROVIDERS, "anthropic", (0.0, 0.0))  # keep the 0.05 s test deadline
+    primary = _StallingLlm("claude", [[_Stall()]], provider_hint="anthropic")
+    other = _ScriptedLlm("gemini", [[_text("fallback", partial=False)]], provider_hint="gemini")
+    wrapper, events = _wrap(primary, other)
+
+    out = await _run(wrapper)
+
+    assert [r.content.parts[0].text for r in out] == ["fallback"]
+    assert primary.calls == 2
+    assert [name for name, _ in events] == [rl.MODEL_RETRY_EVENT, rl.MODEL_FALLBACK_EVENT]
+
+
+class _Recording(_ScriptedLlm):
+    """Answers, and keeps the thought signatures each function call had when sent."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.seen: list[bytes | None] = []
+
+    async def generate_content_async(self, llm_request: Any, stream: bool = False):
+        self.seen = [p.thought_signature for c in llm_request.contents for p in c.parts if p.function_call is not None]
+        async for item in super().generate_content_async(llm_request, stream):
+            yield item
+
+
+def _claude_tool_history() -> _Req:
+    return _Req(
+        [
+            _mc("user", [types.Part(text="find it")]),
+            _mc("model", [_call("search_project_documents", id="toolu_1")]),
+            _mc("user", [_resp("search_project_documents", id="toolu_1")]),
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_gemini_fallback_can_continue_a_claude_tool_loop(_clean_slate):
+    claude = _ScriptedLlm("claude", [[RuntimeError("boom")]], provider_hint="anthropic")
+    gemini = _Recording("gemini", [[_text("carried on", partial=False)]], provider_hint="gemini")
+    wrapper, _ = _wrap(claude, gemini, max_retries_per_model=0)
+    req = _claude_tool_history()
+
+    out = [r async for r in wrapper.generate_content_async(llm_request=req, stream=False)]
+
+    assert [r.content.parts[0].text for r in out] == ["carried on"]
+    assert gemini.seen == [rl.FOREIGN_CALL_THOUGHT_SIGNATURE]
+
+
+@pytest.mark.asyncio
+async def test_signatures_are_never_added_for_other_providers_or_over_real_ones(_clean_slate):
+    claude = _Recording("claude", [[_text("fine", partial=False)]], provider_hint="anthropic")
+    wrapper, _ = _wrap(claude)
+    req = _claude_tool_history()
+    [r async for r in wrapper.generate_content_async(llm_request=req, stream=False)]
+    assert claude.seen == [None]
+
+    real = _claude_tool_history()
+    real.contents[1].parts[0].thought_signature = b"gemini's own"
+    assert rl.backfill_foreign_thought_signatures(real) is False
+    assert real.contents[1].parts[0].thought_signature == b"gemini's own"

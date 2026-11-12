@@ -18,7 +18,8 @@ get the old behaviour back.
 into ``jsonPayload``, with ``severity`` and ``message`` lifted out. That is what
 makes ``jsonPayload.event="ttft"`` queryable, and it needs no Cloud Logging
 handler (which would add a background thread and a network dependency to every
-request path). Off Cloud Run we keep human-readable text.
+request path). Off Cloud Run we keep human-readable text, with any
+``json_fields`` appended as compact JSON so a self-hosted log keeps them.
 
 The `extra={"json_fields": {...}}` convention is the same one
 ``google-cloud-logging``'s handler uses, so call sites do not change if we ever
@@ -108,6 +109,28 @@ class StructuredFormatter(logging.Formatter):
             return json.dumps({"severity": payload["severity"], "message": payload["message"]})
 
 
+class TextFormatter(logging.Formatter):
+    """Readable line for local runs that still keeps ``json_fields``.
+
+    The plain stdlib format dropped them, so a self-hosted deployment logged a
+    browser error boundary's report as its bare event name: the message, stack
+    and component the client sent were received and thrown away.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("%(levelname)s %(name)s: %(message)s")
+
+    def format(self, record: logging.LogRecord) -> str:
+        line = super().format(record)
+        fields = getattr(record, "json_fields", None)
+        if isinstance(fields, dict) and fields:
+            try:
+                line = f"{line} {json.dumps(fields, default=str, separators=(',', ':'))}"
+            except Exception:  # never let logging raise on the request path
+                line = f"{line} [json_fields not serialisable]"
+        return line
+
+
 # Third-party loggers whose INFO output is per-token or per-request chatter.
 # Measured on prod over 2026-09-13/14: `ag_ui_adk` logs one `[ADK_EVENT]` line
 # per streamed partial — 36% of every line the backend wrote — and the two
@@ -156,9 +179,7 @@ def setup_logging() -> str:
         return level_name
 
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(
-        StructuredFormatter() if _ON_CLOUD_RUN else logging.Formatter("%(levelname)s %(name)s: %(message)s")
-    )
+    handler.setFormatter(StructuredFormatter() if _ON_CLOUD_RUN else TextFormatter())
     root.handlers[:] = [handler]
     root.setLevel(level)
 
@@ -173,4 +194,4 @@ def setup_logging() -> str:
     return level_name
 
 
-__all__ = ["StructuredFormatter", "setup_logging"]
+__all__ = ["StructuredFormatter", "TextFormatter", "setup_logging"]

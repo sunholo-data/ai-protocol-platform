@@ -2,9 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { fetchWithAuth } from "@/lib/apiClient";
-import type { WelcomeConfig } from "@/types/skill";
+import type { DirectLauncherConfig } from "@/components/workspace/DirectLaunchers";
+import { localizedField, useLocale } from "@/i18n";
+import { skillGreeting } from "@/hooks/useSkillText";
+import type { SkillLocales, WelcomeConfig } from "@/types/skill";
 
 interface SkillMeta {
+  /** In the person's language (SKILL.md `locales:`), else the base name. */
   displayName: string;
   /** The skill's avatar (persona.avatar) — a /public path or URL. Shown on the
    * bot chat bubble so the speaking skill matches its switcher logo, letting
@@ -18,8 +22,13 @@ interface SkillMeta {
    * which tool calls have a UI surface. */
   mcpServerIds: readonly string[];
   /** Skill's initialMessage (legacy) — falls back when welcome.introMessage
-   * unset. v6.4.0 4.5 SKILL-ONBOARDING M1 (the AI-greeting source). */
+   * unset. v6.4.0 4.5 SKILL-ONBOARDING M1 (the AI-greeting source). In the
+   * person's language when the skill translates it. */
   initialMessage: string;
+  /** The greeting a fresh chat shows, in the person's language: see
+   * `skillGreeting` (a translated initial_message → welcome.introMessage →
+   * initialMessage). Null when the skill has none. */
+  greeting: string | null;
   /** v6.4.0 4.5 SKILL-ONBOARDING welcome block — intro_message + example
    * documents + sidebar bucket browser. Null when skill omits the block. */
   welcome: WelcomeConfig | null;
@@ -32,7 +41,7 @@ interface SkillMeta {
    * launcher: `allowActionTriggeredRuns` gates whether a launcher click can
    * fire a `start_compare` action through surface-action-run (vs. the
    * chat-intent fallback). Defaults to false when the skill omits the block. */
-  a2ui: { allowActionTriggeredRuns: boolean };
+  a2ui: { allowActionTriggeredRuns: boolean; directLaunchers?: readonly DirectLauncherConfig[] };
   /** The skill's configured tool names (skillMetadata.tools). Empty when
    * unknown. Drives which workbench-launcher affordances appear — the compare
    * button needs `compare_ppa_contracts`, the analyze-obligations button needs
@@ -43,11 +52,17 @@ interface SkillMeta {
    * Gates whether the Workspace Home keeps its example tiles up for the whole
    * conversation. See extractCanDelegate. */
   canDelegate: boolean;
+  /** The skill's `thinking:` depth (off | low | dynamic). */
+  thinking: string;
+  /** False: the skill keeps its model whatever the composer's Model pick. */
+  modelChoice: boolean;
   loading: boolean;
 }
 
 interface SkillMetadataResponse {
   model?: string;
+  thinking?: string;
+  modelChoice?: boolean;
   tools?: unknown;
   delegation?: unknown;
   subSkills?: unknown;
@@ -69,6 +84,7 @@ interface SkillResponse {
   initialMessage?: string;
   initial_message?: string;
   welcome?: WelcomeConfig | null;
+  locales?: SkillLocales | null;
 }
 
 function extractMcpServerIds(data: SkillResponse): readonly string[] {
@@ -129,7 +145,12 @@ function extractA2ui(data: SkillResponse): SkillMeta["a2ui"] {
   const allow =
     a2ui?.allow_action_triggered_runs === true ||
     a2ui?.allowActionTriggeredRuns === true;
-  return { allowActionTriggeredRuns: allow };
+  const entries = a2ui?.direct_launchers;
+  const directLaunchers = Array.isArray(entries) ? entries.filter((entry): entry is DirectLauncherConfig =>
+    entry !== null && typeof entry === "object" && typeof entry.name === "string" &&
+    typeof entry.label === "string" && typeof entry.tool === "string",
+  ) : [];
+  return { allowActionTriggeredRuns: allow, ...(directLaunchers.length ? { directLaunchers } : {}) };
 }
 
 export function useSkillMeta(skillId: string): SkillMeta {
@@ -140,6 +161,7 @@ export function useSkillMeta(skillId: string): SkillMeta {
   const [mcpServerIds, setMcpServerIds] = useState<readonly string[]>([]);
   const [initialMessage, setInitialMessage] = useState<string>("");
   const [welcome, setWelcome] = useState<WelcomeConfig | null>(null);
+  const [locales, setLocales] = useState<SkillLocales | null>(null);
   const [model, setModel] = useState<string>("");
   const [voice, setVoice] = useState<SkillMeta["voice"]>(null);
   const [a2ui, setA2ui] = useState<SkillMeta["a2ui"]>({
@@ -147,6 +169,8 @@ export function useSkillMeta(skillId: string): SkillMeta {
   });
   const [tools, setTools] = useState<readonly string[]>([]);
   const [canDelegate, setCanDelegate] = useState(false);
+  const [thinking, setThinking] = useState("dynamic");
+  const [modelChoice, setModelChoice] = useState(true);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -164,8 +188,11 @@ export function useSkillMeta(skillId: string): SkillMeta {
           setMcpServerIds(extractMcpServerIds(data));
           setInitialMessage(data.initialMessage || data.initial_message || "");
           setWelcome(data.welcome ?? null);
+          setLocales(data.locales ?? null);
           const meta = data.skillMetadata ?? data.skill_metadata;
           setModel(meta?.model || "");
+          setThinking(typeof meta?.thinking === "string" ? meta.thinking : "dynamic");
+          setModelChoice(meta?.modelChoice !== false);
           setVoice(extractVoice(data));
           setA2ui(extractA2ui(data));
           setTools(extractTools(data));
@@ -182,5 +209,25 @@ export function useSkillMeta(skillId: string): SkillMeta {
     };
   }, [skillId]);
 
-  return { displayName, avatar, ownerId, slug, mcpServerIds, initialMessage, welcome, model, voice, a2ui, tools, canDelegate, loading };
+  // The person's language, resolved on every render so switching it applies at
+  // once (no refetch). The base values above stay as the server sent them.
+  const locale = useLocale();
+  return {
+    displayName: localizedField(displayName, locales, "display_name", locale),
+    avatar,
+    ownerId,
+    slug,
+    mcpServerIds,
+    initialMessage: localizedField(initialMessage, locales, "initial_message", locale),
+    greeting: skillGreeting({ welcome, initialMessage, locales }, locale),
+    welcome,
+    model,
+    voice,
+    a2ui,
+    tools,
+    canDelegate,
+    thinking,
+    modelChoice,
+    loading,
+  };
 }

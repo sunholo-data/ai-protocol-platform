@@ -175,3 +175,31 @@ def test_regional_rungs_only_for_gemini(monkeypatch):
     model = resolve_model_chain("smart")
     for member in _models(model):
         assert member  # chain resolved without error; shape sanity
+
+
+def test_haiku_5_5_is_the_last_claude_rung_and_the_lite_cross_provider_rung():
+    """2026-11-05: haiku-5-5 replaced haiku-4-5 as every Claude chain's last
+    Claude rung, and backs the global `lite` front door across providers."""
+    from config.models import entry_for
+
+    for ref in ("claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-sonnet-4-6"):
+        ids = [link.id for link in entry_for(ref).fallbacks]
+        assert "claude-haiku-5-5" in ids and "claude-haiku-4-5" not in ids, (ref, ids)
+        assert ids[-1] == "gemini-3-5-flash-lite-eu", (ref, ids)
+    assert [link.id for link in entry_for("claude-haiku-5-5").fallbacks] == [
+        "claude-haiku-4-5",
+        "gemini-3-5-flash-lite-eu",
+    ]
+    assert [link.id for link in entry_for("gemini-3-5-flash-lite").fallbacks][-1] == "claude-haiku-5-5"
+    # The eu-strict front door must never carry a US rung.
+    assert all(link.id.startswith("gemini") for link in entry_for("gemini-3-5-flash-lite-eu").fallbacks)
+
+
+def test_global_smart_has_an_openai_peer_rung():
+    """2026-11-05: an Anthropic outage on `smart` falls to gpt-6-1-sol before it
+    downgrades; an opus-5-5-only fault still tries opus-5 first."""
+    from config.models import entry_for
+
+    ids = [link.id for link in entry_for("claude-opus-5-5").fallbacks]
+    assert ids[:2] == ["claude-opus-5", "gpt-6-1-sol"], ids
+    assert ids[-1] == "gemini-3-5-flash-lite-eu", ids

@@ -10,6 +10,7 @@
 // source of truth the AuthoringCopilot and the Studio form share.
 
 import type {
+  SkillLocales,
   SkillMetadata,
   SkillPersona,
   SkillVoiceConfig,
@@ -58,6 +59,11 @@ export interface StudioDraft {
   persona?: Partial<SkillPersona>;
   welcome?: Partial<WelcomeConfig>;
   accessControl?: Record<string, unknown>;
+  /** Read-only here: the base greeting, shown as a language tab's placeholder. */
+  initialMessage?: string;
+  /** Per-language display name / description / greeting — filled fields only;
+   * absent when the skill has no translations (see studio/skillLocales.ts). */
+  locales?: SkillLocales;
   [key: string]: unknown;
 }
 

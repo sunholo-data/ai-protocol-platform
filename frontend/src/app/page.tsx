@@ -8,7 +8,9 @@ import { OneHeroVisual } from "@/components/landing/OneHeroVisual";
 import { ProtocolStripe } from "@/components/landing/ProtocolStripe";
 import { skillHref } from "@/components/navigation/skillHref";
 import { SkillStatusBadge } from "@/components/skills/SkillStatusBadge";
+import { SkillTextOf } from "@/components/skills/SkillTextOf";
 import { BRANDING } from "@/lib/branding";
+import type { SkillLocales } from "@/types/skill";
 import Link from "next/link";
 
 const SHOW_DEV_PROBES = process.env.NEXT_PUBLIC_SHOW_DEV_PROBES === "true";
@@ -27,6 +29,8 @@ interface SkillSummary {
    * SkillStatusBadge — recognised tags become coloured badges
    * (experimental / dev-tool / a2ui-demo); the rest are metadata. */
   tags?: string[];
+  /** Per-locale display_name / description (SKILL.md `locales:`). */
+  locales?: SkillLocales | null;
 }
 
 async function getMarketplaceSkills(): Promise<SkillSummary[]> {
@@ -74,10 +78,10 @@ export default async function HomePage() {
       {skills.length > 0 && (
         <section className="mx-auto w-full max-w-7xl px-6 py-16 md:px-10">
           <div className="mb-6 flex items-end justify-between">
-            <h2 className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+            <h2 className="font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
               Skills
             </h2>
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
               {skills.length} available
             </span>
           </div>
@@ -90,13 +94,13 @@ export default async function HomePage() {
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <span className="text-sm font-semibold text-foreground group-hover:text-primary">
-                      {skill.displayName || skill.name}
+                      <SkillTextOf skill={skill} field="displayName" fallback={skill.name} />
                     </span>
                     <SkillStatusBadge tags={skill.tags} />
                   </div>
-                  {skill.description && (
+                  {(skill.description || Object.values(skill.locales ?? {}).some((l) => l.description)) && (
                     <span className="line-clamp-2 text-xs text-muted-foreground">
-                      {skill.description}
+                      <SkillTextOf skill={skill} field="description" />
                     </span>
                   )}
                 </Link>

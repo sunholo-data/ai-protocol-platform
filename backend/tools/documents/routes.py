@@ -23,7 +23,9 @@ from db.firestore import delete_document as _delete_firestore_doc
 from db.firestore import get_document as _get_firestore_doc
 from db.firestore import set_document as _set_firestore_doc
 from extensions import document_event
-from tools.documents.ingest import require_owned_folder
+from tools.documents import block_store
+from tools.documents.ingest import normalize_folder_path, require_owned_folder
+from tools.documents.media import MEDIA_TYPES
 from tools.documents.recent import recent_documents_for_user
 
 log = logging.getLogger(__name__)
@@ -104,18 +106,67 @@ class _RenameFolderRequest(BaseModel):
 
 @router.patch("/api/folders/{folder_id}")
 def rename_folder(folder_id: str, body: _RenameFolderRequest, user: _CurrentUser) -> _FolderResponse:
+    """Rename a folder and everything under it.
+
+    Folders are flat: the subfolder `Reports/2026` is a folder named that way.
+    Renaming `Reports` to `Archive` also renames `Reports/2026` to
+    `Archive/2026`, so the tree moves together. A folder a GitHub source writes
+    into can't be renamed — the next sync would recreate the old name.
+    """
     folder = folders_db.get_folder(user_id=user.uid, folder_id=folder_id)
     if folder is None or folder.get("userId") not in (None, user.uid):
         raise HTTPException(status_code=404, detail="Folder not found")
-    name = (body.name or "").strip()
-    if not name or len(name) > 200:
+    raw = (body.name or "").strip()
+    if not raw or len(raw) > 200:
         raise HTTPException(status_code=400, detail="A folder name must be 1-200 characters.")
-    other = folders_db.find_folder_by_name(user.uid, name)
-    if other is not None and other.get("id") != folder_id:
+    try:
+        name = normalize_folder_path(raw)
+    except HTTPException:
+        raise HTTPException(status_code=400, detail="A folder name can't contain '.' or '..' as a part.") from None
+    if not name:
+        raise HTTPException(status_code=400, detail="A folder name must be 1-200 characters.")
+    old = str(folder.get("name") or "").strip()
+    if name == old:
+        return _FolderResponse(**{**folder, "id": folder_id, "userId": user.uid})
+
+    from sources.synced_folders import covering_source, synced_prefixes
+
+    synced = covering_source(synced_prefixes(user.uid), old) if old else None
+    if synced is not None:
         raise HTTPException(
-            status_code=409, detail={"code": "FOLDER_EXISTS", "message": f"You already have a folder called '{name}'."}
+            status_code=409,
+            detail={
+                "code": "FOLDER_SYNCED",
+                "message": (
+                    f"'{old}' is kept in sync from GitHub ({synced['repo']}) by the project "
+                    f"'{synced['projectName']}', so it can't be renamed: the next sync would bring "
+                    "the old name back."
+                ),
+                "projectId": synced["projectId"],
+            },
         )
-    folders_db.rename_folder(user.uid, folder_id, name)
+
+    below = folders_db.subfolders(user.uid, old) if old else []
+    names = {folder_id: name, **{str(f["id"]): name + str(f.get("name") or "").strip()[len(old) :] for f in below}}
+    moving = set(names)
+    taken = {
+        str(f.get("name") or "").strip().casefold(): str(f.get("name") or "")
+        for f in folders_db.list_folders(user.uid)
+        if str(f.get("id")) not in moving
+    }
+    for new in names.values():
+        if new.casefold() in taken:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "FOLDER_EXISTS",
+                    "message": f"You already have a folder called '{taken[new.casefold()]}'.",
+                },
+            )
+    if below:
+        folders_db.rename_folders(user.uid, names)
+    else:
+        folders_db.rename_folder(user.uid, folder_id, name)
     return _FolderResponse(**{**folder, "id": folder_id, "name": name, "userId": user.uid})
 
 
@@ -155,11 +206,10 @@ def list_folder_documents(folder_id: str, user: _CurrentUser) -> _DocumentsListR
         raise HTTPException(status_code=404, detail="Folder not found")
     if folder.get("userId") != user.uid:
         raise HTTPException(status_code=403, detail=_ACCESS_DENIED)
-    docs = folders_db.list_folder_documents(user_id=user.uid, folder_id=folder_id)
     # A listing needs metadata, not content: parsed blocks made one folder of 11
-    # documents a 2.2 MB response. GET /api/documents/{id} still returns them.
-    for doc in docs:
-        doc.pop("blocks", None)
+    # documents a 2.2 MB response. Projected, so they are never read either.
+    # GET /api/documents/{id} still returns them.
+    docs = folders_db.list_folder_documents(user_id=user.uid, folder_id=folder_id, fields=folders_db.LISTING_FIELDS)
     return _DocumentsListResponse(documents=docs)
 
 
@@ -190,6 +240,8 @@ def get_document(doc_id: str, user: _CurrentUser) -> dict:
     if doc.get("userId") != user.uid:
         raise HTTPException(status_code=403, detail=_ACCESS_DENIED)
     doc.setdefault("id", doc_id)
+    # A large document's blocks live in chunks; the viewer gets them whole.
+    doc["blocks"] = block_store.load_blocks(doc_id, doc)
     return doc
 
 
@@ -205,6 +257,11 @@ _CONTENT_TYPE_BY_FORMAT = {
     "md": "text/markdown",
     "csv": "text/csv",
     "txt": "text/plain",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    # Video and audio play from /preview (tools/documents/media.py).
+    **{ext.lstrip("."): mime for ext, mime in MEDIA_TYPES.items()},
 }
 
 
@@ -463,7 +520,16 @@ async def reparse_document(doc_id: str, user: _CurrentUser) -> dict:
         "parsedAt": now.isoformat() if status == "parsed" else None,
         "updatedAt": now.isoformat(),
     }
+    try:
+        chunks = block_store.prepare_record(doc_id, update)
+    except block_store.BlockTooLargeError as exc:
+        chunks = 0
+        update.update(
+            blocks=[], blockChunks=0, parseStatus="failed", status="failed", parseError=str(exc), parsedAt=None
+        )
+        status, error = "failed", str(exc)
     _set_firestore_doc(_PARSED_DOCS_COLLECTION, doc_id, update, merge=True)
+    block_store.drop_stale_chunks(doc_id, keep=chunks, had=int(doc.get("blockChunks") or 0))
     document_event("upserted", {"uid": user.uid, "doc_id": doc_id, "folder_id": doc.get("folderId")})
     log.info("Reparse complete for doc %s: status=%s blocks=%d", doc_id, status, len(blocks))
     return {"docId": doc_id, "parseStatus": status, "blockCount": len(blocks), "parseError": error}
@@ -517,6 +583,7 @@ def _delete_owned_document(doc_id: str, doc: dict, user: User) -> None:
             log.warning("GCS delete failed for %s (continuing): %s", storage_path, exc)
 
     _delete_firestore_doc(_PARSED_DOCS_COLLECTION, doc_id)
+    block_store.drop_stale_chunks(doc_id, keep=0, had=int(doc.get("blockChunks") or 0))
     # The counters used to be left as they were, so an emptied folder still
     # read "1 document" (seen live 2026-10-02).
     _adjust_counts(user, doc.get("folderId"), doc, -1)

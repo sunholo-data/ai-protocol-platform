@@ -132,3 +132,13 @@ class TestLocalSessionEscapeHatch:
         for val in ("memory", "Memory", "MEMORY", " memory", "memory ", "  Memory  "):
             with patch.dict(os.environ, {"AITANA_LOCAL_SESSION": val}):
                 assert _force_in_memory_session(), f"value {val!r} should opt in (case/trim)"
+
+
+def test_memory_service_is_one_per_process():
+    """A new service per call built a new API client on every /api/me/memories
+    request (~0.7 s), and an in-memory one forgot everything between calls."""
+    from adk.session import get_memory_service
+
+    with patch.dict("os.environ", {}, clear=True):
+        first = get_memory_service()
+        assert get_memory_service() is first

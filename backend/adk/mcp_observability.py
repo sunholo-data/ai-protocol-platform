@@ -238,9 +238,11 @@ def compose_after_tool_callbacks(
     if existing is None:
         # Adapt the observers' "return None always" to also return the original
         # response so the caller's contract is preserved.
-        def _just_observe(tool: Any, args: dict, tool_context: Any, tool_response: Any) -> Any:
+        async def _just_observe(tool: Any, args: dict, tool_context: Any, tool_response: Any) -> Any:
             for observer in observers:
-                observer(tool=tool, args=args, tool_context=tool_context, tool_response=tool_response)
+                result = observer(tool=tool, args=args, tool_context=tool_context, tool_response=tool_response)
+                if inspect.isawaitable(result):
+                    await result
             return tool_response
 
         return _just_observe

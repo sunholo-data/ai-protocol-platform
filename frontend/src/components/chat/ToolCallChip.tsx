@@ -7,18 +7,20 @@
 // it does NOT inspect resultContent for ui:// URIs anymore.
 // See: docs/design/v6.1.0/mcp-app-integrations.md (M2A — frontend)
 //
-// Hovering the chip opens a card with the same "Called with" / "Result"
-// detail the Workbench Activity tab shows, so the user can peek at what a
-// tool is doing without leaving the chat. Hover-only by design: no click
-// behaviour, and the card closes when the pointer leaves chip and card.
+// Hovering — or tapping, on a touch screen — the chip opens a card with the
+// same "Called with" / "Result" detail the Workbench Activity tab shows, so the
+// user can see what a tool did (and why it failed) without leaving the chat.
+// Tap outside or Esc closes it.
 
 "use client";
 
+import { useState } from "react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import type { ToolCallState } from "@/hooks/useSkillAgent";
 import { ToolCallDetails, hasToolDetail } from "@/components/activity/ToolCallDetails";
 import { FLOATING_SURFACE } from "@/lib/surfaces";
 import { useToolLabels } from "@/hooks/useToolLabels";
+import { Spinner as UiSpinner } from "@/components/ui/spinner";
 
 const MAX_TOOL_LABEL = 32;
 
@@ -31,13 +33,25 @@ export function ToolCallChip({ toolCall }: ToolCallChipProps) {
   const fullLabel = labelFor(toolCall.name);
   const label =
     fullLabel.length > MAX_TOOL_LABEL ? fullLabel.slice(0, MAX_TOOL_LABEL) + "…" : fullLabel;
+  // Controlled so a tap opens it too: Radix tooltips only open on hover/focus,
+  // which leaves a failed tool's reason unreachable on a phone.
+  const [open, setOpen] = useState(false);
 
   return (
     <Tooltip.Provider delayDuration={300} skipDelayDuration={100}>
-      <Tooltip.Root>
+      <Tooltip.Root open={open} onOpenChange={setOpen}>
         <Tooltip.Trigger asChild>
           <div
             tabIndex={0}
+            role="button"
+            aria-label={`${fullLabel}: ${STATUS_LABEL[toolCall.status]}`}
+            onClick={() => setOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setOpen(true);
+              }
+            }}
             data-testid="tool-call-chip"
             data-tool-name={toolCall.name}
             title={toolCall.name}
@@ -80,7 +94,7 @@ function ChipDetail({ toolCall, label }: { toolCall: ToolCallState; label: strin
         <span className="min-w-0 flex-1 truncate">
           <span className="font-medium text-foreground/80">{label}</span>
           {label !== toolCall.name && (
-            <span data-testid="tool-call-raw-name" className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">
+            <span data-testid="tool-call-raw-name" className="ml-1.5 font-mono text-[11px] text-muted-foreground/70">
               {toolCall.name}
             </span>
           )}
@@ -110,19 +124,7 @@ function ChipDetail({ toolCall, label }: { toolCall: ToolCallState; label: strin
 
 function Spinner() {
   return (
-    <svg
-      className="h-3 w-3 animate-spin text-orange-500"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-label="Running"
-    >
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-      />
-    </svg>
+    <UiSpinner size="xs" label="Running" className="text-primary" />
   );
 }
 

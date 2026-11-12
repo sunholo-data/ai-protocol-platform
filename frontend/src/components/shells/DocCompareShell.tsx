@@ -159,7 +159,7 @@ function WorkspaceCanvas({
   onCompare: () => void;
 }) {
   const state = useSurfaceState("workspace");
-  const { welcome, initialMessage } = useSkillMeta(skillId);
+  const { welcome, greeting } = useSkillMeta(skillId);
 
   if (state?.surface) {
     return (
@@ -173,9 +173,7 @@ function WorkspaceCanvas({
   const bucketBrowser = welcome?.bucketBrowser ?? null;
   const hasFileAffordances = examples.length > 0 || bucketBrowser != null;
   const prompt =
-    (welcome?.introMessage && welcome.introMessage.trim()) ||
-    (initialMessage && initialMessage.trim()) ||
-    "Pick two contracts and I'll show you the differences side-by-side.";
+    greeting || "Pick two contracts and I'll show you the differences side-by-side.";
 
   if (!hasFileAffordances) {
     return (

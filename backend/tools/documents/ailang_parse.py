@@ -4,8 +4,9 @@ Routes supported formats (docx, pptx, xlsx, odt, odp, ods, epub, eml, mbox,
 html, md, csv) through the AILANG Parse API which performs deterministic
 XML-level parsing in <1s per file — no LLM tokens consumed.
 
-Unsupported formats (PDF, images) return None; the caller should fall back
-to Gemini multimodal extraction.
+PDFs and images the hosted parser cannot read (no text layer, a scan's
+near-empty one, or a file too large for the API) fall back to Gemini vision in
+``vision_parse``. Formats nothing handles return None.
 
 Output formats:
   "blocks"           — List[dict] (ailang_parse Block objects as dicts), default
@@ -18,16 +19,17 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses as _dc
+import json
 import logging
 import os
 import shutil
+import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from threading import Lock
 from typing import Any
-from urllib.parse import urlparse
 
 from google.cloud import storage
 
@@ -142,6 +144,7 @@ class ParseOutcome:
     output_format: str = "blocks"
     error: str | None = None
     error_code: str | None = None  # "auth" | "quota" | "api" | "download" | "empty" | "unknown"
+    parser: str = "ailang-parse"  # or "gemini-vision" (tools/documents/vision_parse.py)
 
     @property
     def ok(self) -> bool:
@@ -175,7 +178,10 @@ def _get_client() -> DocParse | None:
     if not api_key:
         log.info("DOCPARSE_API_KEY not set — AILANG Parse extraction disabled")
         return None
-    _client_singleton = DocParse(api_key=api_key, timeout=60)
+    # Spreadsheets take 20-95 s server-side (2026-10-30); at 60 s the client
+    # abandoned parses that then succeeded. The SDK's own default is 120 and its
+    # docs recommend 300 for heavy documents.
+    _client_singleton = DocParse(api_key=api_key, timeout=int(os.environ.get("DOCPARSE_TIMEOUT_S", "300")))
     log.info("AILANG Parse client initialised")
     _refresh_deterministic_extensions(_client_singleton)
     return _client_singleton
@@ -195,8 +201,25 @@ def is_supported(gs_url: str) -> bool:
     """
     if not gs_url:
         return False
-    ext = PurePosixPath(urlparse(gs_url).path).suffix.lower()
+    ext = _gs_suffix(gs_url)
     return ext in DETERMINISTIC_EXTENSIONS
+
+
+def split_gs_url(gs_url: str) -> tuple[str, str]:
+    """``gs://bucket/path`` → ``(bucket, path)``, by plain string split.
+
+    Not ``urlparse``: a ``gs://`` URI is not a URL, and object names may hold
+    ``#`` or ``?``. urlparse cut "meeting #3 notes.docx" at the ``#`` (a
+    fragment), so its extension read as '' and the parse was skipped — the file
+    stranded in pending_ai_extraction (2026-10-30).
+    """
+    rest = gs_url[len("gs://") :] if gs_url.startswith("gs://") else gs_url
+    bucket, _, path = rest.partition("/")
+    return bucket, path
+
+
+def _gs_suffix(gs_url: str) -> str:
+    return PurePosixPath(split_gs_url(gs_url)[1]).suffix.lower()
 
 
 def is_parseable(gs_url: str) -> bool:
@@ -210,7 +233,7 @@ def is_parseable(gs_url: str) -> bool:
     """
     if not gs_url:
         return False
-    ext = PurePosixPath(urlparse(gs_url).path).suffix.lower()
+    ext = _gs_suffix(gs_url)
     return ext in PARSEABLE_EXTENSIONS
 
 
@@ -342,6 +365,31 @@ def _unnest_arrays(value: Any, wrapper_key: str = _DEFAULT_WRAPPER_KEY) -> Any:
     return value
 
 
+def _compact(value: Any) -> Any:
+    """Drop fields that only carry the SDK dataclass's empty default.
+
+    The SDK models every block kind as one flat ``Block`` with ~28 defaulted
+    fields, and ``asdict`` writes all of them on every child, cell and run: a
+    28 KB spreadsheet became a 1.7 MB sheet section (the API's own response was
+    ~180 KB), over Firestore's record limit. Every reader defaults a missing
+    field (audited 2026-10-30), so only non-empty values are kept. Exceptions:
+    ``type`` always; ``level`` even at 0 (readers default a missing level to 1);
+    non-falsy defaults (``anchor_block_index=-1``, ``col_span=1``) survive as is.
+    List elements are never dropped, so row and cell positions hold.
+    """
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            v = _compact(v)
+            # 0 == False, so the membership test drops zero counts too.
+            if k in ("type", "level") or v not in ("", None, False, [], {}):
+                out[k] = v
+        return out
+    if isinstance(value, list):
+        return [_compact(v) for v in value]
+    return value
+
+
 def _flatten_block(d: dict) -> dict:
     """Make one parsed block safe to store in Firestore.
 
@@ -369,7 +417,7 @@ def _extract_content(result: ParseResult, output_format: str) -> str | list | No
     if output_format == "blocks":
         if not result.blocks:
             return None
-        return [_flatten_block(_dc.asdict(b)) for b in result.blocks]
+        return [_flatten_block(_compact(_dc.asdict(b))) for b in result.blocks]
     return result.markdown or getattr(result, "text", None) or None
 
 
@@ -438,20 +486,99 @@ def _parse_file_sync(tmp_path: str, output_format: str) -> ParseOutcome:
 # --- Public async API ---
 
 
+# --- Host-local fallback for PDFs with no text layer ---
+#
+# The hosted parse API ships only the pdftotext backend, so an image-only PDF
+# (slides exported as pictures) fails with PDF_BACKEND_FAILED. The local
+# `docparse` CLI escalates pdftotext -> docling OCR on its own and never uses AI
+# unless asked. A deployment that runs on a host with the CLI and its backends
+# installed (`docparse --install-backends`) sets DOCPARSE_LOCAL_CLI to its
+# path; everywhere else (Cloud Run) it is unset and the API's error stands.
+# A named stopgap until the hosted image carries docling (docparse repo).
+_LOCAL_TIMEOUT_S = int(os.environ.get("DOCPARSE_LOCAL_TIMEOUT_S", "900"))
+
+
+def _no_text_layer(outcome: ParseOutcome) -> bool:
+    return not outcome.ok and "PDF_BACKEND_FAILED" in (outcome.error or "")
+
+
+def _local_cli() -> str:
+    return os.environ.get("DOCPARSE_LOCAL_CLI", "").strip()
+
+
+def _parse_local_sync(path: str, output_format: str) -> ParseOutcome:
+    """Parse ``path`` with the host's ``docparse`` CLI (default ladder: never AI)."""
+    out_dir = tempfile.mkdtemp(prefix="docparse_local_")
+    env = {k: v for k, v in os.environ.items() if k != "DOCPARSE_PDF_BACKEND"}
+    try:
+        proc = subprocess.run(
+            [_local_cli(), path, "--output-dir", out_dir],
+            capture_output=True,
+            text=True,
+            timeout=_LOCAL_TIMEOUT_S,
+            env=env,
+        )
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip()[-300:]
+            return ParseOutcome(error=f"local docparse failed (exit {proc.returncode}): {tail}", error_code="api")
+        with open(os.path.join(out_dir, os.path.basename(path) + ".json"), encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("aiCallsUsed"):
+            log.warning("local docparse used %s AI call(s) on %s", data["aiCallsUsed"], path)
+        content = _extract_content(ParseResult.from_dict(data.get("document") or {}), output_format)
+        if content is None:
+            return ParseOutcome(error="local docparse found no text in this document", error_code="empty")
+        return ParseOutcome(content=content, output_format=output_format)
+    except subprocess.TimeoutExpired:
+        return ParseOutcome(error=f"local docparse timed out after {_LOCAL_TIMEOUT_S}s", error_code="api")
+    except Exception as exc:
+        return ParseOutcome(error=f"local docparse failed: {type(exc).__name__}: {exc}", error_code="unknown")
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
+
+
+async def _local_fallback(gs_url: str, tmp_path: str | None, output_format: str, hosted: ParseOutcome) -> ParseOutcome:
+    """The hosted outcome, or a local parse when it found no text layer and the
+    host has the CLI. Downloads the file when ``tmp_path`` is None."""
+    if not (_no_text_layer(hosted) and _local_cli() and output_format == "blocks"):
+        return hosted
+    own = tmp_path is None
+    path = tmp_path or await asyncio.to_thread(_download_gcs_to_tempfile, gs_url)
+    if path is None:
+        return hosted
+    try:
+        log.info("AILANG Parse: no text layer in %s; parsing with the local docparse CLI", gs_url)
+        local = await asyncio.to_thread(_parse_local_sync, path, output_format)
+        if not local.ok:
+            log.warning("local docparse fallback failed for %s: %s", gs_url, local.error)
+            return ParseOutcome(
+                error=f"{hosted.error} — local OCR also failed: {local.error}",
+                error_code=hosted.error_code,
+                output_format=output_format,
+            )
+        return local
+    finally:
+        if own and os.path.exists(path):
+            shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+
+
 async def parse_gcs_file(gs_url: str, output_format: str = "blocks") -> ParseOutcome | None:
-    """Parse an Office/text file on GCS via AILANG Parse.
+    """Parse a file on GCS: AILANG Parse first, Gemini vision as the fallback.
+
+    Vision (``vision_parse``) reads PDFs and images when the hosted parser is
+    unavailable, fails, or returns a scan's near-empty text layer.
 
     Returns:
       ParseOutcome(content=...) on success
-      ParseOutcome(error=...) when AILANG accepted the format but failed
-      None when the file extension is not supported (caller should use Gemini fallback)
+      ParseOutcome(error=...) when the format is handled but every route failed
+      None when no route handles the file (unsupported extension, or the hosted
+      parser is disabled for a format vision does not read)
     """
-    if not is_parseable(gs_url):
-        ext = PurePosixPath(urlparse(gs_url).path).suffix.lower()
+    from tools.documents import vision_parse
+
+    if not is_parseable(gs_url) and _gs_suffix(gs_url) not in vision_parse.VISION_MIME_TYPES:
+        ext = _gs_suffix(gs_url)
         log.info("AILANG Parse: skipping %s (extension %r not parseable)", gs_url, ext)
-        return None
-    if _get_client() is None:
-        log.info("AILANG Parse: client disabled, skipping %s", gs_url)
         return None
 
     cache_key = f"ailang_parse:{output_format}:{gs_url}"
@@ -460,17 +587,47 @@ async def parse_gcs_file(gs_url: str, output_format: str = "blocks") -> ParseOut
         log.info("AILANG Parse cache hit: %s", gs_url)
         return ParseOutcome(content=cached, output_format=output_format)
 
+    hosted: ParseOutcome | None = None
+    if _get_client() is None:
+        log.info("AILANG Parse: client disabled for %s", gs_url)
+    elif is_parseable(gs_url):
+        hosted = await _parse_hosted(gs_url, output_format)
+
+    reason = await vision_parse.fallback_reason(gs_url, hosted, output_format)
+    if reason is None:
+        if hosted is not None and hosted.ok:
+            _cache_set(cache_key, hosted.content)
+        return hosted
+
+    vision = await vision_parse.transcribe_gcs_file(gs_url, reason=reason)
+    if vision.ok:
+        _cache_set(cache_key, vision.content)
+        return vision
+    # Both routes failed. Say so, with both reasons, rather than storing a
+    # scan's empty text layer as if it were the document.
+    hosted_why = hosted.error if hosted is not None and not hosted.ok else reason
+    return ParseOutcome(
+        error=f"{hosted_why} — reading it as images also failed: {vision.error}",
+        error_code=(hosted.error_code if hosted is not None and not hosted.ok else None) or vision.error_code,
+        output_format=output_format,
+    )
+
+
+async def _parse_hosted(gs_url: str, output_format: str) -> ParseOutcome:
+    """The hosted AILANG Parse strategies: signed URL, then download + upload."""
     # Strategy 1: signed URL (works on Cloud Run, no download needed)
     signed_url = await asyncio.to_thread(_generate_signed_url, gs_url)
     if signed_url:
         log.info("AILANG Parse: parsing via signed URL for %s", gs_url)
         outcome = await asyncio.to_thread(_parse_url_sync, signed_url, output_format)
         if outcome.ok:
-            _cache_set(cache_key, outcome.content)
             return outcome
         # Auth/quota errors are definitive — the download path will fail the same way.
         if outcome.error_code in ("auth", "quota"):
             return outcome
+        # No text layer: re-uploading to the same API fails the same way.
+        if _no_text_layer(outcome):
+            return await _local_fallback(gs_url, None, output_format, outcome)
         # api/unknown errors from parse_url may be server-side URL-handling bugs;
         # fall through to the download strategy rather than giving up immediately.
         log.warning(
@@ -492,9 +649,7 @@ async def parse_gcs_file(gs_url: str, output_format: str = "blocks") -> ParseOut
                 output_format=output_format,
             )
         outcome = await asyncio.to_thread(_parse_file_sync, tmp_path, output_format)
-        if outcome.ok:
-            _cache_set(cache_key, outcome.content)
-        return outcome
+        return await _local_fallback(gs_url, tmp_path, output_format, outcome)
     except Exception as exc:
         return ParseOutcome(
             error=f"AILANG Parse download/parse pipeline failed: {type(exc).__name__}: {exc}",

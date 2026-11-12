@@ -45,6 +45,8 @@ from typing import Any
 
 from google.adk.agents.readonly_context import ReadonlyContext
 
+from adk.a2ui_privacy import public_surface_snapshot
+
 # Match the namespace key prefix used by the surface-action endpoint.
 # Both sides must agree on this exact string; anchor it here.
 _PERSISTED_NAMESPACE_PREFIX = "a2ui_surface_context."
@@ -172,7 +174,7 @@ def _collect_surfaces(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
 
     # Per-turn snapshot from forwardedProps.a2ui_surface_state
-    snapshot = state.get(_PER_TURN_STATE_KEY)
+    snapshot = public_surface_snapshot(state.get(_PER_TURN_STATE_KEY))
     if isinstance(snapshot, dict):
         for surface_id, payload in snapshot.items():
             if not isinstance(surface_id, str) or not isinstance(payload, dict):
@@ -193,7 +195,7 @@ def _collect_surfaces(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
         if "." not in suffix:
             continue
         surface_id, field_name = suffix.split(".", 1)
-        if not surface_id or not field_name:
+        if not surface_id or surface_id.startswith("private:") or not field_name:
             continue
         merged.setdefault(surface_id, {})[field_name] = value
 

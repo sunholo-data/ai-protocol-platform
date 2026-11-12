@@ -113,3 +113,19 @@ def test_skill_push_noop_when_identical(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     assert not put_route.called
     assert "already up to date" in result.output
+
+
+@respx.mock
+def test_skill_push_by_slug_writes_to_the_canonical_id(tmp_path) -> None:
+    """The GET resolves a slug; the PUT must go to the skillId it returned —
+    a PUT to the slug 404s (found live 2026-10-03, `skill push sunholo-inbox`)."""
+    respx.get(f"{BASE}/api/skills/my-skill").mock(
+        return_value=httpx.Response(200, json={"skillId": "uuid-1", "name": "my-skill", "instructions": "old"})
+    )
+    put_route = respx.put(f"{BASE}/api/skills/uuid-1").mock(
+        return_value=httpx.Response(200, json={"skillId": "uuid-1", "name": "my-skill"})
+    )
+    template = _write_template(tmp_path)
+    result = CliRunner().invoke(main, ["--env", "local", "skill", "push", "my-skill", "--file", str(template)])
+    assert result.exit_code == 0, result.output
+    assert put_route.called

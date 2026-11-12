@@ -34,7 +34,7 @@ export function WrenchIcon() {
   );
 }
 
-export const DETAIL_LABEL = "text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60";
+export const DETAIL_LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground/60";
 
 /** Copy-to-clipboard button with a brief "Copied" confirmation. */
 export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
@@ -52,7 +52,7 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
           // clipboard unavailable (insecure context) — no-op
         }
       }}
-      className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+      className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
       title={`${label} to clipboard`}
       aria-label={`${label} to clipboard`}
     >

@@ -81,12 +81,23 @@ class _Mapping:
     tool_names: frozenset[str]
     result_matcher: ResultMatcher | None
     name: str
+    context_matcher: Callable[[Any], bool] | None = None
     surface: Any = WORKSPACE_SURFACE_ID  # str | Callable[[Any], str]
     artifact_meta: ArtifactMeta | None = None
+    # True: render from the response BEFORE the large-output offload and let the
+    # model still get the offloaded pointer (see ``register``).
+    offload: bool = False
 
-    def matches(self, tool_name: str, typed_result: Any) -> bool:
+    def matches(self, tool_name: str, typed_result: Any, tool_context: Any = None) -> bool:
         if self.tool_names and tool_name not in self.tool_names:
             return False
+        if self.context_matcher is not None:
+            try:
+                if not self.context_matcher(tool_context):
+                    return False
+            except Exception as exc:
+                logger.warning("a2ui context matcher %r raised (suppressed): %s", self.name, exc)
+                return False
         if self.result_matcher is not None:
             try:
                 return bool(self.result_matcher(typed_result))
@@ -95,13 +106,17 @@ class _Mapping:
                 return False
         return True
 
-    def resolve_surface(self, typed_result: Any) -> str:
+    def resolve_surface(self, typed_result: Any, tool_context: Any = None) -> str:
         """The target surfaceId — a literal, or a callable of the result. Falls
         back to the workspace surface if a callable raises / returns empty."""
         strategy = self.surface
         if callable(strategy):
             try:
-                return strategy(typed_result) or WORKSPACE_SURFACE_ID
+                return (
+                    strategy(typed_result, tool_context)
+                    if len(inspect.signature(strategy).parameters) >= 2
+                    else strategy(typed_result)
+                ) or WORKSPACE_SURFACE_ID
             except Exception as exc:
                 logger.warning("a2ui surface strategy %r raised (suppressed): %s", self.name, exc)
                 return WORKSPACE_SURFACE_ID
@@ -142,15 +157,24 @@ def register(
     name: str | None = None,
     surface: Any = WORKSPACE_SURFACE_ID,
     artifact_meta: ArtifactMeta | None = None,
+    context_matcher: Callable[[Any], bool] | None = None,
+    offload: bool = False,
 ) -> str:
     """Register a result→A2UI transform. First matching mapping wins.
 
     A mapping matches a ``(tool_name, typed_result)`` pair when:
       * ``tool_names`` is empty OR ``tool_name`` is in it, AND
-      * ``result_matcher`` is None OR ``result_matcher(typed_result)`` is truthy.
+      * ``result_matcher`` is None OR ``result_matcher(typed_result)`` is truthy, AND
+      * ``context_matcher`` is None OR it accepts this invocation (e.g. its MCP server).
 
     Declaring ``tool_names`` also marks those tools as render-payload tools
-    (never offloaded — see :func:`is_render_payload_tool`).
+    (never offloaded — see :func:`is_render_payload_tool`), unless ``offload``
+    is set. With ``offload=True`` the transform runs on the full response
+    before the large-output offload (the emitter's ``before_offload`` stage),
+    and the model then gets the usual artifact pointer for a large one. That
+    suits tools whose results can be large AND are worth drawing, such as
+    GitHub listings: exempting them would put every large result in the
+    model's context, and offloading them first would leave the tab blank.
 
     Args:
         transform: Pure ``(typed_result, tool_context=None) -> messages | None``.
@@ -158,8 +182,10 @@ def register(
         result_matcher: Optional shape predicate for finer matching.
         name: Human/CLI-facing mapping name (defaults to ``transform.__name__``).
         surface: Target surface — a literal surfaceId or a callable
-            ``typed_result -> surfaceId`` (per-entity artifacts, 7.5). Default
+            ``(typed_result, tool_context=None) -> surfaceId`` (per-entity or per-turn artifacts). Default
             ``workspace`` preserves 7.3 single-surface behaviour.
+        context_matcher: Optional invocation predicate, for server-scoped opt-ins.
+        offload: Render before offload instead of exempting from it (above).
         artifact_meta: Optional ``typed_result -> {kind,title,description}`` for
             the workbench tab title + Workspace index (7.5).
 
@@ -174,8 +200,10 @@ def register(
             tool_names=names,
             result_matcher=result_matcher,
             name=mapping_name,
+            context_matcher=context_matcher,
             surface=surface,
             artifact_meta=artifact_meta,
+            offload=offload,
         )
     )
     return mapping_name
@@ -206,7 +234,9 @@ def _retarget_surface(messages: list[A2uiMessage], surface_id: str) -> list[A2ui
     return out
 
 
-def render_for_emit(tool_name: str, typed_result: Any, tool_context: Any = None) -> RenderResult | None:
+def render_for_emit(
+    tool_name: str, typed_result: Any, tool_context: Any = None, *, offload: bool | None = None
+) -> RenderResult | None:
     """Run the first matching transform and resolve its target surface + artifact
     metadata (7.5). Returns a :class:`RenderResult` or ``None``.
 
@@ -215,9 +245,14 @@ def render_for_emit(tool_name: str, typed_result: Any, tool_context: Any = None)
     breaks the chat turn. The messages are retargeted to the resolved surface so
     the client builds the SurfaceModel under the artifact id (not the transform's
     ``workspace`` placeholder).
+
+    ``offload`` picks the emitter stage: ``True`` considers only mappings that
+    render before the offload, ``False`` only the others, ``None`` all (CLI).
     """
     for mapping in _registry:
-        if not mapping.matches(tool_name, typed_result):
+        if offload is not None and mapping.offload != offload:
+            continue
+        if not mapping.matches(tool_name, typed_result, tool_context):
             continue
         try:
             messages = mapping.transform(typed_result, tool_context)
@@ -226,7 +261,7 @@ def render_for_emit(tool_name: str, typed_result: Any, tool_context: Any = None)
             return None
         if not messages:
             return None
-        surface_id = mapping.resolve_surface(typed_result)
+        surface_id = mapping.resolve_surface(typed_result, tool_context)
         return RenderResult(
             surface_id=surface_id,
             messages=_retarget_surface(list(messages), surface_id),
@@ -264,8 +299,10 @@ def is_render_payload_tool(tool_name: str) -> bool:
     This is the large-output offload exemption marker: a tool whose output feeds
     a UI mapping must never be replaced by an artifact pointer (that strands the
     render). Registry-driven — retires the hardcoded ``_RENDER_PAYLOAD_TOOLS``.
+    Mappings registered with ``offload=True`` don't count: they render before
+    the offload instead.
     """
-    return any(tool_name in m.tool_names for m in _registry)
+    return any(tool_name in m.tool_names and not m.offload for m in _registry)
 
 
 def tool_produces_artifact(tool_name: str) -> bool:

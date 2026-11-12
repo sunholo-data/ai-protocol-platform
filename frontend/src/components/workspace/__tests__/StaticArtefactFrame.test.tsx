@@ -119,7 +119,7 @@ describe("StaticArtefactFrame", () => {
         onUpdateModelContext={() => {}}
       />,
     );
-    const iframe = screen.getByTitle(/MCP App artefact/i) as HTMLIFrameElement;
+    const iframe = screen.getByTitle(/Interactive view/i) as HTMLIFrameElement;
     expect(iframe.src).toBe(`${SANDBOX_ORIGIN}/sandbox.html`);
     const sandbox = iframe.getAttribute("sandbox") ?? "";
     expect(sandbox).toContain("allow-scripts");
@@ -134,7 +134,7 @@ describe("StaticArtefactFrame", () => {
         onUpdateModelContext={() => {}}
       />,
     );
-    const iframe = screen.getByTitle(/MCP App artefact/i) as HTMLIFrameElement;
+    const iframe = screen.getByTitle(/Interactive view/i) as HTMLIFrameElement;
     expect(iframe.src).toBe(`${SANDBOX_ORIGIN}/sandbox.html`);
   });
 

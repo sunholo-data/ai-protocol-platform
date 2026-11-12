@@ -69,22 +69,109 @@ def test_unknown_folder_is_404(client):
         assert client.patch("/api/folders/nope", json={"name": "x"}).status_code == 404
 
 
+def _rename_folder(client, folder, body, *, others=(), synced=()):
+    """PATCH a folder with the user's other folders and synced prefixes in place."""
+    with (
+        patch(f"{R}.folders_db.get_folder", return_value=folder),
+        patch(f"{R}.folders_db.list_folders", return_value=[folder, *others]),
+        patch("sources.synced_folders.synced_prefixes", return_value=list(synced)),
+        patch(f"{R}.folders_db.rename_folder") as one,
+        patch(f"{R}.folders_db.rename_folders") as many,
+    ):
+        resp = client.patch(f"/api/folders/{folder['id']}", json=body)
+    return resp, one, many
+
+
 def test_rename_and_duplicate_name(client):
     folder = {"id": "f1", "name": "Old", "userId": "mark"}
-    with (
-        patch(f"{R}.folders_db.get_folder", return_value=folder),
-        patch(f"{R}.folders_db.find_folder_by_name", return_value=None),
-        patch(f"{R}.folders_db.rename_folder") as rename,
-    ):
-        resp = client.patch("/api/folders/f1", json={"name": "  Papers "})
+    resp, one, many = _rename_folder(client, folder, {"name": "  Papers "})
     assert resp.status_code == 200 and resp.json()["name"] == "Papers"
-    rename.assert_called_once_with("mark", "f1", "Papers")
-    with (
-        patch(f"{R}.folders_db.get_folder", return_value=folder),
-        patch(f"{R}.folders_db.find_folder_by_name", return_value={"id": "f2"}),
-    ):
-        resp = client.patch("/api/folders/f1", json={"name": "papers"})
+    one.assert_called_once_with("mark", "f1", "Papers")
+    many.assert_not_called()
+
+    resp, one, many = _rename_folder(client, folder, {"name": "papers"}, others=[{"id": "f2", "name": "Papers"}])
     assert resp.status_code == 409 and resp.json()["detail"]["code"] == "FOLDER_EXISTS"
+    assert "'Papers'" in resp.json()["detail"]["message"]
+    one.assert_not_called()
+    many.assert_not_called()
+
+
+def test_rename_moves_the_subfolders_with_it(client):
+    folder = {"id": "f1", "name": "docs", "userId": "mark"}
+    others = [
+        {"id": "f2", "name": "docs/design"},
+        {"id": "f3", "name": "Docs/design/v1"},
+        {"id": "f4", "name": "docs-old"},
+        {"id": "f5", "name": "other/docs"},
+    ]
+    resp, one, many = _rename_folder(client, folder, {"name": "aipla"}, others=others)
+    assert resp.status_code == 200 and resp.json()["name"] == "aipla"
+    many.assert_called_once_with("mark", {"f1": "aipla", "f2": "aipla/design", "f3": "aipla/design/v1"})
+    one.assert_not_called()
+
+
+def test_rename_refuses_when_a_moved_subfolder_would_clash(client):
+    folder = {"id": "f1", "name": "a", "userId": "mark"}
+    others = [{"id": "f2", "name": "a/x"}, {"id": "f3", "name": "b/x"}]
+    resp, one, many = _rename_folder(client, folder, {"name": "b"}, others=others)
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == {"code": "FOLDER_EXISTS", "message": "You already have a folder called 'b/x'."}
+    one.assert_not_called()
+    many.assert_not_called()
+
+
+def test_rename_cleans_the_path_and_refuses_dot_segments(client):
+    folder = {"id": "f1", "name": "Old", "userId": "mark"}
+    resp, one, _ = _rename_folder(client, folder, {"name": " a // b/ "})
+    assert resp.status_code == 200 and resp.json()["name"] == "a/b"
+    resp, one, many = _rename_folder(client, folder, {"name": "a/../b"})
+    assert resp.status_code == 400 and "'..'" in resp.json()["detail"]
+    one.assert_not_called()
+    many.assert_not_called()
+
+
+def test_rename_to_the_same_name_writes_nothing(client):
+    folder = {"id": "f1", "name": "Old", "userId": "mark"}
+    resp, one, many = _rename_folder(client, folder, {"name": "Old"})
+    assert resp.status_code == 200
+    one.assert_not_called()
+    many.assert_not_called()
+
+
+SYNCED = {"prefix": "docs", "projectId": "p1", "projectName": "AIPLA", "repo": "example-org/app", "sourceId": "s1"}
+
+
+@pytest.mark.parametrize("name", ["docs", "DOCS/design", "docs/design/v1"])
+def test_a_github_synced_folder_cannot_be_renamed(client, name):
+    folder = {"id": "f1", "name": name, "userId": "mark"}
+    resp, one, many = _rename_folder(client, folder, {"name": "elsewhere"}, synced=[SYNCED])
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["code"] == "FOLDER_SYNCED" and detail["projectId"] == "p1"
+    assert "AIPLA" in detail["message"] and "example-org/app" in detail["message"]
+    one.assert_not_called()
+    many.assert_not_called()
+
+
+def test_a_folder_above_a_synced_folder_cannot_be_renamed(client):
+    # Renaming `client` would move the synced `client/docs` out from under its source.
+    folder = {"id": "f1", "name": "client", "userId": "mark"}
+    resp, *_ = _rename_folder(client, folder, {"name": "x"}, synced=[{**SYNCED, "prefix": "client/docs"}])
+    assert resp.status_code == 409 and resp.json()["detail"]["code"] == "FOLDER_SYNCED"
+
+
+def test_unrelated_folders_still_rename_beside_a_synced_one(client):
+    for name in ("docs-old", "other/docs", "aipla"):
+        folder = {"id": "f1", "name": name, "userId": "mark"}
+        resp, *_ = _rename_folder(client, folder, {"name": "renamed"}, synced=[SYNCED])
+        assert resp.status_code == 200, name
+
+
+def test_synced_folders_endpoint_lists_the_prefixes(client):
+    with patch("sources.synced_folders.synced_prefixes", return_value=[SYNCED]) as listing:
+        resp = client.get("/api/sources/synced-folders")
+    assert resp.status_code == 200 and resp.json() == {"synced": [SYNCED]}
+    listing.assert_called_once_with("mark")
 
 
 def _gcs():
@@ -324,3 +411,10 @@ def test_unknown_document_rename_is_404(client):
 def test_patch_needs_exactly_one_change(client):
     assert _rename(client, _doc(), {})[0].status_code == 422
     assert _rename(client, _doc(), {"filename": "b", "folder_id": "dst"})[0].status_code == 422
+
+
+def test_folder_projects_route_returns_the_links(client):
+    with patch("projects.folder_links.folder_links", return_value={"f1": []}) as links:
+        resp = client.get("/api/folders/projects")
+    assert resp.status_code == 200 and resp.json() == {"folders": {"f1": []}}
+    links.assert_called_once_with("mark")

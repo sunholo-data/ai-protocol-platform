@@ -30,6 +30,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useSurfaceState } from "@/providers/SurfaceRegistry";
+import { useFormat, type Formatter } from "@/i18n";
 
 // ── The declared envelope ────────────────────────────────────────────────────
 
@@ -117,16 +118,16 @@ function toX(v: unknown, type?: string): number | null {
   return toNum(v);
 }
 
-const NUM = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const PCT = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const NUM: Intl.NumberFormatOptions = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
+const PCT: Intl.NumberFormatOptions = { minimumFractionDigits: 1, maximumFractionDigits: 1 };
 
 /** A capture rate of 0.729 is read as "73%", never as "0.73 EUR/MWh". When the
  *  server declares `yFormat: "percent"` the unit is meaningless by construction
  *  (the measure is dimensionless), so it is dropped rather than appended. */
-function fmtValue(v: number | null | undefined, unit?: string, format?: string): string {
+function fmtValue(fmt: Formatter, v: number | null | undefined, unit?: string, format?: string): string {
   if (v == null || !Number.isFinite(v)) return "—";
-  if (format === "percent") return `${PCT.format(v * 100)}%`;
-  return unit ? `${NUM.format(v)} ${unit}` : NUM.format(v);
+  if (format === "percent") return `${fmt.number(v * 100, PCT)}%`;
+  return unit ? `${fmt.number(v, NUM)} ${unit}` : fmt.number(v, NUM);
 }
 
 /** Compact axis tick text — no unit, no fixed decimals for round numbers. */
@@ -242,14 +243,14 @@ function compareRows(
 }
 
 /** Cell text for the table — formatted for reading (units, "—" for null). */
-function fmtCell(v: unknown, col: ColumnDecl): string {
+function fmtCell(fmt: Formatter, v: unknown, col: ColumnDecl): string {
   if (v == null) return "—";
   if (col.type === "time") {
     const t = Date.parse(String(v));
     if (Number.isFinite(t)) return `${new Date(t).toISOString().slice(0, 19).replace("T", " ")} UTC`;
   }
   const n = toNum(v);
-  if (n != null) return fmtValue(n, col.unit);
+  if (n != null) return fmtValue(fmt, n, col.unit);
   const s = String(v).trim();
   return s === "" ? "—" : s;
 }
@@ -284,6 +285,9 @@ function csvFilename(title: string): string {
 
 export function SeriesArtefactTab({ surfaceId, className }: { surfaceId: string; className?: string }) {
   const state = useSurfaceState(surfaceId);
+  // Numbers used to be pinned to "en-US"; they now follow the interface
+  // language, still without the browser's region (same output in English).
+  const fmt = useFormat({ browserRegion: false });
   const root = (state?.surface?.dataModel?.get("/") ?? null) as SeriesRoot | null;
   const [hover, setHover] = useState<number | null>(null);
 
@@ -527,7 +531,7 @@ export function SeriesArtefactTab({ surfaceId, className }: { surfaceId: string;
             {range}
           </span>
         )}
-        {rowCount > 0 && <span>{rowCount.toLocaleString("en-US")} rows</span>}
+        {rowCount > 0 && <span>{fmt.number(rowCount)} rows</span>}
         {source && (
           <>
             <span aria-hidden="true">·</span>
@@ -575,7 +579,7 @@ export function SeriesArtefactTab({ surfaceId, className }: { surfaceId: string;
           <p className="text-sm font-medium text-foreground">No settled prices in this range.</p>
           <p className="mt-1 text-xs text-muted-foreground">
             {rows.length > 0
-              ? `${rows.length.toLocaleString("en-US")} rows were returned, but none carry a settled value — the range may not be settled yet. Try an earlier range.`
+              ? `${fmt.number(rows.length)} rows were returned, but none carry a settled value — the range may not be settled yet. Try an earlier range.`
               : "The query returned no rows. Check the range and try again."}
           </p>
         </div>
@@ -600,13 +604,13 @@ export function SeriesArtefactTab({ surfaceId, className }: { surfaceId: string;
           ] as const
         ).map(([label, v]) => (
           <div key={label} className="rounded-lg border border-border bg-muted/20 px-3 py-2">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
             <div
               className={`mt-0.5 text-sm font-semibold tabular-nums ${
                 typeof v === "number" && v < 0 ? "text-rose-600 dark:text-rose-400" : "text-foreground"
               }`}
             >
-              {fmtValue(v, unit, yFormat)}
+              {fmtValue(fmt, v, unit, yFormat)}
             </div>
           </div>
         ))}
@@ -648,7 +652,7 @@ export function SeriesArtefactTab({ surfaceId, className }: { surfaceId: string;
                 y={chart.py(t)}
                 textAnchor="end"
                 dominantBaseline="middle"
-                className="fill-muted-foreground text-[10px] tabular-nums"
+                className="fill-muted-foreground text-[11px] tabular-nums"
               >
                 {fmtTick(t, yFormat)}
               </text>
@@ -682,7 +686,7 @@ export function SeriesArtefactTab({ surfaceId, className }: { surfaceId: string;
                 x={Math.min(W - M.right, Math.max(M.left, chart.px(xs[i])))}
                 y={H - 8}
                 textAnchor={i === 0 ? "start" : i === xs.length - 1 ? "end" : "middle"}
-                className="fill-muted-foreground text-[10px] tabular-nums"
+                className="fill-muted-foreground text-[11px] tabular-nums"
               >
                 {fmtX(xs[i], xDecl?.type, chart.xSpan)}
               </text>
@@ -716,7 +720,7 @@ export function SeriesArtefactTab({ surfaceId, className }: { surfaceId: string;
                   x={W - M.right}
                   y={chart.py(refValue) - 4}
                   textAnchor="end"
-                  className="fill-muted-foreground text-[10px]"
+                  className="fill-muted-foreground text-[11px]"
                 >
                   {refLabel}
                 </text>
@@ -780,7 +784,7 @@ export function SeriesArtefactTab({ surfaceId, className }: { surfaceId: string;
             {chart.paths.map((s) => (
               <div key={s.key} className="flex items-center gap-1.5 text-muted-foreground">
                 <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.color }} aria-hidden="true" />
-                <span className="tabular-nums text-foreground">{fmtValue(s.values[hoverRow], s.unit, yFormat)}</span>
+                <span className="tabular-nums text-foreground">{fmtValue(fmt, s.values[hoverRow], s.unit, yFormat)}</span>
               </div>
             ))}
           </div>
@@ -834,7 +838,7 @@ export function SeriesArtefactTab({ surfaceId, className }: { surfaceId: string;
 
         {capped && (
           <p data-testid="series-row-count-notice" className="text-xs font-medium text-amber-600 dark:text-amber-400">
-            Showing first {rows.length.toLocaleString("en-US")} of {rowCount.toLocaleString("en-US")} rows.
+            Showing first {fmt.number(rows.length)} of {fmt.number(rowCount)} rows.
           </p>
         )}
 
@@ -853,16 +857,21 @@ export function SeriesArtefactTab({ surfaceId, className }: { surfaceId: string;
                     data-testid={`series-col-${c.key}`}
                     scope="col"
                     aria-sort={sortKey === c.key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-                    className="cursor-pointer select-none whitespace-nowrap border-b border-border px-3 py-2 text-left font-medium text-muted-foreground hover:text-foreground"
-                    onClick={() => toggleSort(c.key)}
+                    className="select-none whitespace-nowrap border-b border-border px-3 py-2 text-left font-medium text-muted-foreground"
                   >
-                    {c.label}
-                    {c.unit ? ` (${c.unit})` : ""}
-                    {sortKey === c.key && (
-                      <span aria-hidden="true" className="ml-1">
-                        {sortDir === "asc" ? "▲" : "▼"}
-                      </span>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(c.key)}
+                      className="cursor-pointer whitespace-nowrap rounded text-left font-medium hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      {c.label}
+                      {c.unit ? ` (${c.unit})` : ""}
+                      {sortKey === c.key && (
+                        <span aria-hidden="true" className="ml-1">
+                          {sortDir === "asc" ? "▲" : "▼"}
+                        </span>
+                      )}
+                    </button>
                   </th>
                 ))}
               </tr>
@@ -877,7 +886,7 @@ export function SeriesArtefactTab({ surfaceId, className }: { surfaceId: string;
                 <tr key={startIndex + i} data-testid="series-row" className="odd:bg-muted/10">
                   {columns.map((c) => (
                     <td key={c.key} className="whitespace-nowrap border-b border-border/60 px-3 py-1.5 tabular-nums text-foreground">
-                      {fmtCell(r[c.key], c)}
+                      {fmtCell(fmt, r[c.key], c)}
                     </td>
                   ))}
                 </tr>

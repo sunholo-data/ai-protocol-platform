@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { fetchWithAuth } from "@/lib/apiClient";
+import { __clearAuthImageCache, useAuthImage } from "@/lib/authImage";
 
 /**
  * Where a thumbnail's bytes come from. Both resolve to an AUTHENTICATED
@@ -50,37 +49,9 @@ function cacheKey(source: DocThumbnailSource, url: string | null): string | null
   return source.kind === "doc" && source.version ? `${url}#${source.version}` : url;
 }
 
-// Module-level blob-URL cache so re-hovering a document is instant (no refetch,
-// no flash). fetchWithAuth forces `cache: "no-store"`, so without this every
-// hover re-downloads + re-renders the thumbnail. The cache OWNS each object URL
-// (we never revoke on unmount); a bounded LRU revokes evicted entries.
-const _thumbCache = new Map<string, string>();
-const _THUMB_CACHE_MAX = 64;
-
-function _cacheGet(url: string): string | null {
-  const hit = _thumbCache.get(url);
-  if (hit) {
-    // LRU touch: re-insert so it's most-recently-used.
-    _thumbCache.delete(url);
-    _thumbCache.set(url, hit);
-  }
-  return hit ?? null;
-}
-
-function _cachePut(url: string, objectUrl: string): void {
-  _thumbCache.set(url, objectUrl);
-  while (_thumbCache.size > _THUMB_CACHE_MAX) {
-    const oldest = _thumbCache.keys().next().value as string | undefined;
-    if (oldest === undefined) break;
-    const evicted = _thumbCache.get(oldest);
-    _thumbCache.delete(oldest);
-    if (evicted) URL.revokeObjectURL(evicted);
-  }
-}
-
-/** Test-only: drop the module cache so tests don't leak thumbnails between cases. */
+/** Test-only: drop the shared image cache so tests don't leak thumbnails between cases. */
 export function __clearThumbnailCache(): void {
-  _thumbCache.clear();
+  __clearAuthImageCache();
 }
 
 /**
@@ -88,62 +59,15 @@ export function __clearThumbnailCache(): void {
  * as an object URL. `url` is `null` while loading, for an unsupported format,
  * or on any error; `failed` distinguishes a real failure (403 no-access, 404,
  * 5xx, network) from "nothing to show" so callers can say so (NEVER SILENT).
- * Results are cached module-wide (keyed by URL + version), so re-hovering the
- * same document is instant; the bounded LRU revokes evicted object URLs.
+ * Cached module-wide by `lib/authImage` (keyed by URL + version), so
+ * re-hovering the same document is instant.
  */
 export function useDocumentThumbnail(
   source: DocThumbnailSource,
   width: number,
 ): { url: string | null; loading: boolean; failed: boolean } {
   const url = thumbnailUrl(source, width);
-  const key = cacheKey(source, url);
-  const cached = key ? _cacheGet(key) : null;
-  const [blobUrl, setBlobUrl] = useState<string | null>(cached);
-  const [loading, setLoading] = useState<boolean>(url != null && !cached);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setFailed(false);
-    if (!url || !key) {
-      setBlobUrl(null);
-      setLoading(false);
-      return;
-    }
-    const hit = _cacheGet(key);
-    if (hit) {
-      setBlobUrl(hit);
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setBlobUrl(null);
-    (async () => {
-      try {
-        const res = await fetchWithAuth(url);
-        if (cancelled) return;
-        if (res.ok) {
-          const blob = await res.blob();
-          if (cancelled) return;
-          const created = URL.createObjectURL(blob);
-          _cachePut(key, created);
-          setBlobUrl(created);
-        } else {
-          setFailed(true);
-        }
-      } catch {
-        if (!cancelled) setFailed(true);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    // No revoke on cleanup — the cache owns the object URL's lifecycle.
-    return () => {
-      cancelled = true;
-    };
-  }, [url, key]);
-
-  return { url: blobUrl, loading, failed };
+  return useAuthImage(url, cacheKey(source, url));
 }
 
 interface DocumentThumbnailProps {

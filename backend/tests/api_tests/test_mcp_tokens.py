@@ -119,3 +119,42 @@ def test_only_people_can_mint(store, mode):
     robot = User(uid="uid-r", email="", domain="", auth_mode=mode)
     assert _client(robot).post("/api/mcp/tokens", json={}).status_code == 403
     assert store.docs == {}
+
+
+# --- approval rights (human-approvals.md) ---------------------------------------
+
+
+def test_tokens_have_scopes_and_approval_tokens_are_short_lived(store):
+    _, plain = mcp_tokens.create_token("uid-alice", "MCP")
+    _, approver = mcp_tokens.create_token("uid-alice", "Claude Code — laptop", approve=True)
+    assert plain["scopes"] == ["mcp"] and approver["scopes"] == ["mcp", "approve"]
+    days = lambda record: (record["expiresAt"] - record["createdAt"]).days  # noqa: E731
+    assert days(plain) == mcp_tokens.DEFAULT_DAYS and days(approver) == mcp_tokens.APPROVE_DEFAULT_DAYS
+    with pytest.raises(mcp_tokens.TokenError):
+        mcp_tokens.create_token("uid-alice", "x", days=mcp_tokens.APPROVE_MAX_DAYS + 1, approve=True)
+
+
+def test_resolving_a_token_returns_its_scopes_and_older_tokens_default_to_mcp(store):
+    token, record = mcp_tokens.create_token("uid-alice", "Claude Code", approve=True)
+    resolved = mcp_tokens.resolve_token_record(token)
+    assert resolved == {"uid": "uid-alice", "id": record["id"], "name": "Claude Code", "scopes": ["mcp", "approve"]}
+    for doc in store.docs.values():
+        doc.pop("scopes")
+    assert mcp_tokens.resolve_token_record(token)["scopes"] == ["mcp"]
+    assert mcp_tokens.list_tokens("uid-alice")[0]["scopes"] == ["mcp"]
+    assert mcp_tokens.resolve_token_record("aip_mcp_unknown") is None
+
+
+def test_a_person_can_mint_an_approval_token_over_rest(store):
+    created = _client(ALICE).post("/api/mcp/tokens", json={"name": "CLI", "approve": True}).json()
+    assert created["scopes"] == ["mcp", "approve"]
+    assert (created["expiresAt"] and created["createdAt"]) and "token" in created
+    too_long = _client(ALICE).post("/api/mcp/tokens", json={"approve": True, "days": 365})
+    assert too_long.status_code == 400
+
+
+@pytest.mark.parametrize("mode", ["anonymous_group_id", "machine"])
+def test_machines_never_mint_approval_tokens(store, mode):
+    robot = User(uid="uid-r", email="", domain="", auth_mode=mode)
+    assert _client(robot).post("/api/mcp/tokens", json={"approve": True}).status_code == 403
+    assert store.docs == {}

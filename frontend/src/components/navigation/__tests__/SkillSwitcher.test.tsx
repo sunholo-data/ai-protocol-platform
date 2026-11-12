@@ -82,19 +82,19 @@ describe("SkillSwitcher", () => {
       makeSkill({ skillId: "s2", displayName: "Writer" }),
     ];
     render(<SkillSwitcher skills={skills} activeSkillId="s2" />);
-    expect(screen.getByLabelText("Switch skill")).toHaveTextContent("Writer");
+    expect(screen.getByRole("button", { name: /switch skill/i })).toHaveTextContent("Writer");
   });
 
   it("shows no generated letter chip for a skill without an avatar", () => {
     const skills = [makeSkill({ skillId: "s1", displayName: "Research", avatar: "" })];
     render(<SkillSwitcher skills={skills} activeSkillId="s1" />);
-    expect(screen.getByLabelText("Switch skill").textContent).toBe("Research");
+    expect(screen.getByRole("button", { name: /switch skill/i }).textContent).toBe("Research");
   });
 
   it("shows 'Select a skill' when there is no active skill", () => {
     const skills = [makeSkill({ skillId: "s1", displayName: "Research" })];
     render(<SkillSwitcher skills={skills} activeSkillId="none" />);
-    expect(screen.getByLabelText("Switch skill")).toHaveTextContent("Select a skill");
+    expect(screen.getByRole("button", { name: /switch skill/i })).toHaveTextContent("Select a skill");
   });
 
   it("opens the dropdown on click and lists skills", async () => {
@@ -103,7 +103,7 @@ describe("SkillSwitcher", () => {
       makeSkill({ skillId: "s2", displayName: "Writer" }),
     ];
     render(<SkillSwitcher skills={skills} activeSkillId="s1" />);
-    await userEvent.click(screen.getByLabelText("Switch skill"));
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
 
     expect(screen.getByLabelText("Search skills")).toBeInTheDocument();
     // Both skills present in the list (Research also in trigger, so use getAllByText).
@@ -117,12 +117,12 @@ describe("SkillSwitcher", () => {
       makeSkill({ skillId: "s2", displayName: "Writer" }),
     ];
     render(<SkillSwitcher skills={skills} activeSkillId="s1" />);
-    await userEvent.click(screen.getByLabelText("Switch skill"));
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
 
     await userEvent.type(screen.getByLabelText("Search skills"), "writ");
     expect(screen.getByText("Writer")).toBeInTheDocument();
     // "Research" no longer in the filtered list (only remaining ref would be trigger).
-    const trigger = screen.getByLabelText("Switch skill");
+    const trigger = screen.getByRole("button", { name: /switch skill/i });
     expect(within(trigger).getByText("Research")).toBeInTheDocument();
     // No list row for Research: outside the trigger there should be none.
     const researchMatches = screen.getAllByText("Research");
@@ -135,7 +135,7 @@ describe("SkillSwitcher", () => {
       makeSkill({ skillId: "prod", displayName: "ProdSkill", tags: [] }),
     ];
     render(<SkillSwitcher skills={skills} activeSkillId="active" />);
-    await userEvent.click(screen.getByLabelText("Switch skill"));
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
 
     // No internal jargon — a normal user just sees their skills.
     expect(screen.queryByText("Production")).toBeNull();
@@ -155,7 +155,7 @@ describe("SkillSwitcher", () => {
       }),
     ];
     render(<SkillSwitcher skills={skills} activeSkillId="prod" />);
-    await userEvent.click(screen.getByLabelText("Switch skill"));
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
 
     expect(screen.queryByText("Skill Studio Copilot")).toBeNull();
     expect(screen.queryByText("In development")).toBeNull();
@@ -173,15 +173,15 @@ describe("SkillSwitcher", () => {
       makeSkill({ skillId: "test", displayName: "TestSkill", tags: ["experimental"] }),
     ];
     render(<SkillSwitcher skills={skills} activeSkillId="active" />);
-    await userEvent.click(screen.getByLabelText("Switch skill"));
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
 
     // Only the admin-visible section is labelled — and with a neutral phrase.
     expect(screen.queryByText("Production")).toBeNull();
     expect(screen.queryByText("Admin & Test")).toBeNull();
     const devHeader = screen.getByText("In development");
 
-    const prodRow = screen.getByText("ProdSkill").closest("button")!;
-    const testRow = screen.getByText("TestSkill").closest("button")!;
+    const prodRow = screen.getByText("ProdSkill").closest("a")!;
+    const testRow = screen.getByText("TestSkill").closest("a")!;
     expect(prodRow).toBeInTheDocument();
     expect(testRow).toBeInTheDocument();
     // The production row precedes the "In development" divider, which precedes the test row.
@@ -202,10 +202,10 @@ describe("SkillSwitcher", () => {
     // Active skill differs from the default so "Example Assistant" appears once (in
     // the default row, not the trigger).
     render(<SkillSwitcher skills={skills} activeSkillId="ppa" defaultSkillId="one" />);
-    await userEvent.click(screen.getByLabelText("Switch skill"));
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
 
     const defaultHeader = screen.getByText("Default");
-    const oneRow = screen.getByText("Example Assistant").closest("button")!;
+    const oneRow = screen.getByText("Example Assistant").closest("a")!;
     const ppaHeader = screen.getByText("Specialists");
     // Default header + its row precede the Specialists section.
     expect(defaultHeader.compareDocumentPosition(oneRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -219,7 +219,7 @@ describe("SkillSwitcher", () => {
       withCategory("tool", { skillId: "web", displayName: "Web Researcher" }),
     ];
     render(<SkillSwitcher skills={skills} activeSkillId="ppa" />);
-    await userEvent.click(screen.getByLabelText("Switch skill"));
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
 
     expect(screen.getByText("Specialists")).toBeInTheDocument();
     expect(screen.getByText("Assistants")).toBeInTheDocument();
@@ -232,10 +232,10 @@ describe("SkillSwitcher", () => {
       makeSkill({ skillId: "mine", displayName: "My Tool", ownerId: "uid-me" }),
     ];
     render(<SkillSwitcher skills={skills} activeSkillId="ppa" currentUserId="uid-me" />);
-    await userEvent.click(screen.getByLabelText("Switch skill"));
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
 
     const yoursHeader = screen.getByText("Your skills");
-    const mineRow = screen.getByText("My Tool").closest("button")!;
+    const mineRow = screen.getByText("My Tool").closest("a")!;
     expect(yoursHeader.compareDocumentPosition(mineRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -246,7 +246,7 @@ describe("SkillSwitcher", () => {
       makeSkill({ skillId: "b", displayName: "Beta" }),
     ];
     const { unmount } = render(<SkillSwitcher skills={uncategorised} activeSkillId="a" />);
-    await userEvent.click(screen.getByLabelText("Switch skill"));
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
     expect(screen.queryByText("Other skills")).toBeNull();
     unmount();
 
@@ -256,7 +256,7 @@ describe("SkillSwitcher", () => {
       makeSkill({ skillId: "misc", displayName: "Misc Skill" }),
     ];
     render(<SkillSwitcher skills={mixed} activeSkillId="ppa" />);
-    await userEvent.click(screen.getByLabelText("Switch skill"));
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
     expect(screen.getByText("Other skills")).toBeInTheDocument();
   });
 
@@ -266,9 +266,8 @@ describe("SkillSwitcher", () => {
       makeSkill({ skillId: "s2", displayName: "Writer" }),
     ];
     render(<SkillSwitcher skills={skills} activeSkillId="s2" />);
-    await userEvent.click(screen.getByLabelText("Switch skill"));
-    await userEvent.click(screen.getByText("Research"));
-
-    expect(pushMock).toHaveBeenCalledWith("/chat/@mark/research");
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
+    // A real link (opens in a new tab with Cmd/Ctrl-click).
+    expect(screen.getByRole("link", { name: /Research/ })).toHaveAttribute("href", "/chat/@mark/research");
   });
 });

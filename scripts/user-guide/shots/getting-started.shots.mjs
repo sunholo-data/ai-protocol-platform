@@ -55,7 +55,7 @@ const GUIDE_SKILL = {
 };
 const HELP_QUESTION = "How do I upload a whole folder of documents?";
 const HELP_ANSWER =
-  "Open the **Your files** panel, then use **Upload folder** and pick the folder on your computer. " +
+  "Under **Files**, click **Browse all folders**, then **Upload folder** and pick the folder on your computer. " +
   "Everything inside it is uploaded into a new folder with the same name, and a summary shows what was skipped.\n\n" +
   "See [Upload a whole folder](/help/folders#upload-a-whole-folder). To add single files instead, see " +
   "[Upload a document](/help/documents#upload-a-document).";
@@ -152,12 +152,12 @@ export default async function gettingStarted({ page, base, shot, tidy, around })
   const open = async (url) => {
     await page.goto(`${base}${url}`, { waitUntil: "networkidle", timeout: 90000 });
     await tidy();
-    const show = page.getByRole("button", { name: "Show sidebar" });
+    const show = page.getByRole("button", { name: /^(Show conversations and files|Show sidebar)$/ });
     if (await show.count()) await show.first().click();
     await page.waitForTimeout(1000);
   };
   const header = () => page.locator("header").first();
-  const sidebar = () => page.locator("aside").filter({ hasText: "Your files" }).first();
+  const sidebar = () => page.locator("aside").filter({ has: page.getByPlaceholder("Search chats and files") }).first();
 
   // The chat page: header, sidebar, conversation area
   await open("/chat/@aitana-platform/demo-researcher");
@@ -188,10 +188,30 @@ export default async function gettingStarted({ page, base, shot, tidy, around })
 
   await page.locator("textarea").last().fill("");
 
-  // Past conversations
+  // + → Model: Auto, Fast, Thorough
+  await page.getByRole("button", { name: "Add files and more" }).click();
+  await page.getByRole("menuitem", { name: /^Model/ }).click();
+  const thorough = page.getByRole("menuitemradio", { name: /^Thorough/ });
+  await thorough.waitFor();
+  // The submenu mounts before Radix positions it (and animates in): measure after.
+  await page.waitForTimeout(500);
+  // Both menus and the composer, nothing else.
+  const boxes = [
+    ...(await Promise.all((await page.getByRole("menu").all()).map((m) => m.boundingBox()))),
+    await composer.boundingBox(),
+  ].filter(Boolean);
+  const mx0 = Math.min(...boxes.map((b) => b.x)) - 16;
+  const my0 = Math.min(...boxes.map((b) => b.y)) - 16;
+  const mx1 = Math.max(...boxes.map((b) => b.x + b.width)) + 16;
+  const my1 = Math.max(...boxes.map((b) => b.y + b.height)) + 16;
+  await shot("11-model-menu", "page", { wait: 300, clip: { x: mx0, y: my0, width: mx1 - mx0, height: my1 - my0 } });
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+
+  // Past conversations: the sidebar's Chats section
   await page.setViewportSize({ width: 1280, height: 1500 });
   const crop = around(sidebar);
-  await crop("05-past-conversations", page.getByText("Past conversations", { exact: true }), page.getByText("Questions about the Phoenix budget").first());
+  await crop("05-past-conversations", sidebar().getByText("Chats", { exact: true }).first(), page.getByText("Questions about the Phoenix budget").first());
 
   // An answered conversation, reopened
   await page.setViewportSize({ width: 1280, height: 860 });

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ActivityPanel } from "../ActivityPanel";
 import type { ToolCallState, DelegationMarkerItem } from "@/hooks/useSkillAgent";
+import { SOURCE_LOCALE, regionalLocale } from "@/i18n";
 
 // useSurfaceState needs the SurfaceRegistry provider; stub it (no pushed
 // activity surface) and stub the A2UI mount so we test the timeline in isolation.
@@ -249,7 +250,111 @@ it("keeps the clock visible on older activity and includes a full timestamp on h
   render(<ActivityPanel toolCalls={[tool("older", "read_document", "success", ts)]} delegations={[]} isThinking={false} {...base} />);
   const time = document.querySelector("time")!;
   expect(time.textContent).toMatch(/\d{2}:\d{2}:\d{2}/);
-  expect(time.textContent).toContain(new Date(ts).toLocaleDateString());
-  expect(time.title).toBe(new Date(ts).toLocaleString(undefined, {timeZoneName:"short"}));
+  // English interface: English formats, in the runtime's region when it is
+  // an English one (identical to the runtime default under en-US / en-GB).
+  const en = regionalLocale(SOURCE_LOCALE);
+  expect(time.textContent).toContain(new Date(ts).toLocaleDateString(en));
+  expect(time.title).toBe(new Date(ts).toLocaleString(en, {timeZoneName:"short"}));
   expect(time.dateTime).toBe(new Date(ts).toISOString());
+});
+
+describe("ActivityPanel — where a slow turn's time goes", () => {
+  it("shows which model the turn is waiting on, counting up", () => {
+    const since = Date.now() - 14_000;
+    render(
+      <ActivityPanel
+        toolCalls={[]}
+        delegations={[]}
+        isThinking={false}
+        modelWait={{ model: "gemini-3.8-flash", since, deadlineS: 20 }}
+        turnStartedAt={since - 1_000}
+        {...base}
+      />,
+    );
+    const row = screen.getByTestId("activity-model-wait-row");
+    expect(row).toHaveTextContent("Waiting for gemini-3.8-flash");
+    expect(row).toHaveTextContent("14s");
+    expect(row).toHaveAttribute("title", expect.stringContaining("20s"));
+  });
+
+  it("hides the wait row once the model is reasoning", () => {
+    render(
+      <ActivityPanel
+        toolCalls={[]}
+        delegations={[]}
+        isThinking
+        modelWait={{ model: "gemini-3.8-flash", since: Date.now(), deadlineS: 10 }}
+        {...base}
+      />,
+    );
+    expect(screen.queryByTestId("activity-model-wait-row")).toBeNull();
+    expect(screen.getByText("Reasoning…")).toBeInTheDocument();
+  });
+
+  it("says what a stall cost and which model took over", () => {
+    render(
+      <ActivityPanel
+        toolCalls={[]}
+        delegations={[]}
+        isThinking={false}
+        modelEvents={[
+          { id: "mf-0", ts: 10, kind: "fallback", model: "gemini-3.8-flash", toModel: "gemini-3.7-flash", code: "MODEL_SILENT_STALL", waitedS: 12.3 },
+          { id: "mf-1", ts: 20, kind: "fallback", model: "gemini-3.8-flash", toModel: "gemini-3.7-flash", code: "MODEL_UNAVAILABLE", reason: "provider_cooldown" },
+          { id: "mr-0", ts: 30, kind: "retry", model: "gemini-3.7-flash", code: "MODEL_RATE_LIMITED", waitedS: 0.4, delayS: 1.5 },
+        ]}
+        {...base}
+      />,
+    );
+    const rows = screen.getAllByTestId("activity-model-event").map((r) => r.textContent);
+    // Newest first.
+    expect(rows[0]).toContain("gemini-3.7-flash rate limited after 0.4s — retrying in 1.5s");
+    expect(rows[1]).toContain("Skipped gemini-3.8-flash after repeated failures — using gemini-3.7-flash");
+    expect(rows[2]).toContain("gemini-3.8-flash sent nothing for 12s — switched to gemini-3.7-flash");
+  });
+
+  it("shows how long a finished tool took, and a running one's elapsed time", () => {
+    const now = Date.now();
+    render(
+      <ActivityPanel
+        toolCalls={[
+          { ...tool("t1", "grep_project_documents", "success", now - 60_000), endTs: now - 52_000 },
+          tool("t2", "grep_project_documents", "success", now - 5_000),
+        ]}
+        delegations={[]}
+        isThinking={false}
+        turnStartedAt={now - 6_000}
+        {...base}
+      />,
+    );
+    const durations = screen.getAllByTestId("activity-tool-duration").map((d) => d.textContent);
+    expect(durations).toEqual(["5s", "8s"]);
+  });
+
+  it("an earlier turn's tool with no result time doesn't count up during a new turn", () => {
+    // Tools loaded from session history carry no result time. Caught on the
+    // live deploy: one showed a climbing "1m 08s" beside the next turn.
+    const now = Date.now();
+    render(
+      <ActivityPanel
+        toolCalls={[tool("old", "knowledge_search", "success", now - 70_000)]}
+        delegations={[]}
+        isThinking={false}
+        turnStartedAt={now - 2_000}
+        {...base}
+      />,
+    );
+    expect(screen.queryByTestId("activity-tool-duration")).toBeNull();
+  });
+
+  it("a tool with no result shows no duration once the turn is over", () => {
+    render(
+      <ActivityPanel
+        toolCalls={[tool("t1", "web_search_agent", "success", Date.now() - 5_000)]}
+        delegations={[]}
+        isThinking={false}
+        {...base}
+      />,
+    );
+    expect(screen.queryByTestId("activity-tool-duration")).toBeNull();
+  });
 });

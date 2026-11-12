@@ -68,7 +68,7 @@ describe("Your instructions card", () => {
     expect(init).toMatchObject({ method: "PUT" });
     expect(JSON.parse(String(init?.body))).toEqual({ instructions: "Answer in Spanish." });
     expect(screen.getByTestId("instructions-on")).toHaveTextContent("Your instructions on");
-    expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute("href", "/settings/instructions");
+    expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute("href", "/settings#instructions");
   });
 
   it("a failed save is shown with Retry, and Retry saves again", async () => {

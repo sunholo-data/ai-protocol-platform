@@ -7,10 +7,9 @@ authorised text; only small matching windows are returned to the caller.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
 from typing import Any
 
-from tools.documents.context import blocks_to_markdown
+from tools.documents.outline import build_structure, heading_path
 
 MAX_TERMS = 12
 MAX_TERM_CHARS = 100
@@ -28,36 +27,34 @@ def literal_pattern(terms: list[str]) -> re.Pattern[str]:
     return re.compile("|".join(re.escape(t) for t in cleaned), re.IGNORECASE)
 
 
-def text_blocks(
-    blocks: list[dict[str, Any]], *, parent_page: Any = None, prefix: str = ""
-) -> Iterator[tuple[str, Any, str]]:
-    for index, block in enumerate(blocks):
-        block_id = str(block.get("block_id") or block.get("id") or f"{prefix}{index}")
-        page = block.get("page") or block.get("page_number") or block.get("pageNumber") or parent_page
-        if block.get("type") == "comment" or block.get("kind") == "comment":
-            continue
-        if block.get("type") == "section" and block.get("children"):
-            yield from text_blocks(block["children"], parent_page=page, prefix=f"{block_id}.")
-        else:
-            text = blocks_to_markdown([block])
-            if text:
-                yield block_id, page, text
-
-
 def matching_passages(
     blocks: list[dict[str, Any]], pattern: re.Pattern[str], *, limit: int = MAX_RESULTS
 ) -> list[dict[str, Any]]:
-    """One context window per matching block; never return a whole large block."""
+    """One context window per match; never return a whole large block.
+
+    Each hit says where it is: the outline section id and heading path it falls
+    under, and the printed page when the document has page markers, so the agent
+    can cite it and open the surrounding section with
+    get_document_content(section=<id>) instead of the whole document. Long
+    headings are clipped in the path; the section id is exact.
+    """
+    structure = build_structure(blocks)
     results = []
-    for block_id, page, text in text_blocks(blocks):
+    for leaf in structure.leaves:
+        text = leaf.text
+        if not text:
+            continue
         position = 0
         while match := pattern.search(text, position):
             start = max(0, match.start() - 200)
             end = min(len(text), start + MAX_SNIPPET_CHARS - 2)
             snippet = ("…" if start else "") + text[start:end] + ("…" if end < len(text) else "")
-            result: dict[str, Any] = {"block_id": block_id, "snippet": snippet, "matched": match.group()}
-            if page is not None:
-                result["page"] = page
+            result: dict[str, Any] = {"block_id": leaf.block_id, "snippet": snippet, "matched": match.group()}
+            if leaf.page is not None:
+                result["page"] = leaf.page
+            if leaf.node is not None:
+                result["section"] = leaf.node.id
+                result["heading_path"] = heading_path(leaf.node)
             results.append(result)
             if len(results) >= limit:
                 return results

@@ -29,6 +29,52 @@
       "rules": {
         "no-console": ["warn", { "allow": ["error"] }]
       }
+    },
+    // MULTI-LANG M2 (multi-language.md §7). Dates and numbers go through
+    // `useFormat()` / `formatterFor()` from @/i18n, which follow the
+    // interface language — a direct toLocale*String or Intl formatter, or a
+    // pinned "en-US", would keep printing English formats in a Danish UI.
+    {
+      "files": ["src/**/*.{ts,tsx}"],
+      "excludedFiles": [
+        "**/__tests__/**",
+        "**/*.test.{ts,tsx}",
+        "src/i18n/**",
+        "src/app/dev/**"
+      ],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "CallExpression[callee.property.name=/^toLocale(Date|Time)?String$/]",
+            "message": "Format dates and numbers with useFormat() (or formatterFor() outside a component) from @/i18n, so they follow the interface language."
+          },
+          {
+            "selector": "MemberExpression[object.name='Intl'][property.name=/^(DateTimeFormat|RelativeTimeFormat|NumberFormat)$/]",
+            "message": "Use useFormat() (or formatterFor()) from @/i18n instead of an Intl formatter, so the format follows the interface language."
+          },
+          {
+            "selector": "Literal[value=/^en-(US|GB)$/]",
+            "message": "Don't pin an English locale; useFormat() from @/i18n formats in the person's language."
+          }
+        ]
+      }
+    },
+    // MULTI-LANG M6 (multi-language.md §8). Areas already moved onto the
+    // catalogs (useT) stay there: no literal text in their JSX. Add an area's
+    // globs here once it is migrated; until then scripts/i18n/literals.mjs
+    // (make i18n-check) only stops its count from going up.
+    // `noStrings` also catches {"text"}; props are left to the ratchet, since
+    // the rule cannot tell aria-label from className. Separators are allowed.
+    {
+      "files": ["src/app/settings/**/*.tsx", "src/components/settings/**/*.tsx"],
+      "excludedFiles": ["**/__tests__/**", "**/*.test.tsx"],
+      "rules": {
+        "react/jsx-no-literals": [
+          "error",
+          { "noStrings": true, "ignoreProps": true, "allowedStrings": ["—", "–", "·", "…", "/", "|", "×", "•", ":"] }
+        ]
+      }
     }
   ]
 }

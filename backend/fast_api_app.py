@@ -9,6 +9,14 @@ import logging
 import os
 import sys as _sys_for_local_mode
 
+# Before anything imports gRPC (firebase_admin, the Google clients). With fork
+# support on, spawning a subprocess while gRPC threads are busy sometimes hands
+# the parent pipe data that is not the child's: measured 2026-10-28, 7-35 of
+# 200 CLI calls read as oversized ("Approval response exceeded its limit"),
+# 0 of 1,200 with it off. The backend never forks to use gRPC in a child; its
+# subprocesses exec immediately. An explicit setting still wins.
+os.environ.setdefault("GRPC_ENABLE_FORK_SUPPORT", "false")
+
 import firebase_admin
 from fastapi import FastAPI
 from google.adk.cli.fast_api import get_fast_api_app
@@ -200,6 +208,16 @@ app: FastAPI = get_fast_api_app(
     allow_origins=allow_origins,
     otel_to_cloud=_otel_to_cloud,
 )
+# Compress JSON responses when the client asks (Accept-Encoding: gzip). The web
+# proxy forwards the header and passes the compressed bytes through, so a chat
+# history or a large document no longer crosses the network as raw JSON (a 1.8 MB
+# document, a 350 KB activity feed — 2026-10-30). Starlette excludes
+# text/event-stream, images and archives by default, so the live AG-UI stream is
+# never buffered; bodies over 128 KiB are compressed off the event loop.
+from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
+
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 app.title = "Sunholo AI Protocol Platform"
 app.description = "Open-source AI protocol platform — Skills + AG-UI + A2UI + MCP Apps + A2A on Google ADK"
 app.version = "6.0.0"
@@ -361,12 +379,15 @@ from internal_tasks.recompact_routes import router as internal_tasks_recompact_r
 from internal_tasks.resident_routes import router as internal_tasks_resident_router  # noqa: E402
 from notifications.routes import router as push_router  # noqa: E402
 from observability.client_logs import router as client_logs_router  # noqa: E402
+from projects.memory_routes import router as memory_router  # noqa: E402
 from projects.routes import router as projects_router  # noqa: E402
 from protocols.a2a import router as a2a_router  # noqa: E402
+from protocols.a2ui_direct_launch_routes import router as a2ui_direct_launch_router  # noqa: E402
 from protocols.a2ui_surface_action_routes import router as a2ui_surface_action_router  # noqa: E402
 from protocols.a2ui_surface_action_run_routes import router as a2ui_surface_action_run_router  # noqa: E402
 from protocols.a2ui_surface_data_routes import router as a2ui_surface_data_router  # noqa: E402
 from protocols.a2ui_surface_direct_routes import router as a2ui_surface_direct_router  # noqa: E402
+from protocols.approvals_routes import router as approvals_router  # noqa: E402
 from protocols.iframe_context_routes import router as iframe_context_router  # noqa: E402
 from protocols.mcp_proxy import router as mcp_proxy_router  # noqa: E402
 from protocols.mcp_server import McpExactPath, get_mcp_asgi_app  # noqa: E402
@@ -379,6 +400,9 @@ from protocols.tools_route import router as tools_router  # noqa: E402
 from protocols.voice_routes import router as voice_router  # noqa: E402
 from skills.routes import router as skills_router  # noqa: E402
 from skills.skill_processor import SkillNotFoundError, process_skill_request  # noqa: E402
+from sources.routes import router as project_sources_router  # noqa: E402
+from sources.scheduler import router as sources_scheduler_router  # noqa: E402
+from sources.webhook import router as sources_webhook_router  # noqa: E402
 from tools.browser_artefact_routes import router as browser_artefact_router  # noqa: E402
 from tools.documents.generate import router as documents_generate_router  # noqa: E402
 from tools.documents.import_by_reference import router as documents_import_router  # noqa: E402
@@ -422,12 +446,20 @@ app.include_router(documents_generate_router)
 app.include_router(documents_import_router)
 app.include_router(doc_folders_router)
 app.include_router(projects_router)  # projects.md §7 + /api/me/instructions
+app.include_router(project_sources_router)  # github-sources.md: /api/projects/{id}/sources
+app.include_router(sources_scheduler_router)  # github-sources.md §7: Cloud Scheduler target, OIDC-gated
+app.include_router(sources_webhook_router)  # github-sources.md P5: push webhook, HMAC-gated, off by default
+app.include_router(memory_router)  # memory-screen.md: /api/me/memories
 app.include_router(rag_corpus_router)
 app.include_router(media_router)
 app.include_router(a2a_router)
 app.include_router(models_router)
 app.include_router(tools_router)
 app.include_router(sessions_router)
+app.include_router(approvals_router)  # human-approvals.md: /api/approvals
+from sources.delete_approvals import register as _register_source_deletes  # noqa: E402
+
+_register_source_deletes()  # project-source-write.md W7: the AI's deletes wait for the owner
 app.include_router(session_bootstrap_router)
 app.include_router(mcp_proxy_router)
 app.include_router(mcp_token_router)
@@ -436,6 +468,7 @@ app.include_router(a2ui_surface_action_router)
 app.include_router(a2ui_surface_action_run_router)
 app.include_router(a2ui_surface_data_router)
 app.include_router(a2ui_surface_direct_router)
+app.include_router(a2ui_direct_launch_router)
 app.include_router(voice_router)
 app.include_router(push_router)
 
@@ -504,9 +537,9 @@ else:
 ChannelRegistry.mount_webhooks(app)
 
 # Mount the MCP streamable-HTTP server. FastAPI does NOT propagate lifespan
-# events to mounted sub-apps, so the FastMCP session_manager task group
+# events to mounted sub-apps, so the MCP server's session_manager task group
 # never starts — every request fails with "Task group is not initialized".
-# We compose FastMCP's session_manager.run() into the parent app's lifespan
+# We compose the MCP server's session_manager.run() into the parent app's lifespan
 # so the task group is up for the lifetime of the service.
 _parent_lifespan = app.router.lifespan_context
 
@@ -694,6 +727,22 @@ def _extract_project_id(body: "_StreamSkillRequest") -> str | None:
     return None
 
 
+def _extract_model_choice(body: "_StreamSkillRequest") -> str | None:
+    """``forwardedProps.model_choice`` — the composer's Model pick
+    (adk.model_choice). forwardedProps only, like project_id. None when absent
+    (a caller without the menu); the processor validates whatever arrives."""
+    raw = (body.forwardedProps or {}).get("model_choice")
+    return raw if isinstance(raw, str) else None
+
+
+def _extract_ui_locale(body: "_StreamSkillRequest") -> str | None:
+    """``forwardedProps.ui_locale`` — the language the person reads the interface
+    in (multi-language.md §6). forwardedProps only, like model_choice. The
+    processor validates it against UI_LOCALES; anything else becomes "" (inert)."""
+    raw = (body.forwardedProps or {}).get("ui_locale")
+    return raw if isinstance(raw, str) else None
+
+
 def _extract_resumed_flag(body: "_StreamSkillRequest") -> bool:
     """True when the frontend signalled this chat was entered by clicking a
     conversation thread from the per-document Conversations panel.
@@ -814,7 +863,7 @@ async def stream_skill(
     extracted_project_id = _extract_project_id(body) if not is_read_only else None
     _log.info(
         "stream_skill: skill=%s session=%s read_only=%s document_ids=%s resumed=%s "
-        "wire_locations=(top:%s, state:%s, fwd:%s)",
+        "wire_locations=(top:%s, state:%s, fwd:%s) surfaces=%s",
         skill_id,
         session_id,
         is_read_only,
@@ -823,6 +872,7 @@ async def stream_skill(
         body.documentIds,
         (body.state or {}).get("document_ids"),
         (body.forwardedProps or {}).get("document_ids"),
+        sorted(extracted_surface_state or {}),
     )
 
     # The session_index write is the last synchronous step before the SSE
@@ -843,6 +893,8 @@ async def stream_skill(
         turn_author=turn_author,
         author=author,
         project_id=extracted_project_id,
+        model_choice=_extract_model_choice(body) if not is_read_only else None,
+        ui_locale=_extract_ui_locale(body),
     )
     try:
         # Surface SkillNotFoundError *before* returning the StreamingResponse so
@@ -945,6 +997,9 @@ async def stream_skill(
             run_state["thread_id"] = event["threadId"]
         elif etype in ("RUN_FINISHED", "RUN_ERROR") and run_state["terminal"] is None:
             run_state["terminal"] = etype
+            # The ttft line's run_outcome: "ok", or "error:<code>" (EMPTY_RUN for a
+            # turn that ended with no answer and no tool call).
+            tracker.set_outcome("ok" if etype == "RUN_FINISHED" else f"error:{event.get('code') or 'unknown'}")
 
     def _after_run() -> None:
         """Tell people what they'd otherwise miss. Never raises, never blocks."""

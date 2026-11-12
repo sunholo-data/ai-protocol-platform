@@ -314,7 +314,7 @@ class _Query:
     so the original collection ref is reusable (mirrors real Firestore).
     """
 
-    __slots__ = ("_client", "_collection", "_filters", "_limit", "_order_by", "_start_after")
+    __slots__ = ("_client", "_collection", "_filters", "_limit", "_order_by", "_select", "_start_after")
 
     def __init__(
         self,
@@ -324,6 +324,7 @@ class _Query:
         order_by: list[tuple[str, str]] | None = None,
         limit: int | None = None,
         start_after: _Snapshot | None = None,
+        select: list[str] | None = None,
     ):
         self._client = client
         self._collection = collection
@@ -331,6 +332,7 @@ class _Query:
         self._order_by = list(order_by or [])
         self._limit = limit
         self._start_after = start_after
+        self._select = None if select is None else list(select)
 
     def where(self, *, filter: FieldFilter | None = None, **_kwargs: Any) -> _Query:
         if filter is None:
@@ -342,6 +344,7 @@ class _Query:
             order_by=self._order_by,
             limit=self._limit,
             start_after=self._start_after,
+            select=self._select,
         )
 
     def order_by(self, field: str, direction: str = Query.ASCENDING) -> _Query:
@@ -352,6 +355,7 @@ class _Query:
             order_by=[*self._order_by, (field, direction)],
             limit=self._limit,
             start_after=self._start_after,
+            select=self._select,
         )
 
     def limit(self, n: int) -> _Query:
@@ -362,6 +366,7 @@ class _Query:
             order_by=self._order_by,
             limit=n,
             start_after=self._start_after,
+            select=self._select,
         )
 
     def start_after(self, snapshot: _Snapshot) -> _Query:
@@ -372,6 +377,20 @@ class _Query:
             order_by=self._order_by,
             limit=self._limit,
             start_after=snapshot,
+            select=self._select,
+        )
+
+    def select(self, field_paths: Iterable[str]) -> _Query:
+        """Field projection, as Firestore's: only these fields come back
+        (``__name__`` alone returns the documents with no fields)."""
+        return _Query(
+            self._client,
+            self._collection,
+            filters=self._filters,
+            order_by=self._order_by,
+            limit=self._limit,
+            start_after=self._start_after,
+            select=list(field_paths),
         )
 
     def stream(self) -> Iterable[_Snapshot]:
@@ -408,6 +427,8 @@ class _Query:
             rows = rows[: self._limit]
 
         for doc_id, data in rows:
+            if self._select is not None:
+                data = {k: v for k, v in data.items() if k in self._select}
             yield _Snapshot(self._collection, doc_id, data)
 
 
@@ -491,6 +512,19 @@ class InMemoryFirestoreClient:
 
     def collection(self, name: str) -> _CollectionRef:
         return _CollectionRef(self, name)
+
+    def get_all(
+        self, references: Iterable[_DocumentRef], field_paths: Iterable[str] | None = None
+    ) -> Iterable[_Snapshot]:
+        """Batched reads, as ``google.cloud.firestore.Client.get_all``."""
+        fields = None if field_paths is None else set(field_paths)
+        for ref in references:
+            snap = ref.get()
+            if snap.exists and fields is not None:
+                snap = _Snapshot(
+                    snap._collection, snap.id, {k: v for k, v in (snap.to_dict() or {}).items() if k in fields}
+                )
+            yield snap
 
     # ------------------------------------------------------------------ debug
 

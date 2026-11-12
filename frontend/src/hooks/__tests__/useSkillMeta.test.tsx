@@ -84,3 +84,13 @@ describe("useSkillMeta", () => {
     expect(result.current.displayName).toBe("abc12345");
   });
 });
+
+it("exposes validated deterministic launcher metadata", async () => {
+  // This hook only exposes fixed declarations; permission is rechecked by the server.
+  mockFetch.mockResolvedValue({ ok: true, json: async () => ({ skillMetadata: { toolConfigs: { a2ui: {
+    direct_launchers: [{ name: "board", label: "Waiting for you", tool: "list_board" }, { name: "bad" }],
+  } } } }) });
+  const { result } = renderHook(() => useSkillMeta("skill"));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.a2ui.directLaunchers).toEqual([{ name: "board", label: "Waiting for you", tool: "list_board" }]);
+});

@@ -440,7 +440,7 @@ def test_post_validate_checks_the_unsaved_draft() -> None:
     """The editor's Validate must check what's IN THE FORM, not what's stored —
     and must work before the tenant exists. It writes nothing."""
     with (
-        patch("admin.tenants.skill_config.list_skills", return_value=[_skill("shepherd")]),
+        patch("admin.tenants.skill_config.list_skills", return_value=[_skill("memo-writer")]),
         patch(
             "admin.tenants.probe_bucket", return_value={**_PROBE_OK, "bucket": "draft-bucket", "writable": True}
         ) as probe,
@@ -449,7 +449,7 @@ def test_post_validate_checks_the_unsaved_draft() -> None:
     ):
         resp = _client(_PLATFORM_ADMIN).post(
             "/api/admin/tenants/acme.com/validate",
-            json={"documents_bucket": " draft-bucket ", "default_skill": "shepherd"},
+            json={"documents_bucket": " draft-bucket ", "default_skill": "memo-writer"},
         )
     assert resp.status_code == 200
     probe.assert_called_once_with("draft-bucket")

@@ -65,11 +65,18 @@ class ThinkDepth(StrEnum):
     DYNAMIC — the model decides. Genuine multi-step reasoning: clause
               analysis, code generation, open-ended chat. The default, and the
               back-compat value for anything previously unset.
+    HIGH    — the person asked for it: the composer's Model → Thorough
+              (adk.model_choice). Never a skill's own setting. 3.x gets
+              thinking_level=HIGH; 2.5 has no family-safe fixed budget, so it
+              stays dynamic. Measured 2026-11-06 on gemini-3.8-flash (EU):
+              HIGH thought no more than DYNAMIC, so it lifts `low`/`off`
+              skills, not `dynamic` ones.
     """
 
     OFF = "off"
     LOW = "low"
     DYNAMIC = "dynamic"
+    HIGH = "high"
 
 
 def _is_3x(api_name: str) -> bool:
@@ -105,7 +112,10 @@ def thinking_config_for(depth: ThinkDepth, model_ref: str) -> ThinkingConfig | N
             return ThinkingConfig(include_thoughts=True, thinking_level=ThinkingLevel.LOW)
         return ThinkingConfig(include_thoughts=True, thinking_budget=_MIN_2_5_BUDGET)
 
-    # DYNAMIC. include_thoughts=True is load-bearing (MODEL-RELIABILITY M4):
+    if depth is ThinkDepth.HIGH and _is_3x(api_name):
+        return ThinkingConfig(include_thoughts=True, thinking_level=ThinkingLevel.HIGH)
+
+    # DYNAMIC (and HIGH on 2.5). include_thoughts=True is load-bearing (MODEL-RELIABILITY M4):
     # without it Gemini thinks silently, the REASONING -> ThinkingPanel
     # pipeline stays dark, and a long thinking phase reads to the user as a
     # hang. See CLAUDE.md #8 (never silent).

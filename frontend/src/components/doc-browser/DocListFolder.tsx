@@ -1,9 +1,14 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import type { Folder, ParsedDocument } from "@/hooks/useDocBrowser";
 import type { KnowledgeBaseInfo } from "@/hooks/useKnowledgeBases";
+import type { FolderProjectLink } from "@/hooks/useFolderProjects";
+import type { SyncedFolder } from "@/hooks/useSyncedFolders";
+import { FolderProjectsMenu, FolderProjectsMenuItems } from "./FolderProjectsMenu";
+import { SyncedBadge, isSyncRoot } from "./DocListFolderGroup";
+import { folderSegments, parentPath } from "./folderTree";
 import { DocListItem } from "./DocListItem";
 import {
   DOC_DRAG_TYPE,
@@ -20,6 +25,7 @@ import { MoveFeedback } from "./MoveFeedback";
 import { AddToSkillPanel, SearchAccessPanel } from "./FolderSearchPanels";
 import { createProjectWithFreeName } from "@/hooks/useProjects";
 import { navigateTo, useOptionalRouter } from "@/lib/useOptionalRouter";
+import { useConfirm } from "@/components/ui/confirm";
 
 interface DocListFolderProps {
   folder: Folder;
@@ -39,6 +45,16 @@ interface DocListFolderProps {
   uid?: string;
   /** The skill the user is chatting with — offered first in "Add to a skill". */
   currentSkillId?: string;
+  /** Shown instead of the full name when the folder sits inside another (`2026` for `reports/2026`). */
+  label?: string;
+  /** Start expanded even when not selected — e.g. a subfolder of it is selected. */
+  defaultOpen?: boolean;
+  /** Subfolders, listed above this folder's own documents when it is open. */
+  children?: ReactNode;
+  /** The GitHub source this folder belongs to (is, is inside, or contains) — it can't be renamed. */
+  syncedBy?: SyncedFolder | null;
+  /** Projects this folder (with its subfolders) is already in. */
+  projects?: FolderProjectLink[];
 }
 
 /** Badge text + tooltip for a searchable folder. */
@@ -68,8 +84,13 @@ export function DocListFolder({
   knowledgeBase,
   uid,
   currentSkillId,
+  label,
+  defaultOpen = false,
+  children,
+  syncedBy = null,
+  projects = [],
 }: DocListFolderProps) {
-  const [open, setOpen] = useState(isActive);
+  const [open, setOpen] = useState(isActive || defaultOpen);
   const nameId = useId();
 
   // Rename
@@ -79,8 +100,8 @@ export function DocListFolder({
   const inputRef = useRef<HTMLInputElement>(null);
   const keepFocusRef = useRef(false);
 
-  // Delete
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Delete, and the other questions asked first
+  const confirm = useConfirm();
   const [deleting, setDeleting] = useState(false);
 
   const [actionError, setActionError] = useState<string | null>(null);
@@ -91,7 +112,6 @@ export function DocListFolder({
 
   // Searchable folder (knowledge base)
   const [searchPending, setSearchPending] = useState<"make" | "stop" | null>(null);
-  const [confirmingStop, setConfirmingStop] = useState(false);
   const [searchPanel, setSearchPanel] = useState<"add" | "access" | null>(null);
   const kbId = folder.knowledgeBaseId ?? null;
 
@@ -112,11 +132,15 @@ export function DocListFolder({
     setOpen((v) => !v);
   }
 
+  // The box edits this folder's own name; its place in the tree stays.
+  // Renaming moves its subfolders along (the server renames the whole tree).
+  const parent = parentPath(folder.name);
+  const ownName = folderSegments(folder.name).at(-1) ?? folder.name;
+
   function startRename() {
     keepFocusRef.current = true;
-    setDraft(folder.name);
+    setDraft(ownName);
     setActionError(null);
-    setConfirmingDelete(false);
     setEditing(true);
   }
 
@@ -126,12 +150,13 @@ export function DocListFolder({
   }
 
   async function saveRename() {
-    const name = draft.trim();
-    if (!name) {
+    const own = draft.trim();
+    if (!own) {
       setActionError("A folder name can't be empty.");
       return;
     }
-    if (name === folder.name) {
+    const name = parent ? `${parent}/${own}` : own;
+    if (own === ownName) {
       cancelRename();
       return;
     }
@@ -144,11 +169,16 @@ export function DocListFolder({
   }
 
   async function confirmDelete() {
-    setDeleting(true);
     setActionError(null);
+    const ok = await confirm({
+      title: `Delete folder "${folder.name}"?`,
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    setDeleting(true);
     const result = await deleteFolder(folder.id);
     setDeleting(false);
-    setConfirmingDelete(false);
     if (result.ok) onDeleted?.(folder.id);
     else setActionError(result.message);
   }
@@ -156,10 +186,24 @@ export function DocListFolder({
   /** A one-off snapshot: the folder's documents today join the project; later
    * uploads don't. The name is pre-filled from the folder, so a clash gets
    * " (2)" rather than an error. Lands on the new project's home. */
+  // Already in a project: ask before making another (it's a one-off copy).
+  async function requestProject() {
+    setActionError(null);
+    if (projects.length > 0) {
+      const ok = await confirm({
+        title: "Create another project?",
+        description: `This folder is already in ${projects.length === 1 ? projects[0].projectName : `${projects.length} projects`}.`,
+        confirmLabel: "Create",
+      });
+      if (!ok) return;
+    }
+    void startProject();
+  }
+
   async function startProject() {
     setStartingProject(true);
     setActionError(null);
-    const result = await createProjectWithFreeName({ name: folder.name, fromFolderId: folder.id });
+    const result = await createProjectWithFreeName({ name: label ?? folder.name, fromFolderId: folder.id });
     setStartingProject(false);
     if (!result.ok) {
       setActionError(result.message);
@@ -178,11 +222,16 @@ export function DocListFolder({
 
   async function confirmStopSearching() {
     if (!kbId) return;
-    setSearchPending("stop");
     setActionError(null);
+    const ok = await confirm({
+      title: `Stop searching "${folder.name}"?`,
+      description: "Its search index is deleted; skills using it lose access. The documents stay.",
+      confirmLabel: "Stop searching",
+    });
+    if (!ok) return;
+    setSearchPending("stop");
     const result = await stopFolderSearch(kbId);
     setSearchPending(null);
-    setConfirmingStop(false);
     if (!result.ok) setActionError(result.message);
   }
 
@@ -237,7 +286,7 @@ export function DocListFolder({
               }}
               className="min-w-0 flex-1 rounded border bg-background px-1.5 py-0.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
             />
-            <span id={`${nameId}-hint`} className="shrink-0 text-[10px] text-muted-foreground">
+            <span id={`${nameId}-hint`} className="shrink-0 text-[11px] text-muted-foreground">
               {renaming ? "Saving…" : "Enter ↵ / Esc"}
             </span>
           </div>
@@ -264,12 +313,17 @@ export function DocListFolder({
             >
               <path d="M1.5 3.5A1 1 0 012.5 2.5h3.879a1 1 0 01.707.293L8.5 4.5H13.5a1 1 0 011 1V12a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" />
             </svg>
-            <span id={nameId} className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-              {folder.name}
+            <span
+              id={nameId}
+              title={folder.name}
+              className="min-w-0 flex-1 truncate text-xs font-medium text-foreground"
+            >
+              {label ?? folder.name}
             </span>
+            {syncedBy && isSyncRoot(syncedBy, folder.name) && <SyncedBadge synced={syncedBy} />}
             {folder.system && (
               <span
-                className="shrink-0 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300"
+                className="shrink-0 rounded bg-violet-100 px-1.5 py-0.5 text-[11px] font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300"
                 title="Documents the assistant created for you"
               >
                 Created
@@ -277,18 +331,20 @@ export function DocListFolder({
             )}
             {(kbId || searchPending === "make") && (
               <span
-                className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800 dark:bg-sky-950 dark:text-sky-300"
+                className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-medium text-sky-800 dark:bg-sky-950 dark:text-sky-300"
                 title={kbId ? searchBadge(knowledgeBase).title : "Making this folder searchable"}
                 data-testid="folder-search-badge"
               >
                 {kbId ? searchBadge(knowledgeBase).text : "Making searchable…"}
               </span>
             )}
-            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
               {folder.docCount}
             </span>
           </button>
         )}
+
+        {!canManage && !editing && <FolderProjectsMenu projects={projects} folderLabel={label ?? folder.name} />}
 
         {canManage && !editing && (
           <DropdownMenu.Root>
@@ -311,15 +367,19 @@ export function DocListFolder({
                   }
                 }}
               >
-                <DropdownMenu.Item className={MENU_ITEM_CLASS} onSelect={startRename}>
-                  Rename
-                </DropdownMenu.Item>
+                <FolderProjectsMenuItems projects={projects} />
+                {/* A synced folder can't be renamed; its GitHub icon says why. */}
+                {!syncedBy && (
+                  <DropdownMenu.Item className={MENU_ITEM_CLASS} onSelect={startRename}>
+                    Rename
+                  </DropdownMenu.Item>
+                )}
                 <DropdownMenu.Item
                   className={MENU_ITEM_CLASS}
                   disabled={startingProject}
-                  onSelect={() => void startProject()}
+                  onSelect={() => void requestProject()}
                 >
-                  Start a project from this folder
+                  New project from folder
                 </DropdownMenu.Item>
                 {searchAvailable && !kbId && (
                   <DropdownMenu.Item
@@ -356,20 +416,14 @@ export function DocListFolder({
                   <DropdownMenu.Item
                     className={MENU_ITEM_CLASS}
                     disabled={searchPending !== null}
-                    onSelect={() => {
-                      setActionError(null);
-                      setConfirmingStop(true);
-                    }}
+                    onSelect={() => void confirmStopSearching()}
                   >
                     Stop searching
                   </DropdownMenu.Item>
                 )}
                 <DropdownMenu.Item
                   className={`${MENU_ITEM_CLASS} text-destructive`}
-                  onSelect={() => {
-                    setActionError(null);
-                    setConfirmingDelete(true);
-                  }}
+                  onSelect={() => void confirmDelete()}
                 >
                   Delete
                 </DropdownMenu.Item>
@@ -378,34 +432,6 @@ export function DocListFolder({
           </DropdownMenu.Root>
         )}
       </div>
-
-      {confirmingDelete && (
-        <div
-          role="alertdialog"
-          aria-label="Delete folder?"
-          className="mx-2 mb-1 rounded border border-destructive/40 px-2 py-1 text-[10px] leading-tight"
-        >
-          <p className="text-foreground">Delete folder &lsquo;{folder.name}&rsquo;?</p>
-          <div className="mt-1 flex gap-1.5">
-            <button
-              type="button"
-              onClick={() => void confirmDelete()}
-              disabled={deleting}
-              className="rounded border border-destructive/40 px-1.5 py-0.5 text-destructive hover:bg-destructive/10 disabled:opacity-50"
-            >
-              {deleting ? "Deleting…" : "Delete"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmingDelete(false)}
-              disabled={deleting}
-              className="rounded border px-1.5 py-0.5 text-muted-foreground hover:bg-accent disabled:opacity-50"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
 
       {searchPanel === "add" && knowledgeBase && (
         <AddToSkillPanel
@@ -420,45 +446,26 @@ export function DocListFolder({
         <SearchAccessPanel kb={knowledgeBase} folderName={folder.name} onClose={() => setSearchPanel(null)} />
       )}
 
-      {confirmingStop && (
-        <div
-          role="alertdialog"
-          aria-label="Stop searching this folder?"
-          className="mx-2 mb-1 rounded border px-2 py-1 text-[10px] leading-tight"
-        >
-          <p className="text-foreground">
-            Stop searching &lsquo;{folder.name}&rsquo;? Its search index is deleted; skills using it lose access. The
-            documents stay.
-          </p>
-          <div className="mt-1 flex gap-1.5">
-            <button
-              type="button"
-              onClick={() => void confirmStopSearching()}
-              disabled={searchPending === "stop"}
-              className="rounded border px-1.5 py-0.5 text-foreground hover:bg-accent disabled:opacity-50"
-            >
-              {searchPending === "stop" ? "Stopping…" : "Stop searching"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmingStop(false)}
-              disabled={searchPending === "stop"}
-              className="rounded border px-1.5 py-0.5 text-muted-foreground hover:bg-accent disabled:opacity-50"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
+      {deleting && (
+        <p role="status" className="px-2 pb-1 text-[11px] leading-tight text-muted-foreground">
+          Deleting folder…
+        </p>
+      )}
+
+      {searchPending === "stop" && (
+        <p role="status" className="px-2 pb-1 text-[11px] leading-tight text-muted-foreground">
+          Stopping search…
+        </p>
       )}
 
       {startingProject && (
-        <p role="status" className="px-2 pb-1 text-[10px] leading-tight text-muted-foreground">
-          Starting a project from &lsquo;{folder.name}&rsquo;…
+        <p role="status" className="px-2 pb-1 text-[11px] leading-tight text-muted-foreground">
+          Creating project…
         </p>
       )}
 
       {actionError && (
-        <div role="alert" className="flex items-start gap-2 px-2 pb-1 text-[10px] leading-tight text-destructive">
+        <div role="alert" className="flex items-start gap-2 px-2 pb-1 text-[11px] leading-tight text-destructive">
           <span className="flex-1">{actionError}</span>
           <button type="button" aria-label="Dismiss" onClick={() => setActionError(null)} className="shrink-0 hover:underline">
             ×
@@ -470,11 +477,26 @@ export function DocListFolder({
 
       {open && (
         <div className="ml-5 mt-0.5 space-y-0.5">
-          {documents.length === 0 && (
-            <p className="px-2 py-1 text-xs text-muted-foreground">
-              No documents yet
-            </p>
-          )}
+          {children}
+          {documents.length === 0 &&
+            (!isActive && folder.docCount > 0 ? (
+              // Only the selected folder's documents are loaded; an open
+              // folder left behind (e.g. after opening a subfolder) offers
+              // to show its own again rather than claiming it has none.
+              <button
+                type="button"
+                onClick={() => onSelect(folder.id)}
+                className="px-2 py-1 text-left text-xs text-muted-foreground hover:text-foreground hover:underline"
+              >
+                Show {folder.docCount} document{folder.docCount === 1 ? "" : "s"}
+              </button>
+            ) : (
+              !children && (
+                <p className="px-2 py-1 text-xs text-muted-foreground">
+                  No documents yet
+                </p>
+              )
+            ))}
           {documents.map((doc) => (
             <DocListItem
               key={doc.id}

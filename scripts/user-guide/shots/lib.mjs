@@ -38,7 +38,7 @@ export async function tidy(page) {
     // Dev-only chrome off; the sidebar's file list un-capped (max-h-[45vh]) so a
     // menu or panel inside it is photographed whole rather than scrolled off.
     content:
-      "nextjs-portal{display:none!important} .bg-yellow-100.border-b.border-yellow-300{display:none!important} aside .max-h-\\[45vh\\],aside .max-h-\\[30vh\\]{max-height:none!important}",
+      "nextjs-portal{display:none!important} .bg-yellow-100.border-b.border-yellow-300{display:none!important} aside .max-h-\\[45vh\\],aside .max-h-\\[30vh\\],aside .max-h-\\[40vh\\]{max-height:none!important}",
   });
   await page.evaluate(() => {
     for (const el of document.querySelectorAll("body *")) {

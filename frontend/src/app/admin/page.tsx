@@ -17,67 +17,52 @@
 "use client";
 
 import NextLink from "next/link";
+import { ChevronRight } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminScope } from "@/hooks/useAdminScope";
 import { SignInRequired } from "@/components/chat/SignInRequired";
+import { PageLoading } from "@/components/ui/skeleton";
 
-type Link = { href: string; label: string; note?: string };
+type Link = { href: string; label: string };
 
+// Grouped by what an operator is trying to do, not by API surface. Titles and
+// links only: the page is a map, each destination explains itself. Labels say
+// "workspace" where the code says tenant.
 type Area = {
-  href: string;
   title: string;
-  // The QUESTION this area answers. The previous IA had one card per API
-  // surface, which mirrored the backend's module layout rather than anything an
-  // operator actually asks — fine for the engineer who wrote it, wrong for a
-  // client admin. v6.16.0 Phase 3 regroups them by task.
-  question: string;
   links: Link[];
-  // Platform-only areas are hidden entirely for tenant scope rather than
-  // shown-then-403'd: offering a door that always slams is the opposite of
-  // the never-silent principle.
+  // Platform-only areas are hidden for a tenant admin rather than shown and
+  // then refused.
   platformOnly?: boolean;
 };
 
 const AREAS: Area[] = [
   {
-    href: "/admin/tenants",
-    title: "Your tenant",
-    question: "What is my tenant configured to do, and what do my users actually see?",
+    title: "Workspace",
     links: [
-      { href: "/admin/tenants", label: "Tenant config", note: "enabled skills, landing skill, group tags, bucket" },
-      { href: "/admin/tenants", label: "What your users actually see", note: "effective access for one user" },
+      { href: "/admin/tenants", label: "Workspace settings" },
+      { href: "/admin/tenants", label: "What your users see" },
     ],
   },
   {
-    href: "/admin/users",
-    title: "People & access",
-    question: "Who is here, and what may they use?",
+    title: "People",
     links: [
-      { href: "/admin/users", label: "Users", note: "grant and revoke group tags" },
-      { href: "/admin/groups", label: "Group tags", note: "the registry, and who holds each tag" },
-      { href: "/admin/tool-permissions", label: "Tool permissions", note: "which tools a user or domain may call" },
+      { href: "/admin/users", label: "Users" },
+      { href: "/admin/groups", label: "Groups" },
+      { href: "/admin/tool-permissions", label: "Tool permissions" },
     ],
   },
   {
-    href: "/skills/studio/new",
-    title: "Skills",
-    question: "What is published, and to whom?",
-    links: [{ href: "/skills/studio/new", label: "Skill Studio", note: "model, tools, instructions, access" }],
-  },
-  {
-    href: "/admin/analytics",
-    title: "Activity & audit",
-    question: "What happened, and who changed what?",
+    title: "Skills and activity",
     links: [
-      { href: "/admin/analytics", label: "Sessions", note: "browse past sessions and their traces" },
-      { href: "/admin/audit", label: "Audit trail", note: "who changed what, and when" },
+      { href: "/skills/studio/new", label: "Skill Studio" },
+      { href: "/admin/analytics", label: "Sessions" },
+      { href: "/admin/audit", label: "Audit trail" },
     ],
   },
   {
-    href: "/admin/settings",
     title: "Platform",
-    question: "Settings that apply across every tenant.",
-    links: [{ href: "/admin/settings", label: "Platform preamble", note: "prepended to every skill's prompt" }],
+    links: [{ href: "/admin/settings", label: "Platform preamble" }],
     platformOnly: true,
   },
 ];
@@ -86,7 +71,7 @@ export default function AdminHub() {
   const { user, loading } = useAuth();
   const { state, domains, isAdmin, isPlatform, recheck } = useAdminScope(!loading && !!user);
 
-  if (loading || state === "loading") return <Centered>Loading…</Centered>;
+  if (loading || state === "loading") return <PageLoading />;
   if (!user) return <SignInRequired />;
 
   // A genuine failure is NOT the same as "you're not an admin" — say so, and
@@ -138,32 +123,31 @@ export default function AdminHub() {
   const areas = AREAS.filter((a) => isPlatform || !a.platformOnly);
 
   return (
-    <main className="mx-auto max-w-4xl p-6">
-      <header className="mb-6">
-        <h1 className="text-xl font-semibold">Administration</h1>
-        <p className="text-sm text-muted-foreground">
-          Manage tenants, skills, access, and analytics.
+    <main className="mx-auto max-w-xl px-4 py-8">
+      <h1 className="text-xl font-semibold">Administration</h1>
+      {!isPlatform && domains.length > 0 && (
+        // A tenant admin seeing a short list should know it is scoped, not
+        // that the platform is empty.
+        <p className="mt-1 text-sm text-muted-foreground">
+          Scoped to {domains.join(", ")}: you&apos;re seeing your workspace only.
         </p>
-        {!isPlatform && domains.length > 0 && (
-          // Say plainly whose data this is. A tenant admin seeing a short list
-          // should know it is scoped, not that the platform is empty.
-          <p className="mt-1 text-xs text-muted-foreground">
-            Scoped to {domains.join(", ")} — you&apos;re seeing your tenant only.
-          </p>
-        )}
-      </header>
-      <div className="grid gap-4 sm:grid-cols-2">
+      )}
+      <div className="mt-6 space-y-6">
         {areas.map((a) => (
-          <section key={a.title} className="rounded-lg border p-4">
-            <h2 className="font-medium">{a.title}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{a.question}</p>
-            <ul className="mt-3 space-y-1.5">
+          <section key={a.title} aria-labelledby={`admin-${a.title}`}>
+            <h2 id={`admin-${a.title}`} className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {a.title}
+            </h2>
+            <ul className="mt-2 divide-y divide-border rounded-[var(--radius)] border border-border">
               {a.links.map((l) => (
                 <li key={l.label}>
-                  <NextLink href={l.href} className="text-sm text-foreground underline-offset-2 hover:underline">
+                  <NextLink
+                    href={l.href}
+                    className="flex items-center justify-between px-4 py-3 text-sm text-foreground hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                  >
                     {l.label}
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />
                   </NextLink>
-                  {l.note && <span className="ml-2 text-xs text-muted-foreground">{l.note}</span>}
                 </li>
               ))}
             </ul>
@@ -175,5 +159,5 @@ export default function AdminHub() {
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
-  return <main className="flex min-h-screen items-center justify-center p-8">{children}</main>;
+  return <main className="flex flex-1 items-center justify-center p-8">{children}</main>;
 }

@@ -85,6 +85,9 @@ export function useSharedSessions(): UseSkillSessionsReturn {
   return useSessionList(`/api/proxy/api/sessions?shared=true&page_size=${PAGE_SIZE}`);
 }
 
+/** A window focus within this long of the last load does not refetch. */
+const FOCUS_REFRESH_MIN_MS = 15_000;
+
 function useSessionList(url: string): UseSkillSessionsReturn {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -94,6 +97,7 @@ function useSessionList(url: string): UseSkillSessionsReturn {
   const [loadMoreFailed, setLoadMoreFailed] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const moreAbortRef = useRef<AbortController | null>(null);
+  const loadedAtRef = useRef(0);
 
   const fetch_ = useCallback(() => {
     abortRef.current?.abort();
@@ -117,6 +121,7 @@ function useSessionList(url: string): UseSkillSessionsReturn {
       .then((data) => {
         setSessions(data.sessions ?? []);
         setNextCursor(data.next_cursor ?? null);
+        loadedAtRef.current = Date.now();
       })
       .catch((err: Error) => {
         if (err.name !== "AbortError") {
@@ -168,7 +173,12 @@ function useSessionList(url: string): UseSkillSessionsReturn {
   }, [fetch_]);
 
   useEffect(() => {
-    const onFocus = () => fetch_();
+    // Returning to the tab refreshes the list — but not when it loaded moments
+    // ago: page load itself fires a focus, which fetched the list twice.
+    // Mutations still refetch at once (sessions-changed, below).
+    const onFocus = () => {
+      if (Date.now() - loadedAtRef.current >= FOCUS_REFRESH_MIN_MS) fetch_();
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [fetch_]);

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../MessageBubble";
 import type { SkillMessage } from "@/hooks/useSkillAgent";
@@ -105,6 +105,8 @@ describe("MessageBubble — tool call chips", () => {
   it("renders running tool call chip with its friendly label", () => {
     const toolCalls = [{ id: "tc-1", name: "web_search_agent", status: "running" as const }];
     render(<MessageBubble message={botMsg()} {...baseProps} toolCalls={toolCalls} />);
+    // Folded into the steps line; the chip shows when it is opened.
+    fireEvent.click(screen.getByRole("button", { name: /Web search/ }));
     expect(screen.getByText("Web search")).toBeInTheDocument();
   });
 
@@ -112,6 +114,7 @@ describe("MessageBubble — tool call chips", () => {
     const longName = "a".repeat(40);
     const toolCalls = [{ id: "tc-1", name: longName, status: "running" as const }];
     render(<MessageBubble message={botMsg()} {...baseProps} toolCalls={toolCalls} />);
+    fireEvent.click(screen.getByTestId("steps-summary").querySelector("button")!);
     expect(screen.getByText("A" + "a".repeat(31) + "…")).toBeInTheDocument();
   });
 });
@@ -153,6 +156,8 @@ describe("MessageBubble — A2UI tool delivery", () => {
       { id: "tc-1", name: "web_search_agent", status: "success" as const },
     ];
     render(<MessageBubble message={botMsg()} {...baseProps} toolCalls={toolCalls} />);
+    // Folded into the steps line; the chip shows when it is opened.
+    fireEvent.click(screen.getByRole("button", { name: /Web search/ }));
     expect(screen.getByText("Web search")).toBeInTheDocument();
     expect(screen.queryByTestId("a2ui-renderer")).not.toBeInTheDocument();
   });

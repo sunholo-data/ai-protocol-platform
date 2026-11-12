@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowLeft, FolderKanban, Plus, Settings } from "lucide-react";
+import { FolderKanban, Plus, Settings } from "lucide-react";
 import { createProject, useProjects } from "@/hooks/useProjects";
 import { useProjectChatHref } from "@/hooks/useProjectChatHref";
-import { relativeTime } from "@/lib/relativeTime";
+import { useFormat } from "@/i18n";
 import { navigateTo, useOptionalRouter } from "@/lib/useOptionalRouter";
 import { NewProjectInline } from "./NewProjectInline";
 
@@ -14,6 +14,7 @@ import { NewProjectInline } from "./NewProjectInline";
  * project goes to its settings, in set-up mode. */
 export function ProjectsList({ uid }: { uid: string }) {
   const router = useOptionalRouter();
+  const fmt = useFormat();
   const chatHref = useProjectChatHref(uid);
   const { projects, status, retry } = useProjects();
   const [creating, setCreating] = useState(false);
@@ -27,9 +28,6 @@ export function ProjectsList({ uid }: { uid: string }) {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 md:px-6">
-      <Link href="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" aria-hidden /> Back to chat
-      </Link>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Projects</h1>
@@ -95,7 +93,7 @@ export function ProjectsList({ uid }: { uid: string }) {
                     {p.docCount} document{p.docCount === 1 ? "" : "s"} · {p.chatCount} chat{p.chatCount === 1 ? "" : "s"}
                   </span>
                 </span>
-                {p.lastOpenedAt && <span className="shrink-0 text-xs text-muted-foreground">{relativeTime(p.lastOpenedAt)}</span>}
+                {p.lastOpenedAt && <span className="shrink-0 text-xs text-muted-foreground">{fmt.relative(p.lastOpenedAt)}</span>}
               </Link>
               <Link
                 href={`/projects/${encodeURIComponent(p.id)}`}

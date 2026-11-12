@@ -44,6 +44,9 @@ from auth import User
 from db.clients import UnmappedTenantError, resolve_documents_bucket
 from db.firestore import get_document, query_documents, set_document
 from extensions import document_event
+from tools.documents import block_store
+from tools.documents.frontmatter import MARKDOWN_EXTENSIONS, markdown_frontmatter
+from tools.documents.media import MEDIA_TYPES, is_av, media_blocks
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +77,29 @@ _ALLOWED_EXTENSIONS = {
     ".jpeg",
     ".tex",
 }
+# Video and audio (tools/documents/media.py): stored and shown, not parsed.
+_ALLOWED_EXTENSIONS |= set(MEDIA_TYPES)
+
+# Plain-text formats a repository holds next to its documents (config, data,
+# code, Markdown dialects). Accepted only from a git source (github-sources.md
+# §9, D3) and parsed as plain text: a user upload still refuses them, so a
+# source never widens what the upload accepts.
+SOURCE_TEXT_EXTENSIONS = {
+    ".mdx",
+    ".qmd",
+    ".rst",
+    ".yaml",
+    ".yml",
+    ".json",
+    ".toml",
+    ".tsv",
+    ".py",
+    ".js",
+    ".ts",
+    ".sh",
+    ".sql",
+    ".ail",
+}
 
 # Canonical Content-Type by extension. Browsers usually set these correctly,
 # but programmatic clients often send application/octet-stream — which makes
@@ -98,6 +124,7 @@ _EXTENSION_CONTENT_TYPES = {
     ".csv": "text/csv",
     ".pdf": "application/pdf",
     ".txt": "text/plain",
+    **MEDIA_TYPES,
 }
 
 
@@ -106,6 +133,8 @@ def _resolve_content_type(filename: str, client_content_type: str | None) -> str
     canonical = _EXTENSION_CONTENT_TYPES.get(ext)
     if canonical:
         return canonical
+    if ext in SOURCE_TEXT_EXTENSIONS:
+        return "text/plain; charset=utf-8"
     return client_content_type or "application/octet-stream"
 
 
@@ -136,6 +165,11 @@ class ParsedDocumentResponse(BaseModel):
     # counts these separately ("12 unchanged") rather than as uploads.
     unchanged: bool = False
 
+    # Upload into a project: why the stored document could not be added to it,
+    # or None when it was (or no project was asked for). The document itself is
+    # saved either way, so this is not an upload failure (NEVER-SILENT #8).
+    project_error: str | None = Field(default=None, alias="projectError")
+
     model_config = {"populate_by_name": True}
 
 
@@ -157,7 +191,8 @@ _PLAIN_TEXT_EXTENSIONS = {".txt", ".log", ".text"}
 
 
 def _is_plain_text(gs_url: str) -> bool:
-    return PurePosixPath(gs_url).suffix.lower() in _PLAIN_TEXT_EXTENSIONS
+    ext = PurePosixPath(gs_url).suffix.lower()
+    return ext in _PLAIN_TEXT_EXTENSIONS or ext in SOURCE_TEXT_EXTENSIONS
 
 
 async def _parse_plain_text(gs_url: str) -> list | None:
@@ -165,13 +200,14 @@ async def _parse_plain_text(gs_url: str) -> list | None:
     lines). Returns None on a read/decode failure. Block shape matches the
     permissive db.models.Block (type + text + a block_id for citations)."""
     import asyncio
-    from urllib.parse import urlparse
 
     from google.cloud import storage as gcs
 
+    from tools.documents.ailang_parse import split_gs_url
+
     def _read() -> bytes:
-        parts = urlparse(gs_url)  # gs://bucket/path
-        return gcs.Client().bucket(parts.netloc).blob(parts.path.lstrip("/")).download_as_bytes()
+        bucket, path = split_gs_url(gs_url)
+        return gcs.Client().bucket(bucket).blob(path).download_as_bytes()
 
     try:
         data = await asyncio.to_thread(_read)
@@ -201,6 +237,11 @@ async def _run_parse(gs_url: str) -> tuple[str, list, int, str | None]:
 
     t0 = time.monotonic()
 
+    # Video and audio have no text: stored as parsed with one block naming the
+    # file, never sent to a parser that would leave them pending forever.
+    if is_av(gs_url):
+        return "parsed", media_blocks(PurePosixPath(gs_url).name), int((time.monotonic() - t0) * 1000), None
+
     # Plain text needs no parser — read it and emit blocks so it reaches
     # `parsed` instead of the never-resolving `pending_ai_extraction`.
     if _is_plain_text(gs_url):
@@ -222,6 +263,10 @@ async def _run_parse(gs_url: str) -> tuple[str, list, int, str | None]:
         log.error("AILANG Parse failed for %s: [%s] %s", gs_url, outcome.error_code, outcome.error)
         return "failed", [], elapsed_ms, outcome.error
 
+    if outcome.parser != "ailang-parse":
+        log.info(
+            "parse: %s read by %s (%d blocks, %d ms)", gs_url, outcome.parser, len(outcome.blocks or []), elapsed_ms
+        )
     return "parsed", outcome.blocks or [], elapsed_ms, None
 
 
@@ -255,6 +300,7 @@ def _to_response(doc: dict) -> ParsedDocumentResponse:
         folderId=doc.get("folderId"),
         error=doc.get("parseError"),
         unchanged=bool(doc.get("unchanged")),
+        projectError=doc.get("projectError"),
     )
 
 
@@ -322,6 +368,8 @@ def _store_document(
     source_markdown: str = "",
     version: int | None = None,
     content_sha256: str = "",
+    source_ref: dict[str, Any] | None = None,
+    frontmatter: str = "",
 ) -> None:
     pr = parse_result
     blocks = pr.blocks
@@ -335,7 +383,8 @@ def _store_document(
         "folderId": folder_id,
         "parseStatus": pr.status,
         # Store parsed blocks so build_document_context / the AI pipeline can read them.
-        # Firestore limit is 1 MiB per doc; typical documents are well under that.
+        # Firestore limit is 1 MiB per doc: a larger document's blocks move to
+        # chunks (block_store.prepare_record below); read them with load_blocks.
         # A pending write used to blank `blocks`. For a NEW document that is
         # correct — there is nothing yet. For a RE-INGEST it wiped the content of
         # a document the user may be reading: the open panel re-renders from
@@ -376,6 +425,11 @@ def _store_document(
     }
     if generated_from is not None:
         doc["generatedFrom"] = generated_from
+    if source_ref is not None:
+        # Where a git-sourced document came from (github-sources.md §4): repo,
+        # ref, path, blob and a link to the file. The source's own manifest is
+        # what decides ownership; this is provenance for people and agents.
+        doc["sourceRef"] = source_ref
     if source_markdown:
         # v6.34.0 P3. There is NO write path into a .docx — `ailang-parse`
         # exposes parse and convert and nothing else — so a revision cannot
@@ -384,6 +438,11 @@ def _store_document(
         # the bytes were rendered. Keeping it is what makes "change the second
         # paragraph" possible at all.
         doc["sourceMarkdown"] = source_markdown
+    if frontmatter or f".{source_format}" in MARKDOWN_EXTENSIONS:
+        # A Markdown file's YAML header, which the parser drops (frontmatter.py).
+        # Stored even when empty: a missing field means "stored before headers
+        # were kept", and the first read fills it in (stored_frontmatter).
+        doc["frontmatter"] = frontmatter
     if content_sha256:
         # What `skip_unchanged` compares against on the next upload of the same
         # filename into the same folder.
@@ -394,24 +453,42 @@ def _store_document(
     # This write REPLACES the record. Carry the document's project tags forward
     # (projects.md §5 trap): a new version, a regeneration or a reparse must not
     # silently take the document out of every project it was in.
-    project_ids = _existing_project_ids(doc_id, user_id)
+    prior = _prior_record(doc_id, user_id)
+    project_ids = [p for p in (prior.get("projectIds") or []) if p]
     if project_ids:
         doc["projectIds"] = project_ids
+    try:
+        chunks = block_store.prepare_record(doc_id, doc)
+    except block_store.BlockTooLargeError as exc:
+        # Visible on the document instead of a 500 that leaves it pending.
+        chunks = 0
+        doc.update(blocks=[], blockChunks=0, parseStatus="failed", status="failed", parseError=str(exc), parsedAt=None)
     set_document(_COLLECTION, doc_id, doc)
+    block_store.drop_stale_chunks(doc_id, keep=chunks, had=int(prior.get("blockChunks") or 0))
     log.info("Stored ParsedDocument %s (parseStatus=%s, blocks=%d, source=%s)", doc_id, pr.status, len(blocks), source)
 
 
-def _existing_project_ids(doc_id: str, user_id: str) -> list[str]:
-    """The project tags on an existing record of the caller's, or []. Best-effort:
-    a failed read must not fail the ingest."""
+def _readable_blocks(doc_id: str, record: dict[str, Any]) -> list | None:
+    """The blocks a re-ingest keeps on screen while it parses; None when they
+    can't be read (the document then shows as parsing, as a new one does)."""
+    try:
+        return block_store.load_blocks(doc_id, record) or None
+    except Exception as exc:
+        log.warning("Could not read the current blocks of %s: %s", doc_id, exc)
+        return None
+
+
+def _prior_record(doc_id: str, user_id: str) -> dict[str, Any]:
+    """The existing record when it is the caller's, else {}. Best-effort: a
+    failed read must not fail the ingest."""
     try:
         prior = get_document(_COLLECTION, doc_id)
     except Exception as exc:
         log.warning("Could not read %s to keep its project tags: %s", doc_id, exc)
-        return []
+        return {}
     if not prior or prior.get("userId") != user_id:
-        return []
-    return [p for p in (prior.get("projectIds") or []) if p]
+        return {}
+    return prior
 
 
 async def _save_version(
@@ -466,13 +543,20 @@ async def ingest_document(
     content_type: str | None = None,
     folder_id: str | None = None,
     skill_id: str = "",
-    source: Literal["uploaded", "generated"] = "uploaded",
+    source: Literal["uploaded", "generated", "git"] = "uploaded",
     generated_from: dict[str, Any] | None = None,
     source_markdown: str = "",
     folder_path: str = "",
     skip_unchanged: bool = False,
+    project_id: str = "",
+    source_ref: dict[str, Any] | None = None,
 ) -> ParsedDocumentResponse:
     """Put a document into the user's workspace. The only way in.
+
+    ``project_id`` (upload from a project's page): the stored document is also
+    added to that project, in this request — so each file of a folder upload is
+    in the project as soon as it lands, and an aborted upload leaves the files
+    that finished both saved and in the project. The caller checks ownership.
 
     ``folder_path`` (folder upload): when no ``folder_id`` is given, the file
     goes into the library folder named by that relative path, created on first
@@ -500,7 +584,7 @@ async def ingest_document(
         raise HTTPException(status_code=400, detail="File must have a name.")
 
     ext = PurePosixPath(filename).suffix.lower()
-    if ext not in _ALLOWED_EXTENSIONS:
+    if ext not in _ALLOWED_EXTENSIONS and not (source == "git" and ext in SOURCE_TEXT_EXTENSIONS):
         log.warning("upload refused for %s: type %r is not supported", filename, ext)
         raise HTTPException(
             status_code=400,
@@ -548,7 +632,10 @@ async def ingest_document(
         and (existing[0].get("parseStatus") or existing[0].get("status")) == "parsed"
     ):
         log.info("Unchanged re-upload of %s (doc %s) — skipped", safe_filename, existing[0]["__id"])
-        return _to_response({**existing[0], "unchanged": True})
+        # Re-running an aborted folder upload into a project: the file is
+        # already saved, but it still has to be in the project.
+        project_error = _add_to_project(user.uid, project_id, existing[0]["__id"]) if project_id else None
+        return _to_response({**existing[0], "unchanged": True, "projectError": project_error})
     doc_id = existing[0]["__id"] if is_overwrite else str(uuid.uuid4())
     if is_overwrite:
         log.info("Re-ingest detected for %s — reusing doc_id %s", safe_filename, doc_id)
@@ -569,12 +656,14 @@ async def ingest_document(
         "generated_from": generated_from,
         "source_markdown": source_markdown,
         "content_sha256": content_sha256,
+        "source_ref": source_ref,
+        "frontmatter": markdown_frontmatter(file_bytes, ext),
     }
 
     # Write pending record immediately so the frontend can show the file.
     # On a RE-INGEST, carry the existing blocks through so an open document does
     # not blank while the new bytes are parsed.
-    existing_blocks = (existing[0].get("blocks") if is_overwrite and existing else None) or None
+    existing_blocks = _readable_blocks(doc_id, existing[0]) if is_overwrite else None
     _store_document(
         doc_id,
         parse_result=_ParseResult("pending", [], None, None),
@@ -618,6 +707,8 @@ async def ingest_document(
         version=version,
         **_store_kwargs,
     )
+    # Before the event, so the one re-index it triggers carries the project tag.
+    project_error = _add_to_project(user.uid, project_id, doc_id, announce=False) if project_id else None
     # Private extensions (e.g. a searchable folder re-indexes the document).
     # Observational and non-blocking — never fails the upload.
     document_event("upserted", {"uid": user.uid, "doc_id": doc_id, "folder_id": effective_folder_id})
@@ -643,5 +734,21 @@ async def ingest_document(
             "blockCount": len(blocks),
             "storagePath": storage_path,
             "folderId": effective_folder_id,
+            "parseError": parse_error if parse_status == "failed" else None,
+            "projectError": project_error,
         }
     )
+
+
+def _add_to_project(user_id: str, project_id: str, doc_id: str, *, announce: bool = True) -> str | None:
+    """Tag a just-stored document into the project. Returns why it could not be
+    added, or None. Never raises: the document is already saved."""
+    from db import projects as projects_db
+
+    try:
+        result = projects_db.tag_documents(user_id, project_id, [doc_id], announce=announce)
+    except Exception as exc:
+        log.warning("project %s: could not add uploaded %s: %s", project_id, doc_id, exc)
+        return "Could not be added to the project. Try again."
+    failed = result.get("failed") or []
+    return (failed[0].get("reason") or "Could not be added to the project.") if failed else None

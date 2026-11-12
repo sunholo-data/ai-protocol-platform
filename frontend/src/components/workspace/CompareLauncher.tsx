@@ -42,6 +42,7 @@ import type { RecentDocument } from "@/hooks/useRecentDocuments";
 import { useActionDrivenAgent, type ActionRunActivitySink } from "@/hooks/useActionDrivenAgent";
 import { CompareConfigForm, type CompareConfig } from "./CompareConfigForm";
 import { cn } from "@/lib/utils";
+import { Spinner as UiSpinner } from "@/components/ui/spinner";
 
 /** The workspace surface the launcher writes its action into (matches the
  * `a2ui_surface_context.workspace.lastAction` slot documented in the
@@ -143,10 +144,7 @@ function composeAnalyzeIntent(doc: CompareCandidate): string {
  * is working, not just grey the button). Matches the app's animate-spin loaders. */
 function Spinner() {
   return (
-    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
-    </svg>
+    <UiSpinner />
   );
 }
 
@@ -322,7 +320,7 @@ export function CompareLauncher({
       className="flex h-full flex-col gap-4 p-6"
     >
       <div className="space-y-1">
-        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           {allowCompare && allowObligations
             ? "Analyse contracts"
             : allowObligations
@@ -455,7 +453,7 @@ export function CompareLauncher({
             setShowConfig((v) => !v);
             onConfigure?.();
           }}
-          className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-primary"
+          className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-primary"
         >
           Configure…
         </button>

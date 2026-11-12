@@ -6,7 +6,8 @@ import asyncio
 import logging
 from typing import Any
 
-from google.adk.tools import ToolContext
+from google.adk.tools import FunctionTool, ToolContext
+from google.adk.tools.base_toolset import BaseToolset
 
 from adk.project_scope import current_project
 from db.firestore import get_document
@@ -77,7 +78,7 @@ def _search(uid: str, project: dict[str, Any], terms: list[str], max_results: in
         },
         "results_truncated": len(merged) > max_results,
         "message": (
-            "Literal, case-insensitive matches in parsed text. Cite filename and page/block; refs are internal. "
+            "Literal, case-insensitive matches in parsed text. Cite filename, section and page; refs are internal. "
             "Only excerpts enter the chat. No matches does not mean the concept is absent: try synonyms or semantic search."
         ),
         **(
@@ -100,8 +101,10 @@ async def grep_project_documents(
     misses. Supply short words/phrases and synonyms, e.g. ["curtail", "interrupt",
     "drawdown", "replenish"]. Matches ANY term, ignoring case; no regex. The
     server scans the text and returns bounded cited excerpts, never whole files.
-    Prefer this over repeatedly opening every document. Ask for more context
-    with get_document_content only for the specific source/section you need.
+    Prefer this over repeatedly opening every document. Each hit names its
+    section id, heading path and printed page: cite those, and for more
+    context open just that section with get_document_content(doc_id=<ref>,
+    section=<section id>) rather than the whole document.
     A literal miss is not proof a concept is absent. Report incomplete coverage.
     With no terms, call bare to learn what input is needed; never invent one.
 
@@ -131,3 +134,26 @@ async def grep_project_documents(
     except Exception:
         log.exception("project text search failed")
         return {"status": "error", "message": "Project text search failed. No complete scan was made.", "results": []}
+
+
+_TOOL = FunctionTool(grep_project_documents)
+
+
+class ProjectTextSearchToolset(BaseToolset):
+    """Offers ``grep_project_documents`` only in a chat scoped to a project the
+    caller owns, like ``search_project_documents``. Outside one the tool can only
+    refuse ("Open one of your projects…"), and a model that sees it calls it anyway:
+    a news skill grepping for a deal rendered that refusal as a card. Unscoped
+    chats get no tool, so there is nothing to call."""
+
+    tool_names = (TOOL_NAME,)  # what it can offer, for the permission inventory
+
+    async def get_tools(self, readonly_context: Any = None) -> list[Any]:
+        if readonly_context is None:
+            return []
+        try:
+            project = await asyncio.to_thread(current_project, readonly_context)
+        except Exception:
+            log.exception("project text search: could not resolve the chat's project; offering no tool")
+            return []
+        return [_TOOL] if project else []

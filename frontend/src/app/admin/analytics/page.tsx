@@ -21,6 +21,8 @@ import { ArrowIcon, CopyButton, StatusDot, WrenchIcon } from "@/components/activ
 import { ToolCallDetails, hasToolDetail } from "@/components/activity/ToolCallDetails";
 import { DocIcon } from "@/components/icons";
 import { buildTimeline, type TimelineItem, type TraceDeleg, type TraceMsg, type TraceTool } from "./timeline";
+import { PageLoading } from "@/components/ui/skeleton";
+import { useFormat, type Formatter } from "@/i18n";
 
 type SessionRow = {
   session_id: string;
@@ -71,35 +73,26 @@ const API = "/api/proxy/api/admin/analytics";
 type ListState = "loading" | "ok" | "forbidden" | "error";
 type TraceState = "idle" | "loading" | "ok" | "error";
 
-function fmtTime(iso: string): string {
+function fmtTime(iso: string, fmt: Formatter): string {
   if (!iso) return "—";
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+  return Number.isNaN(d.getTime()) ? iso : fmt.dateTime(d);
 }
 
 /** Relative "3h ago" for list rows; exact time on hover. */
-function fmtAgo(iso: string): string {
+function fmtAgo(iso: string, fmt: Formatter): string {
   if (!iso) return "—";
-  const d = new Date(iso).getTime();
-  if (Number.isNaN(d)) return iso;
-  const s = Math.max(0, Math.floor((Date.now() - d) / 1000));
-  if (s < 60) return "just now";
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const days = Math.floor(h / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(d).toLocaleDateString();
+  return fmt.relative(iso, Date.now(), { dateOptions: {} }) || iso;
 }
 
-function clockTime(ts: number): string {
+function clockTime(ts: number, fmt: Formatter): string {
   if (!ts) return "";
-  return new Date(ts).toLocaleTimeString();
+  return fmt.time(ts);
 }
 
 export default function AnalyticsPage() {
   const { user, loading } = useAuth();
+  const fmt = useFormat();
   const [rows, setRows] = useState<SessionRow[]>([]);
   const [owners, setOwners] = useState<OwnerFacet[]>([]);
   const [skills, setSkills] = useState<SkillFacet[]>([]);
@@ -153,7 +146,7 @@ export default function AnalyticsPage() {
       .catch(() => setTraceState("error"));
   }, []);
 
-  if (loading) return <Centered>Loading…</Centered>;
+  if (loading) return <PageLoading />;
   if (!user) return <SignInRequired />;
   if (state === "forbidden") {
     return (
@@ -261,12 +254,12 @@ export default function AnalyticsPage() {
                       <span className="truncate font-medium">{r.title || "(untitled)"}</span>
                       <span className="flex shrink-0 items-center gap-1">
                         {r.transcript_lost && (
-                          <span className="rounded-full border border-amber-500/50 px-1.5 text-[10px] uppercase text-amber-600 dark:text-amber-400">
+                          <span className="rounded-full border border-amber-500/50 px-1.5 text-[11px] uppercase text-amber-600 dark:text-amber-400">
                             transcript lost
                           </span>
                         )}
                         {r.archived && (
-                          <span className="rounded-full border px-1.5 text-[10px] uppercase text-muted-foreground">
+                          <span className="rounded-full border px-1.5 text-[11px] uppercase text-muted-foreground">
                             archived
                           </span>
                         )}
@@ -278,7 +271,7 @@ export default function AnalyticsPage() {
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                       {(r.skill_label || r.skill_id) && (
-                        <span className="rounded-full bg-muted px-1.5 py-px text-[10px] text-foreground/70">
+                        <span className="rounded-full bg-muted px-1.5 py-px text-[11px] text-foreground/70">
                           {r.skill_label || r.skill_id}
                         </span>
                       )}
@@ -290,7 +283,7 @@ export default function AnalyticsPage() {
                           · {r.document_count} {r.document_count === 1 ? "doc" : "docs"}
                         </span>
                       )}
-                      <span title={fmtTime(r.last_message_at)}>· {fmtAgo(r.last_message_at)}</span>
+                      <span title={fmtTime(r.last_message_at, fmt)}>· {fmtAgo(r.last_message_at, fmt)}</span>
                     </div>
                   </button>
                 </li>
@@ -324,6 +317,7 @@ export default function AnalyticsPage() {
 
 /** Header metadata block: who / which skill / when / how much. */
 function TraceHeader({ trace }: { trace: Trace }) {
+  const fmt = useFormat();
   const docs = trace.documents ?? [];
   return (
     <div className="rounded-md border bg-muted/10 px-3 py-2">
@@ -340,19 +334,19 @@ function TraceHeader({ trace }: { trace: Trace }) {
       </div>
       <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-4">
         <div>
-          <dt className="text-[10px] uppercase text-muted-foreground/60">Started</dt>
-          <dd>{fmtTime(trace.first_message_at || "")}</dd>
+          <dt className="text-[11px] uppercase text-muted-foreground/60">Started</dt>
+          <dd>{fmtTime(trace.first_message_at || "", fmt)}</dd>
         </div>
         <div>
-          <dt className="text-[10px] uppercase text-muted-foreground/60">Last activity</dt>
-          <dd>{fmtTime(trace.last_message_at || "")}</dd>
+          <dt className="text-[11px] uppercase text-muted-foreground/60">Last activity</dt>
+          <dd>{fmtTime(trace.last_message_at || "", fmt)}</dd>
         </div>
         <div>
-          <dt className="text-[10px] uppercase text-muted-foreground/60">Turns</dt>
+          <dt className="text-[11px] uppercase text-muted-foreground/60">Turns</dt>
           <dd>{trace.turn_count ?? "—"}</dd>
         </div>
         <div>
-          <dt className="text-[10px] uppercase text-muted-foreground/60">Events</dt>
+          <dt className="text-[11px] uppercase text-muted-foreground/60">Events</dt>
           <dd>{trace.event_count ?? "—"}</dd>
         </div>
       </dl>
@@ -376,6 +370,7 @@ function TraceHeader({ trace }: { trace: Trace }) {
 
 /** Expandable tool row in the timeline — same detail body as the chat Activity tab. */
 function TimelineToolRow({ item }: { item: Extract<TimelineItem, { kind: "tool" }> }) {
+  const fmt = useFormat();
   const [open, setOpen] = useState(false);
   const hasDetail = hasToolDetail(item.argsJson, item.resultContent);
   return (
@@ -393,10 +388,10 @@ function TimelineToolRow({ item }: { item: Extract<TimelineItem, { kind: "tool" 
         {item.ts ? (
           <time
             dateTime={new Date(item.ts).toISOString()}
-            title={new Date(item.ts).toLocaleString()}
-            className="shrink-0 tabular-nums text-[10px] text-muted-foreground/70"
+            title={fmt.dateTime(item.ts)}
+            className="shrink-0 tabular-nums text-[11px] text-muted-foreground/70"
           >
-            {clockTime(item.ts)}
+            {clockTime(item.ts, fmt)}
           </time>
         ) : null}
         {hasDetail && (
@@ -415,6 +410,7 @@ function TimelineToolRow({ item }: { item: Extract<TimelineItem, { kind: "tool" 
 }
 
 function TimelineMessageRow({ item }: { item: Extract<TimelineItem, { kind: "message" }> }) {
+  const fmt = useFormat();
   const who = item.role === "user" ? "User" : item.agentLabel || "Assistant";
   return (
     <li
@@ -423,14 +419,14 @@ function TimelineMessageRow({ item }: { item: Extract<TimelineItem, { kind: "mes
       }
     >
       <div className="mb-0.5 flex items-center justify-between gap-2">
-        <span className="text-[10px] font-medium uppercase text-muted-foreground">{who}</span>
+        <span className="text-[11px] font-medium uppercase text-muted-foreground">{who}</span>
         {item.ts ? (
           <time
             dateTime={new Date(item.ts).toISOString()}
-            title={new Date(item.ts).toLocaleString()}
-            className="tabular-nums text-[10px] text-muted-foreground/70"
+            title={fmt.dateTime(item.ts)}
+            className="tabular-nums text-[11px] text-muted-foreground/70"
           >
-            {clockTime(item.ts)}
+            {clockTime(item.ts, fmt)}
           </time>
         ) : null}
       </div>
@@ -440,6 +436,7 @@ function TimelineMessageRow({ item }: { item: Extract<TimelineItem, { kind: "mes
 }
 
 function TraceView({ trace }: { trace: Trace }) {
+  const fmt = useFormat();
   const [view, setView] = useState<"timeline" | "raw">("timeline");
   const timeline = buildTimeline(trace);
 
@@ -476,7 +473,7 @@ function TraceView({ trace }: { trace: Trace }) {
       {view === "raw" ? (
         <div className="rounded-md border">
           <div className="flex items-center justify-between border-b px-2 py-1">
-            <span className="text-[10px] font-medium uppercase text-muted-foreground/60">
+            <span className="text-[11px] font-medium uppercase text-muted-foreground/60">
               Full trace payload
             </span>
             <CopyButton text={JSON.stringify(trace, null, 2)} />
@@ -504,10 +501,10 @@ function TraceView({ trace }: { trace: Trace }) {
                 {item.ts ? (
                   <time
                     dateTime={new Date(item.ts).toISOString()}
-                    title={new Date(item.ts).toLocaleString()}
-                    className="shrink-0 tabular-nums text-[10px] text-muted-foreground/70"
+                    title={fmt.dateTime(item.ts)}
+                    className="shrink-0 tabular-nums text-[11px] text-muted-foreground/70"
                   >
-                    {clockTime(item.ts)}
+                    {clockTime(item.ts, fmt)}
                   </time>
                 ) : null}
               </li>

@@ -34,7 +34,7 @@ dependencies = [
     # AILANG Parse — deterministic document parsing
     "ailang-parse[gcs]>=0.13.1",
     # MCP
-    "mcp>=1.30.0,<2.0.0",
+    "mcp>=2.3.0,<3.0.0",
     # Coordinated ADK 2 / AG-UI 1.0 bridge; requires Context-stable streaming.
     # AG-UI protocol bridge (ADK -> AG-UI events over SSE)
     "ag-ui-adk==0.10.0",
@@ -153,16 +153,17 @@ constraint-dependencies = [
     "httplib2>=0.32.0",
     "joserfc>=1.6.8",
     "msgpack>=1.2.1",
-    "oauthlib>=4.0.0",
-    "pyasn1>=0.6.4",
+    "oauthlib>=4.0.1",
+    "pyasn1>=0.6.5",
     "pydantic-settings>=2.14.2",
     "pyjwt>=2.15.0",
     "python-multipart>=0.0.32",
     "sqlparse>=0.6.0",
     "urllib3>=2.8.0",
     "anyio>=4.14.2",
-    "certifi>=2026.10.19",
+    "certifi>=2026.10.23",
     "fsspec>=2026.6.0",
+    "filelock>=4.2.1",
     "idna>=3.15",
     "mako>=1.4.2",
     "multidict>=6.9.1",

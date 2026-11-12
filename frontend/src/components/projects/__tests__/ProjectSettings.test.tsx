@@ -7,8 +7,14 @@ const mockPush = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mockPush, replace: vi.fn() }) }));
 vi.mock("@/components/document/DocumentThumbnail", () => ({ DocumentThumbnail: () => <div data-testid="thumb" /> }));
 vi.mock("@/components/doc-browser/UploadDropZone", () => ({
-  UploadDropZone: ({ onUploadComplete }: { onUploadComplete?: (id: string, name: string) => void }) => (
-    <button type="button" onClick={() => onUploadComplete?.("d-up", "new.pdf")}>
+  UploadDropZone: ({
+    projectId,
+    onUploadComplete,
+  }: {
+    projectId?: string;
+    onUploadComplete?: (id: string, name: string) => void;
+  }) => (
+    <button type="button" data-project={projectId} onClick={() => onUploadComplete?.("d-up", "new.pdf")}>
       Upload
     </button>
   ),
@@ -54,6 +60,9 @@ beforeEach(() => {
     [`GET ${P}/documents`]: () => res(200, { documents: [], next_cursor: null }),
     [`GET ${P}/sessions?page_size=30`]: () => res(200, { sessions: [], next_cursor: null }),
     "GET /api/proxy/api/skills/s1": () => res(200, { welcome: null }),
+    "GET /api/proxy/api/me/memories?project_id=p1": () => res(200, { available: true, memories: [] }),
+    [`GET ${P}/sources`]: () => res(200, { sources: [], credentials: [] }),
+    "GET /api/proxy/api/knowledge-bases": () => res(404),
   };
   mockFetch.mockImplementation(async (url: RequestInfo | URL, init?: RequestInit) => {
     const key = `${init?.method ?? "GET"} ${String(url)}`;
@@ -106,6 +115,16 @@ describe("ProjectSettings — a settings page, not a chat page", () => {
     expect(guide).toHaveTextContent("Add the documents you're working with");
     expect(screen.getByTestId("project-docs-empty")).toHaveTextContent("No documents yet.");
     expect(screen.getByRole("link", { name: "Start chatting in this project" })).toHaveAttribute("href", `${CHAT}?project=p1`);
+  });
+
+  it("shows the project's own memory (memory-screen design)", async () => {
+    route({
+      "GET /api/proxy/api/me/memories?project_id=p1": () =>
+        res(200, { available: true, memories: [{ ref: "r1", fact: "Counterparty is the seller", updated_at: null }] }),
+    });
+    render(<ProjectSettings projectId="p1" uid="u1" />);
+    const section = await screen.findByRole("region", { name: "Project memory" });
+    expect(await within(section).findByText("Counterparty is the seller")).toBeInTheDocument();
   });
 
   it("has no composer and no chat list — chatting happens on the chat screen", async () => {
@@ -166,11 +185,15 @@ describe("ProjectSettings — documents", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't remove it from the project (HTTP 500).");
   });
 
-  it("an upload here is tagged into the project, and says so", async () => {
-    route({ [`POST ${P}/documents`]: () => res(200, { added: ["d-up"], already: [], failed: [] }) });
+  it("an upload here goes into the project in the same request, and says so", async () => {
     render(<ProjectSettings projectId="p1" uid="u1" />);
-    await userEvent.click(await screen.findByRole("button", { name: "Upload" }));
+    const upload = await screen.findByRole("button", { name: "Upload" });
+    // The drop zone sends project_id with every file (folder uploads too).
+    expect(upload).toHaveAttribute("data-project", "p1");
+    await userEvent.click(upload);
     expect(await screen.findByText("Added new.pdf")).toBeInTheDocument();
+    // No separate add request: an unrouted POST would have thrown.
+    expect(mockFetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 });
 

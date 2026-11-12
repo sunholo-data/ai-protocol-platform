@@ -1,0 +1,22 @@
+{
+  "5bd2bc9495038f67b4668f83c60d1967cccd080c5a45413cc102be8ffd7fdacb": {
+    "originalHash": "d7214e1dacf9e6e70c9ca80247717b4be13b240510428fef132b7da3260d1a32",
+    "version": "4.6.7",
+    "format": "js"
+  },
+  "11236f851be4b8119cf4f480488131db9a3fd38bb5038996dedfb7f2552ba267": {
+    "originalHash": "7a2f06d88e280bdd198c60e0d292ed7f1e3993e877be4415de07e6abc7746dd1",
+    "version": "4.6.7",
+    "format": "cjs"
+  },
+  "db4a9deb1078bf01d3917ac4e773a922875ad9d9abc6f3261e9b28831789582a": {
+    "originalHash": "9763a2938f0e7f983363ef4bf6530e7583e3f2d54f8a4a6684efad58febc6e8e",
+    "version": "3.25.76",
+    "format": "js"
+  },
+  "f1e85b532c0e08658de773048fa1405c4afea8aeb369eba1f9f5e8dd9184d9b5": {
+    "originalHash": "06487cc05ed45c5dd29789bf0aa75734d1ce06592a7f2665ba4ca90a68e8a3e1",
+    "version": "3.25.76",
+    "format": "cjs"
+  }
+}

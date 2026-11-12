@@ -37,6 +37,8 @@ function makeReturn(overrides: Partial<UseSkillAgentReturn> = {}): UseSkillAgent
     stageLabel: null,
     delegations: [],
     fallbacks: [],
+    modelEvents: [],
+    modelWait: null,
     compactions: [],
     tidyingUp: false,
     resolvedModel: null,
@@ -164,15 +166,13 @@ describe("ChatShell — closable artifact tabs (CLOSABLE-ARTEFACT-TABS)", () => 
     // The result is closable — named by its friendly title (CLAUDE.md #9).
     expect(screen.getByLabelText("Close DE_LU prices")).toBeTruthy();
 
-    // Workspace/Home, Document and Activity are structural furniture, not
-    // results. They must never offer a close.
-    expect(screen.queryByLabelText("Close Workspace")).toBeNull();
-    expect(screen.queryByLabelText("Close Document")).toBeNull();
+    // Activity is structural furniture, not a result: never a close. (Start
+    // and Document appear only when there is a skill launcher or an open
+    // document, and are structural too.)
     expect(screen.queryByLabelText("Close Activity")).toBeNull();
-    // ...and those three ARE actually on screen (guards a vacuous pass above).
-    for (const fixed of ["Workspace", "Document", "Activity"]) {
-      expect(screen.getByRole("tab", { name: new RegExp(fixed, "i") })).toBeTruthy();
-    }
+    // ...and it IS on screen (guards a vacuous pass above).
+    expect(screen.getByRole("tab", { name: /Activity/i })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: /Workspace/i })).toBeNull();
     expect(resultTabNames()).toEqual(["DE_LU prices"]);
   });
 
@@ -217,7 +217,7 @@ describe("ChatShell — closable artifact tabs (CLOSABLE-ARTEFACT-TABS)", () => 
     // Says what is lost, and that it is irreversible — this result may have
     // cost a real BigQuery job.
     expect(copy).toMatch(/can't be undone/i);
-    expect(copy).toMatch(/re-running the query/i);
+    expect(copy).toMatch(/run it again/i);
   });
 
   it("ACCEPTING the confirm de-registers the artifact — the count decrements", async () => {
@@ -239,7 +239,7 @@ describe("ChatShell — closable artifact tabs (CLOSABLE-ARTEFACT-TABS)", () => 
     expect(screen.getByRole("tab", { name: /DK2 prices/i })).toBeTruthy();
   });
 
-  it("moves focus to Workspace when the CLOSED tab was the active one (#8 never silent)", async () => {
+  it("moves focus to a remaining tab when the CLOSED tab was the active one (#8 never silent)", async () => {
     stubConfirm(true);
     await renderChat();
     emitSurface(pricesEnvelope("entsoe_prices_dk1", "DK1 prices"));
@@ -253,10 +253,9 @@ describe("ChatShell — closable artifact tabs (CLOSABLE-ARTEFACT-TABS)", () => 
     fireEvent.click(screen.getByLabelText("Close DK2 prices"));
 
     await waitFor(() => expect(screen.queryByRole("tab", { name: /DK2 prices/i })).toBeNull());
-    // Focus falls back to Workspace/Home — NOT to the surviving DK1 tab, and
-    // never to nothing. Home indexes what's left, so the user can get anywhere.
-    expect(screen.getByRole("tab", { name: /Workspace/i }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("tab", { name: /DK1 prices/i })).toBeTruthy();
+    // Focus falls to the first remaining tab — never to nothing. All results
+    // lists the rest, so the user can get anywhere.
+    expect(screen.getByRole("tab", { name: /DK1 prices/i }).getAttribute("aria-selected")).toBe("true");
   });
 
   it("closing the LAST artifact folds the workbench away — never a blank pane", async () => {

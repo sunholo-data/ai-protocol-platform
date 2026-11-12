@@ -54,4 +54,31 @@ describe("DocListView", () => {
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(retry).toHaveBeenCalledOnce();
   });
+
+  it("nests an uploaded folder's subfolders and opens the path to the selected one", async () => {
+    const folder = (id: string, name: string, docCount = 1) => ({ id, name, userId: "u1", docCount, parsedCount: docCount });
+    const setActiveFolderId = vi.fn();
+    state = base({
+      folders: [folder("f-2026", "flying-fish/survey/2026"), folder("f-notes", "flying-fish/notes", 3), folder("f-other", "Contracts")],
+      activeFolderId: "f-2026",
+      setActiveFolderId,
+    });
+    render(<DocListView uid="u1" />);
+
+    // One top-level row for the uploaded folder, not one per path.
+    expect(screen.queryByText("flying-fish/notes")).toBeNull();
+    const top = screen.getByRole("button", { name: /^flying-fish/ });
+    expect(top).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /^survey/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /^2026/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /^Contracts/ })).toHaveAttribute("aria-expanded", "false");
+    // The parent-only row counts the documents beneath it.
+    expect(top).toHaveTextContent("4");
+
+    await userEvent.click(screen.getByRole("button", { name: /^notes/ }));
+    expect(setActiveFolderId).toHaveBeenCalledWith("f-notes");
+
+    await userEvent.click(top);
+    expect(screen.queryByRole("button", { name: /^survey/ })).toBeNull();
+  });
 });

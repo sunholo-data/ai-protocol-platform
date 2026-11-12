@@ -127,24 +127,28 @@ export default async function workspace({ page, base, shot, tidy }) {
   await shot("01-answer-with-sources", "page", { wait: 1200 });
 
   const tab = (name) => page.getByRole("tab", { name: new RegExp(name) }).first();
-  // The workbench pane only: from its "Workbench" title to the right edge.
+  // The workbench pane only: from its tab row to the right edge.
   const pane = async (height = 470) => {
-    const t = await page.getByText("Workbench", { exact: true }).first().boundingBox();
+    const t = await page.getByRole("tablist").last().boundingBox();
     const vw = page.viewportSize().width;
-    return { x: t.x - 18, y: t.y - 22, width: vw - (t.x - 18), height };
+    return { x: t.x - 2, y: t.y - 8, width: vw - (t.x - 2), height };
   };
 
   await shot("05-sources-tab", "page", { wait: 400, clip: await pane(330) });
 
-  await tab("Workspace").click();
-  await shot("02-workspace-home", "page", { wait: 600, clip: await pane(300) });
+  // All results: every result from the conversation, plus the activity log.
+  // (Crop first: an open menu hides the rest of the page from role queries.)
+  const resultsClip = await pane(300);
+  await page.getByRole("button", { name: /^All results/ }).first().click();
+  await page.getByRole("menu").first().waitFor();
+  await shot("02-workspace-home", "page", { wait: 600, clip: resultsClip });
+  await page.keyboard.press("Escape");
 
   await tab("Activity").click();
   await shot("03-activity", "page", { wait: 600, clip: await pane(260) });
 
   await tab("Sources").click();
   await page.getByRole("button", { name: /Open Phoenix project brief\.docx in the Document tab/ }).click();
-  await tab("Document").waitFor();
   await page.waitForTimeout(1500);
   // The Styled view renders the real file; the synthetic document has only its
   // parsed text, so photograph the Text view.

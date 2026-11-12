@@ -76,7 +76,7 @@ describe("useSessionMessages", () => {
     const { result } = renderHook(() => useSessionMessages("sess-1"));
 
     await waitFor(() => expect(result.current.isLoadingHistory).toBe(false));
-    expect(result.current.historyError).toContain("starting fresh");
+    expect(result.current.historyError).toContain("Couldn't load");
     expect(result.current.initialMessages).toEqual([]);
   });
 
@@ -119,7 +119,7 @@ describe("useSessionMessages", () => {
 
     await waitFor(() => expect(result.current.isLoadingHistory).toBe(false));
     expect(result.current.sessionGone).toBe(false);
-    expect(result.current.historyError).toContain("starting fresh");
+    expect(result.current.historyError).toContain("Couldn't load");
   });
 
   it("stranded-session-prevention (1.23) Option 1: sessionGone resets when sessionId changes", async () => {

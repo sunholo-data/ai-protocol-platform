@@ -4,11 +4,21 @@
 #
 # Substitutions are managed by Terraform (see infrastructure repo)
 
+# cloud-sdk is pinned by digest (2026-11-03): the image Google published that day
+# dropped python3, which the seed gate and the promotion's substitution step run.
+# To move it, check `python3 --version` inside the candidate image first.
 substitutions:
   _VERTEX_AI_SEARCH_DATASTORE_ID: ''
   _VERTEX_AI_SEARCH_PROJECT: ''
   _VERTEX_AI_SEARCH_LOCATION: 'eu'
   _A2A_AGENT_DOCUMENTS_BUCKET: ''
+  # Knowledge-base freshness (docs/design/private/knowledge-base-freshness.md):
+  # extra buckets a KB source may read (csv; `bucket=tenant` = owned by that
+  # tenant), and the Cloud Scheduler identity + audience for
+  # /internal/knowledge/sync-due. Empty = no extra buckets, route closed.
+  _KNOWLEDGE_GCS_BUCKETS: ''
+  _KNOWLEDGE_SCHEDULER_OIDC_SA: ''
+  _KNOWLEDGE_SCHEDULER_AUDIENCE: ''
   # v6.39.0: off unless the env sets it. Real values live in the
   # trigger substitutions, per docs/ops/env-config-parity.md.
   _BROWSER_SERVICE_ENABLED: 'false'
@@ -245,7 +255,7 @@ steps:
         echo "--- ruff format check ---" && uv run ruff format --check .
         echo "--- pytest (fast) ---"     && uv run pytest tests/ --ignore=tests/integration -m "not slow" --tb=short -q
 
-  - name: 'node:20-slim'
+  - name: 'node:22-slim'
     waitFor: ['-']
     id: 'ci-gate-frontend'
     entrypoint: bash
@@ -298,20 +308,32 @@ steps:
   # overlay into frontend/content, frontend/public/help/img and backend/bundled
   # (gitignored build outputs). A bad page (missing image, unknown anchor) fails
   # the build here rather than shipping a broken /help.
-  - name: 'node:20-slim'
+  - name: 'node:22-slim'
     id: bundle-user-guide
     waitFor: ['ci-gate-backend', 'ci-gate-frontend']
     entrypoint: 'node'
     args: ['scripts/user-guide/bundle.mjs']
 
+  # --- Interface catalogs → the frontend build context ---
+  # frontend/messages + any docs/customers/*/messages overlay, merged into
+  # frontend/src/i18n/generated/catalog.json (gitignored build output) that the
+  # message layer imports. multi-language.md §4.
+  - name: 'node:22-slim'
+    id: bundle-i18n
+    waitFor: ['ci-gate-backend', 'ci-gate-frontend']
+    entrypoint: 'node'
+    args: ['scripts/i18n/bundle.mjs']
+
   - name: 'gcr.io/cloud-builders/docker'
     id: build-frontend
-    waitFor: ['get-firebase-config', 'bundle-user-guide']
+    waitFor: ['get-firebase-config', 'bundle-user-guide', 'bundle-i18n']
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        while IFS='=' read -r key val; do
+        # `|| [[ -n ... ]]`: a secret saved without a trailing newline (the
+        # console's default) would otherwise lose its LAST line silently.
+        while IFS='=' read -r key val || [[ -n "$$key" ]]; do
           [[ -z "$$key" || "$${key:0:1}" == "#" ]] && continue
           export "$$key=$$val"
         done < .env.local
@@ -624,7 +646,7 @@ steps:
   # header for why; the short version is that promotion used to be images-only
   # to avoid duplicating this surface, which left prod's spec with no deploy
   # route at all. Every substitution below is forwarded under its own name.
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk@sha256:aa2b2728a6f3eaf1d6d37409133fde8220b28460282f6983e3055b1b2c792228'
     id: deploy
     entrypoint: bash
     waitFor: ['push-frontend', 'push-backend', 'push-toolbox']
@@ -648,6 +670,9 @@ steps:
       - '_VERTEX_AI_SEARCH_PROJECT=${_VERTEX_AI_SEARCH_PROJECT}'
       - '_VERTEX_AI_SEARCH_LOCATION=${_VERTEX_AI_SEARCH_LOCATION}'
       - '_A2A_AGENT_DOCUMENTS_BUCKET=${_A2A_AGENT_DOCUMENTS_BUCKET}'
+      - '_KNOWLEDGE_GCS_BUCKETS=${_KNOWLEDGE_GCS_BUCKETS}'
+      - '_KNOWLEDGE_SCHEDULER_OIDC_SA=${_KNOWLEDGE_SCHEDULER_OIDC_SA}'
+      - '_KNOWLEDGE_SCHEDULER_AUDIENCE=${_KNOWLEDGE_SCHEDULER_AUDIENCE}'
       - '_MODEL_RESIDENCY_POLICY=${_MODEL_RESIDENCY_POLICY}'
       - '_SLOW_STREAM_PROBE_ENABLED=${_SLOW_STREAM_PROBE_ENABLED}'
       - '_COMPACTION_SECOND_PASS=${_COMPACTION_SECOND_PASS}'
@@ -685,7 +710,7 @@ steps:
   #      first-token-ish endpoint doesn't false-trip the assertion.
   #   3. One retry per assertion on a 0/5xx — collapses to PASS on the
   #      common case of a transient cold-start hiccup mid-smoke.
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk@sha256:aa2b2728a6f3eaf1d6d37409133fde8220b28460282f6983e3055b1b2c792228'
     id: smoke-deployed
     entrypoint: bash
     args:
@@ -764,7 +789,7 @@ steps:
   # (user-managed or default), unlike `gcloud auth print-identity-token`.
   # include_email=true is required: the backend allowlist check needs the email
   # claim (see docs/ops/gotchas.md #13 #14 and docs/ops/platform-skills.md).
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk@sha256:aa2b2728a6f3eaf1d6d37409133fde8220b28460282f6983e3055b1b2c792228'
     id: seed-platform-skills
     waitFor: ['smoke-deployed']
     entrypoint: bash
@@ -775,9 +800,9 @@ steps:
         URL=$(gcloud run services describe ${_SERVICE_NAME} \
           --project=${_PROJECT_ID} --region=${_REGION} \
           --format='value(status.url)')
-        TOKEN=$(curl -sf \
-          "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$${URL}&format=full&include_email=true" \
-          -H "Metadata-Flavor: Google")
+        # scripts/build-id-token.sh: metadata /identity, else IAM Credentials
+        # generateIdToken (the default pool's metadata server 404s /identity).
+        TOKEN=$(bash scripts/build-id-token.sh "$${URL}")
         code=$(curl -sS -o /tmp/seed -w '%{http_code}' --max-time 60 \
           -X POST -H "Authorization: Bearer $${TOKEN}" \
           "$${URL}/api/proxy/api/admin/seed-platform-skills") || code=000

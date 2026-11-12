@@ -403,16 +403,32 @@ def get_session_service() -> BaseSessionService:
     return _session_service_singleton
 
 
+_memory_service_singleton: InMemoryMemoryService | VertexAiMemoryBankService | None = None
+
+
+def _reset_memory_service_for_tests() -> None:
+    global _memory_service_singleton
+    _memory_service_singleton = None
+
+
 def get_memory_service() -> InMemoryMemoryService | VertexAiMemoryBankService:
-    """Get memory service — Vertex AI Agent Engine or in-memory."""
+    """Get memory service — Vertex AI Agent Engine or in-memory. One per process,
+    like the session service: a new instance per call built a new API client
+    (credentials, TLS) on every /api/me/memories request (~0.7 s), and an
+    in-memory one forgot everything between calls."""
+    global _memory_service_singleton
+    if _memory_service_singleton is not None:
+        return _memory_service_singleton
     agent_engine_id = os.environ.get("AGENT_ENGINE_ID")
     if agent_engine_id and not _force_in_memory_session():
-        return VertexAiMemoryBankService(
+        _memory_service_singleton = VertexAiMemoryBankService(
             project=require_gcp_project(),
             location=os.environ["GOOGLE_CLOUD_LOCATION"],
             agent_engine_id=_normalize_agent_engine_id(agent_engine_id),
         )
-    return InMemoryMemoryService()
+    else:
+        _memory_service_singleton = InMemoryMemoryService()
+    return _memory_service_singleton
 
 
 _artifact_service_singleton: InMemoryArtifactService | GcsArtifactService | None = None

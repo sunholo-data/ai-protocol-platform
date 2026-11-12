@@ -25,7 +25,7 @@ export function InContextBadge({ openTabs, includedDocIds }: InContextBadgeProps
       ? `Will process: ${includedTabs[0].filename}`
       : `Will process ${includedDocIds.length} documents on next turn`;
   return (
-    <div className="mb-2 flex items-center gap-2 px-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+    <div className="mb-2 flex items-center gap-2 px-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
       <span className="h-1.5 w-1.5 rounded-full bg-primary/70" aria-hidden />
       <span className="truncate">{label}</span>
     </div>

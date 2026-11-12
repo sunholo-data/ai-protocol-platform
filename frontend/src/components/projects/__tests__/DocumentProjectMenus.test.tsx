@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Folder, ParsedDocument } from "@/hooks/useDocBrowser";
@@ -14,6 +14,10 @@ import { fetchWithAuth } from "@/lib/apiClient";
 import { __resetProjectsStore } from "@/hooks/useProjects";
 import { DocListItem } from "@/components/doc-browser/DocListItem";
 import { DocListFolder } from "@/components/doc-browser/DocListFolder";
+import { ConfirmProvider } from "@/components/ui/confirm";
+
+// Questions go through the shared confirm dialog (useConfirm): render inside its provider.
+const render = (ui: React.ReactElement) => rtlRender(ui, { wrapper: ConfirmProvider });
 
 const mockFetch = vi.mocked(fetchWithAuth);
 
@@ -151,7 +155,7 @@ describe("document ⋯ → Add to project…", () => {
   });
 });
 
-describe("folder ⋯ → Start a project from this folder (E4)", () => {
+describe("folder ⋯ → New project from folder (E4)", () => {
   const folder: Folder = { id: "f1", name: "PPAs 2025", userId: "u1", docCount: 4, parsedCount: 4 };
 
   it("creates from the folder and lands on the new home", async () => {
@@ -165,9 +169,76 @@ describe("folder ⋯ → Start a project from this folder (E4)", () => {
     });
     render(<DocListFolder folder={folder} documents={[]} isActive={false} onSelect={vi.fn()} onDocClick={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Folder actions" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Start a project from this folder" }));
+    await user.click(await screen.findByRole("menuitem", { name: "New project from folder" }));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/projects/p5"));
     expect(body).toEqual({ name: "PPAs 2025", fromFolderId: "f1", uniqueName: true });
+  });
+
+  const inAipla = [{ projectId: "p-a", projectName: "AIPLA", documents: 17, via: "github" as const }];
+
+  it("a folder already in a project asks before starting another; Cancel makes nothing", async () => {
+    const user = userEvent.setup();
+    route({});
+    render(
+      <DocListFolder folder={folder} projects={inAipla} documents={[]} isActive={false} onSelect={vi.fn()} onDocClick={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Folder actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "New project from folder" }));
+    const ask = await screen.findByRole("alertdialog", { name: "Create another project?" });
+    expect(ask).toHaveTextContent("This folder is already in AIPLA.");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("confirming starts the new project, named after the subfolder", async () => {
+    const user = userEvent.setup();
+    let body: unknown;
+    route({
+      "POST /api/proxy/api/projects": (init) => {
+        body = JSON.parse(String(init?.body));
+        return res(201, { id: "p6", name: "pilot" });
+      },
+    });
+    const nested: Folder = { ...folder, name: "docs/design/pilot" };
+    render(
+      <DocListFolder
+        folder={nested}
+        label="pilot"
+        projects={inAipla}
+        documents={[]}
+        isActive={false}
+        onSelect={vi.fn()}
+        onDocClick={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Folder actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "New project from folder" }));
+    await user.click(await screen.findByRole("button", { name: "Create" }));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/projects/p6"));
+    expect(body).toEqual({ name: "pilot", fromFolderId: "f1", uniqueName: true });
+  });
+
+  it("the ⋯ menu lists the projects the folder is in and opens one", async () => {
+    const user = userEvent.setup();
+    const two = [...inAipla, { projectId: "p-b", projectName: "Beta", documents: 2, via: "documents" as const }];
+    render(<DocListFolder folder={folder} projects={two} documents={[]} isActive={false} onSelect={vi.fn()} onDocClick={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Folder actions" }));
+    expect(await screen.findByText("Projects")).toBeInTheDocument();
+    // How each project holds the folder is on the row, not only in a tooltip.
+    const aipla = screen.getByRole("menuitem", { name: /AIPLA\s*Synced from GitHub · 17 documents/ });
+    expect(aipla).toHaveAttribute("title", "Open AIPLA");
+    expect(screen.getByText("2 documents added by hand")).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: /Beta\s*2 documents added by hand/ }));
+    expect(mockPush).toHaveBeenCalledWith("/projects/p-b");
+  });
+
+  it("a folder in no project has no project section", async () => {
+    const user = userEvent.setup();
+    render(<DocListFolder folder={folder} documents={[]} isActive={false} onSelect={vi.fn()} onDocClick={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Folder actions" }));
+    await screen.findByRole("menuitem", { name: "Rename" });
+    expect(screen.queryByText(/^Projects?$/)).toBeNull();
   });
 
   it("a failure is shown on the folder", async () => {
@@ -177,8 +248,18 @@ describe("folder ⋯ → Start a project from this folder (E4)", () => {
     });
     render(<DocListFolder folder={folder} documents={[]} isActive={false} onSelect={vi.fn()} onDocClick={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Folder actions" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Start a project from this folder" }));
+    await user.click(await screen.findByRole("menuitem", { name: "New project from folder" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("You have 100 projects already.");
     expect(mockPush).not.toHaveBeenCalled();
+  });
+});
+
+describe("linkDescription", () => {
+  it("says how a project holds the folder", async () => {
+    const { linkDescription } = await import("@/components/doc-browser/FolderProjectsMenu");
+    const base = { projectId: "p", projectName: "P" };
+    expect(linkDescription({ ...base, documents: 12, via: "github" })).toBe("Synced from GitHub · 12 documents");
+    expect(linkDescription({ ...base, documents: 3, via: "folder" })).toBe("Follows this folder · 3 documents");
+    expect(linkDescription({ ...base, documents: 1, via: "documents" })).toBe("1 document added by hand");
   });
 });

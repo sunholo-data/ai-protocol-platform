@@ -78,10 +78,10 @@ describe("ProjectsSection — states (NEVER SILENT)", () => {
     route({ "GET /api/proxy/api/projects": () => res(200, { projects: many }) });
     render(<ProjectsSection chatHrefFor={chatHref} />);
     const list = await screen.findByRole("list", { name: "Your projects" });
-    expect(within(list).getAllByRole("link", { name: /^Project \d+\s*\d/ })).toHaveLength(SIDEBAR_PROJECT_LIMIT);
-    expect(within(list).getAllByRole("link", { name: /^Project \d+\s*\d/ })[0]).toHaveAttribute("href", "/chat/s1?project=p0");
+    expect(within(list).getAllByRole("link", { name: /^Project \d+$/ })).toHaveLength(SIDEBAR_PROJECT_LIMIT);
+    expect(within(list).getAllByRole("link", { name: /^Project \d+$/ })[0]).toHaveAttribute("href", "/chat/s1?project=p0");
     expect(within(list).getAllByRole("link", { name: /settings$/ })[0]).toHaveAttribute("href", "/projects/p0");
-    expect(screen.getByRole("link", { name: "See all (10)" })).toHaveAttribute("href", "/projects");
+    expect(screen.getByRole("link", { name: "All projects (10)" })).toHaveAttribute("href", "/projects");
   });
 });
 
@@ -130,7 +130,7 @@ describe("ProjectsSection — dropping a document ADDS it", () => {
       "POST /api/proxy/api/projects/p1/documents": post,
     });
     render(<ProjectsSection chatHrefFor={chatHref} />);
-    const link = await screen.findByRole("link", { name: /^Iberia portfolio review\s*\d/ });
+    const link = await screen.findByRole("link", { name: /^Iberia portfolio review$/ });
     return link.closest("li") as HTMLElement;
   }
 

@@ -78,19 +78,17 @@ export class SurfaceErrorBoundary extends Component<
         <div
           role="alert"
           data-testid="surface-error"
+          data-surface-id={this.props.surfaceId}
           className="my-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
         >
-          <p className="font-medium">This surface failed to render.</p>
-          <p className="mt-1 text-xs opacity-90">
-            {/*
-              The surface id, not the error message. A thrown message can quote
-              the payload that caused it, and an A2UI payload carries customer
-              content — a contract clause in a red box on screen is a leak with
-              extra steps. The detail belongs in the log (M3), not the DOM.
-            */}
-            Surface <code className="font-mono">{this.props.surfaceId}</code> could not be
-            displayed. The rest of this page still works.
-          </p>
+          {/*
+            Never the error message: a thrown message can quote the payload
+            that caused it, and an A2UI payload carries customer content. The
+            detail belongs in the log (M3); the surface id is on the element
+            for debugging, not in the copy.
+          */}
+          <p className="font-medium">This part couldn&apos;t load.</p>
+          <p className="mt-1 text-xs opacity-90">The rest of the page still works.</p>
           <button
             type="button"
             onClick={this.handleRetry}

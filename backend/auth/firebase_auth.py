@@ -77,6 +77,10 @@ class User(BaseModel):
     # Only machine principals set these today (auth/tailnet_auth.py).
     supervisors: tuple[str, ...] = ()
     notify_inbox: str = ""
+    # When this request's Firebase ID token says the person last signed in
+    # (its `auth_time` claim, epoch seconds). None for every other auth path.
+    # High-risk human approvals require it to be recent (auth/approvals.py).
+    auth_time: float | None = None
 
 
 def _extract_domain(email: str) -> str:
@@ -97,6 +101,7 @@ def _user_from_decoded_token(decoded: dict[str, Any]) -> User:
         domain=_extract_domain(email),
         group_tags=group_tags,
         email_verified=decoded.get("email_verified") is True,
+        auth_time=decoded.get("auth_time"),
     )
 
 

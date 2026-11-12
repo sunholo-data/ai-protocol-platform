@@ -129,7 +129,52 @@ def _extension_for(mime: str) -> str:
         "image/jpeg": "jpg",
         "image/webp": "webp",
         "application/pdf": "pdf",
+        "image/gif": "gif",
+        "video/mp4": "mp4",
+        "video/webm": "webm",
+        "video/quicktime": "mov",
+        "audio/mpeg": "mp3",
+        "audio/wav": "wav",
+        "audio/x-wav": "wav",
+        "audio/mp4": "m4a",
+        "audio/ogg": "ogg",
+        "audio/flac": "flac",
     }.get(mime, "bin")
+
+
+# Generated media (an image or audio generator, a rendered clip) is served
+# from here: the same user-namespaced store and uid re-check as screenshots,
+# under a name that does not say "browser".
+MEDIA_URL_PREFIX = "/api/media"
+
+
+async def save_user_media(tool_context: ToolContext, data: bytes, mime: str, *, label: str) -> dict[str, Any]:
+    """Store media a tool produced for the CALLER and return its reference.
+
+    For tools that make pictures, audio or video (on-device generation, a
+    rendered clip): the bytes go to the caller's own artefact namespace, never
+    into the tool result, and ``show_media(artefacts=[reference["url"]])``
+    shows them. ``label`` names the file so a model can tell several apart
+    (``"kitchen-render"``). Raises when the store cannot be written: the caller
+    reports that, rather than return the bytes instead.
+    """
+    from google.genai import types as genai_types
+
+    safe = _UNSAFE_IN_FILENAME.sub("-", (label or "media").strip()).strip("-.")[:60] or "media"
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    digest = hashlib.sha256(data).hexdigest()[:8]
+    artefact_id = f"{safe}_{stamp}_{digest}.{_extension_for(mime)}"
+    await tool_context.save_artifact(
+        filename=f"{ARTEFACT_NAMESPACE}{artefact_id}",
+        artifact=genai_types.Part.from_bytes(data=data, mime_type=mime),
+    )
+    logger.info("media_results: saved %s (%d bytes, %s)", artefact_id, len(data), mime)
+    return {
+        "artefact_id": artefact_id,
+        "url": f"{MEDIA_URL_PREFIX}/{artefact_id}",
+        "mime": mime,
+        "bytes": len(data),
+    }
 
 
 async def _save_one(
@@ -234,4 +279,4 @@ async def _convert_media_results(
     return {**tool_response, "content": converted}
 
 
-__all__ = ["ARTEFACT_NAMESPACE", "ARTEFACT_URL_PREFIX", "_convert_media_results"]
+__all__ = ["ARTEFACT_NAMESPACE", "ARTEFACT_URL_PREFIX", "MEDIA_URL_PREFIX", "_convert_media_results", "save_user_media"]

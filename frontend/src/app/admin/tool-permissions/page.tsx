@@ -14,6 +14,8 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/apiClient";
 import { SignInRequired } from "@/components/chat/SignInRequired";
+import { useConfirm } from "@/components/ui/confirm";
+import { PageLoading } from "@/components/ui/skeleton";
 
 type PermType = "user" | "domain" | "wildcard";
 type PermDoc = {
@@ -127,8 +129,15 @@ export default function ToolPermissionsPage() {
     }
   };
 
+  const confirm = useConfirm();
   const remove = async (id: string) => {
-    if (typeof window !== "undefined" && !window.confirm(`Delete tool-permission doc "${id}"?`)) return;
+    const ok = await confirm({
+      title: `Delete "${id}"?`,
+      description: "Its tool rules stop applying straight away.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
     setDeletingId(id);
     setNotice(null);
     try {
@@ -147,7 +156,7 @@ export default function ToolPermissionsPage() {
     }
   };
 
-  if (loading) return <Centered>Loading…</Centered>;
+  if (loading) return <PageLoading />;
   if (!user) return <SignInRequired />;
   if (probe === "forbidden") {
     return (
@@ -201,7 +210,7 @@ export default function ToolPermissionsPage() {
                 <tr key={d.doc_id} className="border-b last:border-0 align-top">
                   <td className="px-4 py-2">
                     <div className="font-mono text-xs">{d.doc_id}</div>
-                    <span className="mt-0.5 inline-block rounded-full border px-2 py-0.5 text-[10px] uppercase text-muted-foreground">
+                    <span className="mt-0.5 inline-block rounded-full border px-2 py-0.5 text-[11px] uppercase text-muted-foreground">
                       {d.type}
                     </span>
                   </td>
@@ -294,7 +303,7 @@ export default function ToolPermissionsPage() {
 function ToolCells({ items, allLabel }: { items: string[]; allLabel?: string }) {
   if (items.length === 0) return <span className="opacity-50">—</span>;
   if (allLabel && items.length === 1 && items[0] === "*") {
-    return <span className="rounded-full border px-2 py-0.5 text-[10px] uppercase">{allLabel}</span>;
+    return <span className="rounded-full border px-2 py-0.5 text-[11px] uppercase">{allLabel}</span>;
   }
   return <span className="break-words">{items.join(", ")}</span>;
 }

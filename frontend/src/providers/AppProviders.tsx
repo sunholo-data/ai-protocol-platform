@@ -2,7 +2,10 @@
 
 import { useEffect, type ReactNode } from "react";
 import { AccessRestrictedGate } from "@/components/auth/AccessRestrictedGate";
+import { ConfirmProvider } from "@/components/ui/confirm";
+import { Toaster } from "@/components/ui/toast";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { UserLocaleProvider } from "@/i18n/userLocale";
 import { installGlobalHandlers } from "@/lib/logger";
 
 /**
@@ -18,8 +21,13 @@ export function AppProviders({ children }: { children: ReactNode }) {
   useEffect(() => installGlobalHandlers(), []);
 
   return (
-    <AuthProvider>
-      <AccessRestrictedGate>{children}</AccessRestrictedGate>
-    </AuthProvider>
+    <UserLocaleProvider>
+      <AuthProvider>
+        <ConfirmProvider>
+          <AccessRestrictedGate>{children}</AccessRestrictedGate>
+          <Toaster />
+        </ConfirmProvider>
+      </AuthProvider>
+    </UserLocaleProvider>
   );
 }

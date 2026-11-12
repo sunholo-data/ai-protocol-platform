@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Folder, ParsedDocument, useDocBrowser } from "@/hooks/useDocBrowser";
@@ -6,6 +6,10 @@ import { DocListFolder } from "../DocListFolder";
 import { DocListItem } from "../DocListItem";
 import { DocListView } from "../DocListView";
 import { DOC_DRAG_TYPE } from "../folderActions";
+import { ConfirmProvider } from "@/components/ui/confirm";
+
+// Deletes ask through the shared confirm dialog (useConfirm), so render inside its provider.
+const render = (ui: React.ReactElement) => rtlRender(ui, { wrapper: ConfirmProvider });
 
 vi.mock("@/lib/apiClient", () => ({ fetchWithAuth: vi.fn() }));
 vi.mock("@/lib/documentEvents", () => ({ notifyDocumentsChanged: vi.fn(), subscribeDocumentsChanged: vi.fn() }));
@@ -69,6 +73,45 @@ beforeEach(() => {
 });
 
 describe("folder rename", () => {
+  it("in a subfolder, edits only its own name and keeps its place in the tree", async () => {
+    const user = userEvent.setup();
+    const nested: Folder = { id: "f-v1", name: "reports/2026/v1", userId: "u1", docCount: 2, parsedCount: 2 };
+    mockFetch.mockResolvedValue(res(200, { ...nested, name: "reports/2026/final" }));
+    renderFolder(nested, { label: "v1" });
+    await openFolderMenu(user);
+    await user.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const input = screen.getByRole("textbox", { name: "Folder name" });
+    expect(input).toHaveValue("v1");
+    await user.clear(input);
+    await user.type(input, "final{Enter}");
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledOnce());
+    expect(JSON.parse(String(mockFetch.mock.calls[0][1]?.body))).toEqual({ name: "reports/2026/final" });
+  });
+
+  it("a GitHub-synced folder offers no rename and says why", async () => {
+    const user = userEvent.setup();
+    const docs: Folder = { id: "f-docs", name: "docs", userId: "u1", docCount: 4, parsedCount: 4 };
+    const syncedBy = { prefix: "docs", projectId: "p1", projectName: "AIPLA", repo: "example-org/app" };
+    renderFolder(docs, { syncedBy });
+    expect(
+      screen.getByRole("img", { name: "Synced from GitHub (example-org/app) into AIPLA · can't be renamed" }),
+    ).toBeInTheDocument();
+    await openFolderMenu(user);
+    await screen.findByRole("menuitem", { name: "Delete" });
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
+  });
+
+  it("a subfolder of a synced folder can't be renamed either, without repeating the badge", async () => {
+    const user = userEvent.setup();
+    const sub: Folder = { id: "f-sub", name: "docs/design", userId: "u1", docCount: 1, parsedCount: 1 };
+    const syncedBy = { prefix: "docs", projectId: "p1", projectName: "AIPLA", repo: "example-org/app" };
+    renderFolder(sub, { syncedBy, label: "design" });
+    expect(screen.queryByTestId("folder-synced-badge")).toBeNull();
+    await openFolderMenu(user);
+    await screen.findByRole("menuitem", { name: "Delete" });
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
+  });
+
   it("renames on Enter, PATCHes the name and refreshes the lists", async () => {
     const user = userEvent.setup();
     mockFetch.mockResolvedValue(res(200, { ...llm, name: "LLM papers" }));
@@ -126,7 +169,7 @@ describe("folder delete", () => {
     renderFolder(papers, { onDeleted });
     await openFolderMenu(user);
     await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
-    expect(screen.getByRole("alertdialog")).toHaveTextContent("Delete folder ‘Papers’?");
+    expect(await screen.findByRole("alertdialog", { name: 'Delete folder "Papers"?' })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(onDeleted).toHaveBeenCalledWith("f-papers-uuid"));
     expect(mockFetch).toHaveBeenCalledWith("/api/proxy/api/folders/f-papers-uuid", { method: "DELETE" });
@@ -141,7 +184,7 @@ describe("folder delete", () => {
     renderFolder(llm, { onDeleted });
     await openFolderMenu(user);
     await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(await screen.findByRole("button", { name: "Delete" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
     expect(screen.getByText("llm")).toBeInTheDocument();
     expect(onDeleted).not.toHaveBeenCalled();
@@ -168,7 +211,7 @@ describe("folder delete", () => {
     // Folder rows render in order: created (no menu), papers, llm.
     await user.click(screen.getAllByRole("button", { name: "Folder actions" })[0]);
     await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() => expect(setActiveFolderId).toHaveBeenCalledWith(llm.id));
   });
 });
@@ -370,10 +413,10 @@ describe("delete a document", () => {
     render(<DocListItem doc={doc} onClick={vi.fn()} moveTargets={[papers]} />);
     await user.click(screen.getByRole("button", { name: "Delete document" }));
     expect(mockFetch).not.toHaveBeenCalled();
-    const dialog = screen.getByRole("alertdialog", { name: "Delete document?" });
-    expect(dialog).toHaveTextContent("Delete ‘a.pdf’? This can’t be undone.");
+    const dialog = await screen.findByRole("alertdialog", { name: 'Delete "a.pdf"?' });
+    expect(dialog).toHaveTextContent("This can't be undone.");
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
-    expect(within(dialog).getByRole("button", { name: "Deleting…" })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete document" })).toBeDisabled());
     expect(mockFetch).toHaveBeenCalledWith("/api/proxy/api/documents/d-uuid-1", { method: "DELETE" });
     resolve(res(204));
     await waitFor(() => expect(mockNotify).toHaveBeenCalledOnce());
@@ -384,7 +427,7 @@ describe("delete a document", () => {
     render(<DocListItem doc={doc} onClick={vi.fn()} moveTargets={[papers]} />);
     await user.click(screen.getByRole("button", { name: "Document actions" }));
     await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
-    expect(screen.getByRole("alertdialog", { name: "Delete document?" })).toHaveTextContent("Delete ‘a.pdf’?");
+    expect(await screen.findByRole("alertdialog", { name: 'Delete "a.pdf"?' })).toBeInTheDocument();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -393,7 +436,7 @@ describe("delete a document", () => {
     const onClick = vi.fn();
     render(<DocListItem doc={doc} onClick={onClick} moveTargets={[papers]} />);
     await user.click(screen.getByRole("button", { name: "Delete document" }));
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(mockFetch).not.toHaveBeenCalled();
     expect(mockNotify).not.toHaveBeenCalled();
@@ -405,7 +448,7 @@ describe("delete a document", () => {
     mockFetch.mockResolvedValue(res(500, { detail: "boom" }));
     render(<DocListItem doc={doc} onClick={vi.fn()} moveTargets={[papers]} />);
     await user.click(screen.getByRole("button", { name: "Delete document" }));
-    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(await screen.findByRole("button", { name: "Delete" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("boom");
     expect(mockNotify).not.toHaveBeenCalled();
   });

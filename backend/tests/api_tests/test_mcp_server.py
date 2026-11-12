@@ -93,9 +93,12 @@ def _rpc(client: TestClient, method: str, params: dict | None = None, token: str
     return resp, data[-1] if data else None
 
 
-def _as_token_owner(user: User | None = ALICE):
+def _as_token_owner(user: User | None = ALICE, scopes: list[str] | None = None):
+    record = (
+        {"uid": user.uid, "id": "tok123tok123", "name": "Claude Code", "scopes": scopes or ["mcp"]} if user else None
+    )
     return (
-        patch("auth.mcp_tokens.resolve_token", return_value=user.uid if user else None),
+        patch("auth.mcp_tokens.resolve_token_record", return_value=record),
         patch("auth.firebase_auth.resolve_user_by_uid", return_value=user),
     )
 
@@ -107,7 +110,8 @@ def _names(msg: dict) -> list[str]:
 # --- the bare path ---------------------------------------------------------
 
 
-def test_bare_mcp_path_is_served_not_redirected(client):
+def test_bare_mcp_path_is_served_not_redirected(client, monkeypatch):
+    monkeypatch.setenv("MCP_AUTH", "optional")  # an anonymous call; the default refuses it
     resp, msg = _rpc(client, "tools/list")
     assert resp.status_code == 200, (resp.status_code, resp.headers.get("location"))
     assert msg and "result" in msg
@@ -117,7 +121,7 @@ def test_bare_mcp_path_is_served_not_redirected(client):
 
 
 def test_anonymous_sees_public_skills_only(client, monkeypatch):
-    monkeypatch.delenv("MCP_AUTH", raising=False)
+    monkeypatch.setenv("MCP_AUTH", "optional")
     _, msg = _rpc(client, "tools/list")
     assert _names(msg) == ["skill_helper"]  # the slug, not the id (#9)
 
@@ -127,6 +131,39 @@ def test_required_mode_rejects_anonymous_with_a_challenge(client, monkeypatch):
     resp, _ = _rpc(client, "tools/list")
     assert resp.status_code == 401
     assert resp.headers["www-authenticate"].startswith("Bearer")
+
+
+def test_default_rejects_anonymous(client, monkeypatch):
+    """Unset MCP_AUTH fails closed. Regression (2026-11-09): the default was
+    `optional`, so every deployment that never set it served its public skills,
+    and their tools' data, to anonymous internet callers."""
+    monkeypatch.delenv("MCP_AUTH", raising=False)
+    monkeypatch.delenv("LOCAL_MODE", raising=False)
+    resp, _ = _rpc(client, "tools/list")
+    assert resp.status_code == 401
+    assert resp.headers["www-authenticate"].startswith("Bearer")
+
+
+@pytest.mark.parametrize(
+    "env,expected",
+    [
+        ({}, True),
+        ({"MCP_AUTH": "required"}, True),
+        ({"MCP_AUTH": "optional"}, False),
+        ({"MCP_AUTH": "Optional "}, False),
+        ({"MCP_AUTH": "off"}, True),  # a typo never opens it
+        ({"LOCAL_MODE": "1"}, False),
+        ({"LOCAL_MODE": "1", "MCP_AUTH": "required"}, True),
+    ],
+)
+def test_auth_required_fails_closed(monkeypatch, env, expected):
+    from protocols.mcp_server import auth_required
+
+    monkeypatch.delenv("MCP_AUTH", raising=False)
+    monkeypatch.delenv("LOCAL_MODE", raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    assert auth_required() is expected
 
 
 # --- personal tokens ------------------------------------------------------------
@@ -176,12 +213,14 @@ def test_token_path_runs_the_rest_api_identity_gates(client):
 
 
 def test_anonymous_cannot_call_a_private_skill(client, monkeypatch):
-    monkeypatch.delenv("MCP_AUTH", raising=False)
+    monkeypatch.setenv("MCP_AUTH", "optional")
     _, msg = _rpc(client, "tools/call", {"name": "skill_my_hours", "arguments": {"message": "hi"}})
     assert msg["result"]["isError"] and "Unknown tool" in msg["result"]["content"][0]["text"]
 
 
-def test_run_error_is_a_tool_error_not_an_empty_answer(client):
+def test_run_error_is_a_tool_error_not_an_empty_answer(client, monkeypatch):
+    monkeypatch.setenv("MCP_AUTH", "optional")  # an anonymous call; the default refuses it
+
     async def failing(**_kw) -> AsyncGenerator[dict, None]:
         yield {"type": "RUN_ERROR", "message": "The model is overloaded. Try again."}
 
@@ -190,7 +229,8 @@ def test_run_error_is_a_tool_error_not_an_empty_answer(client):
     assert msg["result"]["isError"] and "overloaded" in msg["result"]["content"][0]["text"]
 
 
-def test_empty_message_is_refused(client):
+def test_empty_message_is_refused(client, monkeypatch):
+    monkeypatch.setenv("MCP_AUTH", "optional")  # an anonymous call; the default refuses it
     _, msg = _rpc(client, "tools/call", {"name": "skill_helper", "arguments": {"message": "  "}})
     assert msg["result"]["isError"]
 

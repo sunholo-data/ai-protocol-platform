@@ -13,6 +13,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { GuideBody } from "@/components/help/GuideBody";
+import { useLocale } from "@/i18n";
+import { pickVariant } from "@/i18n/resolve";
 import { BRANDING } from "@/lib/branding";
 import {
   helpHref,
@@ -33,6 +35,8 @@ interface HelpPage {
   title: string;
   summary?: string;
   body: string;
+  /** The page in other languages, when the deployment offers them (/help-content). */
+  translations?: Record<string, { title: string; summary?: string; body: string }>;
 }
 
 type Load = { status: "loading" } | { status: "error" } | { status: "ready"; page: HelpPage };
@@ -169,6 +173,8 @@ export function HelpArtefactTab({ surfaceId, className }: { surfaceId: string; c
 
   const appName = BRANDING.appName;
   const full = current ? helpHref(current) : "/help";
+  const locale = useLocale();
+  const shown = load.status === "ready" ? (pickVariant(load.page.translations, locale) ?? load.page) : null;
 
   return (
     <div ref={scroller} className={`flex h-full flex-col overflow-auto ${className ?? ""}`}>
@@ -221,15 +227,15 @@ export function HelpArtefactTab({ surfaceId, className }: { surfaceId: string; c
             </a>
             .
           </p>
-        ) : (
+        ) : shown ? (
           <article className="space-y-4">
             <header className="space-y-1">
-              <h1 className="text-xl font-semibold tracking-tight text-foreground">{withAppName(load.page.title, appName)}</h1>
-              {load.page.summary ? <p className="text-sm text-muted-foreground">{withAppName(load.page.summary, appName)}</p> : null}
+              <h1 className="text-xl font-semibold tracking-tight text-foreground">{withAppName(shown.title, appName)}</h1>
+              {shown.summary ? <p className="text-sm text-muted-foreground">{withAppName(shown.summary, appName)}</p> : null}
             </header>
-            <GuideBody body={load.page.body} appName={appName} onLink={onLink} compact />
+            <GuideBody body={shown.body} appName={appName} onLink={onLink} compact />
           </article>
-        )}
+        ) : null}
       </div>
     </div>
   );

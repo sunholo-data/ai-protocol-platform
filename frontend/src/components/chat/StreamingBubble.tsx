@@ -10,8 +10,11 @@
 import type { SkillMessage } from "@/hooks/useSkillAgent";
 import { BrandAvatar } from "@/components/chat/BrandAvatar";
 import { ThinkingPanel } from "@/components/chat/ThinkingPanel";
+import { useToolLabels } from "@/hooks/useToolLabels";
 
 interface StreamingBubbleProps {
+  /** A tool running mid-answer: said in words, so the pause doesn't look frozen. */
+  activeToolName?: string | null;
   message: SkillMessage;
   skillId: string;
   /** Active skill's avatar — matches the bot MessageBubble (6.11). Null → brand mark. */
@@ -22,7 +25,16 @@ interface StreamingBubbleProps {
   isThinking?: boolean;
 }
 
-export function StreamingBubble({ message, skillId, botAvatarUrl, botLabel, thinkingContent, isThinking }: StreamingBubbleProps) {
+export function StreamingBubble({
+  message,
+  skillId,
+  botAvatarUrl,
+  botLabel,
+  thinkingContent,
+  isThinking,
+  activeToolName,
+}: StreamingBubbleProps) {
+  const labelFor = useToolLabels();
   return (
     // Same frame as the finished assistant MessageBubble, so the swap on
     // TEXT_MESSAGE_END causes no layout shift.
@@ -51,6 +63,12 @@ export function StreamingBubble({ message, skillId, botAvatarUrl, botLabel, thin
             {message.content}
             <span className="ml-0.5 inline-block h-3.5 w-0.5 bg-primary motion-safe:animate-pulse align-middle" />
           </p>
+          {activeToolName && (
+            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+              Using <span className="font-medium text-foreground">{labelFor(activeToolName)}</span>…
+              <span className="h-1.5 w-1.5 rounded-full bg-primary motion-safe:animate-pulse" />
+            </p>
+          )}
         </div>
       </div>
     </div>

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { cn } from "@/lib/utils";
 
 type Status = "loading" | "ok" | "down";
 
@@ -29,38 +28,19 @@ export function BackendHealthBadge() {
     };
   }, []);
 
-  const label =
-    status === "loading"
-      ? "checking backend…"
-      : status === "ok"
-        ? "backend ok"
-        : "backend down";
-
-  const color =
-    status === "loading"
-      ? "bg-muted text-muted-foreground"
-      : status === "ok"
-        ? "bg-green-100 text-green-800"
-        : "bg-red-100 text-red-800";
+  // Quiet when healthy: a "backend ok" pill is internal plumbing, not news.
+  // Only an outage is worth the user's attention.
+  if (status !== "down") return null;
 
   return (
     <span
-      className={cn(
-        "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium",
-        color,
-      )}
+      role="status"
+      className="inline-flex items-center gap-2 rounded-full border border-destructive/30 bg-destructive/10 px-3 py-1 text-xs font-medium text-destructive"
       data-testid="backend-health-badge"
       data-status={status}
     >
-      <span
-        className={cn(
-          "h-2 w-2 rounded-full",
-          status === "loading" && "bg-muted-foreground animate-pulse",
-          status === "ok" && "bg-green-500",
-          status === "down" && "bg-red-500",
-        )}
-      />
-      {label}
+      <span aria-hidden className="h-2 w-2 rounded-full bg-destructive" />
+      Can&apos;t reach the service
     </span>
   );
 }

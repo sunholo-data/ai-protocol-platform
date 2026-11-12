@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { fetchWithAuth } from "@/lib/apiClient";
 import type { Skill } from "@/types/skill";
 import { PLATFORM_OWNER_UID } from "@/lib/platformOwner";
+import { sharedRequest } from "@/lib/sharedRequest";
 
 interface UseUserSkillsReturn {
   skills: Skill[];
@@ -17,11 +18,29 @@ interface UseUserSkillsReturn {
  * the user's own list so a fork keeps the user's version (different skillId,
  * same display name is fine — both render).
  */
+/** Merging the burst of mounts on one page load — not a cache the user could
+ * notice after editing a skill. */
+const SKILLS_SHARE_MS = 5_000;
+
+// Keyed by the VIEWER as well as the owner: the platform list is filtered by
+// the caller's access, so one person's list must never reach the next person
+// to sign in on the same tab inside the window.
+function loadSkills(viewerUid: string, ownerId: string): Promise<Skill[]> {
+  return sharedRequest(
+    `skills:${viewerUid}:${ownerId}`,
+    () =>
+      fetchWithAuth(`/api/proxy/api/skills?ownerId=${encodeURIComponent(ownerId)}`).then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<Skill[]>;
+      }),
+    SKILLS_SHARE_MS,
+  );
+}
+
 export function useUserSkills(uid: string | null): UseUserSkillsReturn {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!uid) {
@@ -29,45 +48,31 @@ export function useUserSkills(uid: string | null): UseUserSkillsReturn {
       setError(null);
       return;
     }
-
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
+    // Shared with every other reader on the page, so never aborted: a uid
+    // change (or unmount) just ignores this request's result.
+    let current = true;
     setIsLoading(true);
     setError(null);
 
-    const own = fetchWithAuth(
-      `/api/proxy/api/skills?ownerId=${encodeURIComponent(uid)}`,
-      { signal: controller.signal },
-    ).then((res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json() as Promise<Skill[]>;
-    });
-
-    const platform = fetchWithAuth(
-      `/api/proxy/api/skills?ownerId=${encodeURIComponent(PLATFORM_OWNER_UID)}`,
-      { signal: controller.signal },
-    ).then((res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json() as Promise<Skill[]>;
-    });
-
-    Promise.all([own, platform])
+    Promise.all([loadSkills(uid, uid), loadSkills(uid, PLATFORM_OWNER_UID)])
       .then(([ownSkills, platformSkills]) => {
+        if (!current) return;
         const seen = new Set(ownSkills.map((s) => s.skillId));
         const merged = [...ownSkills, ...platformSkills.filter((s) => !seen.has(s.skillId))];
         setSkills(merged);
       })
-      .catch((err: Error) => {
-        if (err.name !== "AbortError") {
-          setError("Could not load skills.");
-          setSkills([]);
-        }
+      .catch(() => {
+        if (!current) return;
+        setError("Could not load skills.");
+        setSkills([]);
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => {
+        if (current) setIsLoading(false);
+      });
 
-    return () => abortRef.current?.abort();
+    return () => {
+      current = false;
+    };
   }, [uid]);
 
   return { skills, isLoading, error };

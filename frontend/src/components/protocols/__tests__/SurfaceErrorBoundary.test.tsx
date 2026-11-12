@@ -50,16 +50,18 @@ describe("SurfaceErrorBoundary", () => {
     expect(notice).toBeInTheDocument();
     // NEVER SILENT: it must be announced, not just painted.
     expect(notice).toHaveAttribute("role", "alert");
-    expect(notice).toHaveTextContent(/failed to render/i);
+    expect(notice).toHaveTextContent(/couldn.t load/i);
   });
 
-  it("names the surface, so the notice says WHICH thing broke", () => {
+  it("tags the notice with the surface id (for debugging; the copy stays plain)", () => {
     render(
       <SurfaceErrorBoundary surfaceId="ppa-compare">
         <Boom />
       </SurfaceErrorBoundary>,
     );
-    expect(screen.getByTestId("surface-error")).toHaveTextContent("ppa-compare");
+    const notice = screen.getByTestId("surface-error");
+    expect(notice).toHaveAttribute("data-surface-id", "ppa-compare");
+    expect(notice).not.toHaveTextContent("ppa-compare");
   });
 
   it("ISOLATION: a throwing surface does not take its siblings down", () => {

@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, type ReactNode } from "react";
 import { Catalog } from "@a2ui/web_core/v0_9";
-import { TextApi, ModalApi } from "@a2ui/web_core/v0_9/basic_catalog";
+import { TextApi, ModalApi, ButtonApi } from "@a2ui/web_core/v0_9/basic_catalog";
 import { basicCatalog, createComponentImplementation } from "@a2ui/react/v0_9";
 import * as Dialog from "@radix-ui/react-dialog";
 import ReactMarkdown from "react-markdown";
@@ -49,10 +49,32 @@ const AccessibleModal = createComponentImplementation(ModalApi, ({ props, buildC
 );
 });
 
+// The SDK's Button sets its variant through CSS-module classes, and 0.10.2
+// ships an empty class map: primary and borderless both render as class=" ",
+// so no stylesheet can tell the main action from a link. Keep the Basic API and
+// expose the variant as data for globals.css.
+export function ButtonContent({ variant, onClick, disabled, children }: {
+  variant?: string; onClick?: () => void; disabled?: boolean; children?: ReactNode;
+}) {
+  return (
+    <button className="a2ui-button" data-variant={variant ?? "default"} onClick={onClick} disabled={disabled}>
+      {children}
+    </button>
+  );
+}
+
+const VariantButton = createComponentImplementation(ButtonApi, ({ props, buildChild }) => (
+  <ButtonContent variant={props.variant} onClick={props.action} disabled={props.isValid === false}>
+    {props.child ? buildChild(props.child) : null}
+  </ButtonContent>
+));
+
+const REPLACED: Record<string, unknown> = { Text: RichText, Modal: AccessibleModal, Button: VariantButton };
+
 export const workbenchCatalog = new Catalog(
   basicCatalog.id,
   [...basicCatalog.components.values()].map(component =>
-    component.name === "Text" ? RichText : component.name === "Modal" ? AccessibleModal : component),
+    (REPLACED[component.name] as typeof component | undefined) ?? component),
   [...basicCatalog.functions.values()],
   basicCatalog.themeSchema,
 );

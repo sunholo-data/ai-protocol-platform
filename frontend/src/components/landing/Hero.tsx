@@ -56,9 +56,9 @@ export function Hero({ visual }: HeroProps) {
 
 function Eyebrow({ text }: { text: string }) {
   return (
-    <div className="inline-flex items-center gap-2 self-start rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
+    <div className="inline-flex items-center gap-2 self-start rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
       <span className="relative flex h-1.5 w-1.5">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60 [animation-iteration-count:3]" />
         <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
       </span>
       {text}

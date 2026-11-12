@@ -36,16 +36,13 @@ export function DocTab({ tab, isActive, onSelect, onClose, onToggleInclude }: Do
 
   const tabEl = (
     <div
-      role="tab"
-      aria-selected={isActive}
       className={[
-        "group flex shrink-0 cursor-pointer items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs",
+        "group flex shrink-0 items-center gap-1.5 border-b-2 px-3 text-xs",
         isActive
           ? "border-primary bg-background text-foreground"
           : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
         tab.included ? "" : "opacity-60",
       ].join(" ")}
-      onClick={() => onSelect(tab.id)}
     >
       <button
         type="button"
@@ -53,10 +50,7 @@ export function DocTab({ tab, isActive, onSelect, onClose, onToggleInclude }: Do
         aria-checked={tab.included}
         aria-label={includeLabel}
         title={includeLabel}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggleInclude(tab.id);
-        }}
+        onClick={() => onToggleInclude(tab.id)}
         className={[
           "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border",
           tab.included
@@ -77,20 +71,27 @@ export function DocTab({ tab, isActive, onSelect, onClose, onToggleInclude }: Do
           </svg>
         )}
       </button>
-      {tab.format && (
-        <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-medium uppercase ${fmtColor}`}>
-          {tab.format}
-        </span>
-      )}
-      <span className="max-w-[120px] truncate">{tab.filename}</span>
+      {/* The selectable part is its own tab button; the checkbox and close
+          button sit beside it, not inside it. */}
+      <button
+        type="button"
+        role="tab"
+        aria-selected={isActive}
+        onClick={() => onSelect(tab.id)}
+        className="flex cursor-pointer items-center gap-1.5 rounded py-1.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        {tab.format && (
+          <span className={`shrink-0 rounded px-1 py-0.5 text-[11px] font-medium uppercase ${fmtColor}`}>
+            {tab.format}
+          </span>
+        )}
+        <span className="max-w-[120px] truncate">{tab.filename}</span>
+      </button>
       <button
         type="button"
         aria-label={`Close ${tab.filename}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose(tab.id);
-        }}
-        className="ml-0.5 rounded p-0.5 opacity-0 hover:bg-muted group-hover:opacity-100"
+        onClick={() => onClose(tab.id)}
+        className="ml-0.5 rounded p-0.5 opacity-0 hover:bg-muted group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
       >
         <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
           <path d="M2 2l8 8M10 2l-8 8" strokeLinecap="round" />

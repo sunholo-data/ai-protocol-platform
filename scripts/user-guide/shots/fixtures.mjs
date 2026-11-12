@@ -66,7 +66,7 @@ export function library() {
       accessControl: { type: "domain", domain: "yourcompany.com" },
       managedBy: null,
       canEdit: true,
-      skillMetadata: { tools: [] },
+      skillMetadata: { tools: [], model: "pro", thinking: "dynamic" },
     },
     {
       skillId: "phoenix-assistant",
@@ -140,9 +140,24 @@ export function library() {
       return json(route, 200, mm[2] ? { messages: [] } : { sessionId: mm[1], skillId: "demo-researcher", title: "", messages: [] }), true;
     }
     if (p === "/api/voice/config") return json(route, 200, { enabled: false }), true;
+    // Shell calls every page makes (since 2026-10-20): empty answers, so no
+    // "Couldn't load" banner appears in a shot that isn't about them.
+    if (p === "/api/me/instructions" && m === "GET") return json(route, 200, { instructions: "" }), true;
+    if (p === "/api/projects" && m === "GET") return json(route, 200, { projects: [] }), true;
+    if (p === "/api/folders/projects" && m === "GET") return json(route, 200, { folders: {} }), true;
+    if (p === "/api/sources/synced-folders" && m === "GET") return json(route, 200, { synced: [] }), true;
     // No original file bytes in the fixture: the app falls back to the Text view.
     if (/^\/api\/documents\/[^/]+\/(preview|thumbnail)$/.test(p)) return json(route, 404, { detail: "no file in the fixture" }), true;
     if (p === "/api/folders" && m === "GET") return json(route, 200, { folders: folders.map(folderJson) }), true;
+    // The sidebar's first view: the files you used last, newest first.
+    if (p === "/api/documents/recent" && m === "GET") {
+      const limit = Number(url.searchParams.get("limit") || 20);
+      const recent = docs
+        .filter((d) => d.id !== "d9" && d.folderId !== "f-created")
+        .slice(0, limit)
+        .map((d) => ({ ...d, lastUsedAt: d.updatedAt || d.createdAt, lastSessionId: null, lastSessionTitle: null }));
+      return json(route, 200, { documents: recent }), true;
+    }
     if ((mm = p.match(/^\/api\/folders\/([^/]+)\/documents$/))) {
       return json(route, 200, { documents: docs.filter((d) => d.folderId === mm[1] && d.id !== "d9") }), true;
     }
@@ -270,6 +285,23 @@ export function library() {
       return json(route, 200, kbs[mm[1]] ?? {}), true;
     }
     if (p === "/api/skills" && m === "GET") return json(route, 200, skills), true;
+    // The composer's Model menu (docs/design/v6.42.0/model-choice.md).
+    if (p === "/api/models/choice" && m === "GET") {
+      return json(route, 200, {
+        offered: "all",
+        levels: {
+          fast: { model: "gemini-3-5-flash-lite", label: "Gemini 3.5 Flash-Lite" },
+          thorough: { model: "gemini-3-1-pro", label: "Gemini 3.1 Pro" },
+        },
+        models: [
+          { id: "gemini-3-1-pro", label: "Gemini 3.1 Pro", note: "reasoning", provider: "google" },
+          { id: "gemini-3-8-flash", label: "Gemini 3.8 Flash", note: "balanced", provider: "google" },
+          { id: "gemini-3-5-flash-lite", label: "Gemini 3.5 Flash-Lite", note: "fastest", provider: "google" },
+        ],
+        labels: { pro: "Gemini 3.8 Flash", lite: "Gemini 3.5 Flash-Lite", "gemini-3-8-flash": "Gemini 3.8 Flash" },
+        resolved: { pro: "gemini-3-8-flash", lite: "gemini-3-5-flash-lite" },
+      }), true;
+    }
     if ((mm = p.match(/^\/api\/skills\/by-slug\/@?([^/]+)\/([^/]+)$/))) {
       const s = skills.find((x) => x.slug === mm[2]);
       return json(route, s ? 200 : 404, s ?? { detail: "not found" }), true;

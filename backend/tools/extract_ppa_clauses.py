@@ -480,6 +480,31 @@ async def extract_ppa_clauses(
             if field not in clauses:
                 setattr(validated, field, None)
 
+    _populated = sum(
+        1
+        for f, v in validated.model_dump().items()
+        if f not in ("doc_id", "other_clauses", "other_clauses_total", "other_clauses_truncated") and v is not None
+    )
+
+    # Nothing found at all: say so instead of rendering an empty clause card.
+    # A scan's empty text layer produced exactly that "OK — 0 clauses" on
+    # 2026-11-02, and the user had no way to tell why. Not cached, so a re-read
+    # document is extracted afresh.
+    if _populated == 0 and not validated.other_clauses:
+        log.warning("extract_ppa_clauses: no clauses found in %s (%d blocks)", identity, len(blocks))
+        what = "none of the requested clauses" if clauses is not None else "no PPA clauses"
+        return json.dumps(
+            {
+                "error": (
+                    f"Read '{identity}' ({len(blocks)} blocks) but found {what} in it. Tell the user "
+                    "plainly. If the document is a PPA, its text may not have been extracted (for "
+                    "example a scan); suggest re-adding it so it is read again."
+                ),
+                "doc_id": identity,
+                "error_code": "no_clauses_found",
+            }
+        )
+
     # If the tool was called via an ADK agent (tool_context present), stash
     # the typed result for compare_ppa_contracts (M3) to consume without
     # re-extracting. Keyed by whatever identity the agent used to call us
@@ -490,11 +515,6 @@ async def extract_ppa_clauses(
     # Success log — .dev-logs shows the tool returned a valid extraction (the
     # frontend clause card renders from this). A blank Workspace with this line
     # present points the finger at the frontend, not the tool.
-    _populated = sum(
-        1
-        for f, v in validated.model_dump().items()
-        if f not in ("doc_id", "other_clauses", "other_clauses_total", "other_clauses_truncated") and v is not None
-    )
     log.info("extract_ppa_clauses: OK %s — %d standard clauses populated", identity, _populated)
     return validated.model_dump_json()
 

@@ -115,6 +115,8 @@ def _rows_from_mcp(typed_result: Any) -> list[dict[str, Any]] | None:
             continue
         if isinstance(parsed, dict):
             rows.append(parsed)
+        elif isinstance(parsed, list):
+            rows.extend(row for row in parsed if isinstance(row, dict))
     return rows
 
 
@@ -466,7 +468,9 @@ def _is_worth_a_tab(rows: list[dict[str, Any]], x: dict[str, Any], y: list[dict[
     return _distinct(rows, x.get("key", "")) >= 2
 
 
-def bigquery_rows_to_a2ui(typed_result: Any, tool_context: Any = None) -> list[dict[str, Any]] | None:
+def bigquery_rows_to_a2ui(
+    typed_result: Any, tool_context: Any = None, display: dict | None = None
+) -> list[dict[str, Any]] | None:
     """Transform a scoped BigQuery query result into A2UI messages.
 
     Returns ``None`` for an error envelope, an unrecognised shape, or zero rows,
@@ -482,6 +486,8 @@ def bigquery_rows_to_a2ui(typed_result: Any, tool_context: Any = None) -> list[d
         return None
 
     requested, marker_title = _chart_request(tool_context)
+    if display is not None:
+        requested, marker_title = True, display.get("title")
     if not requested:
         # The agent did not ask for this one to be shown. Not a failure: the full
         # result is still in the Activity tab and the agent narrates the number.
@@ -506,6 +512,12 @@ def bigquery_rows_to_a2ui(typed_result: Any, tool_context: Any = None) -> list[d
         f"{len(rows):,} row{'s' if len(rows) != 1 else ''}",
         f"Columns: {', '.join(columns) if columns else '—'}",
     ]
+    # A table fallback must show values, not only a row count/column list.
+    # Keep the Basic-catalog fallback bounded; the model retains the full rows.
+    if not _is_worth_a_tab(rows, x, y):
+        lines.extend(" · ".join(f"{column}: {row.get(column)}" for column in columns) for row in rows[:50])
+        if len(rows) > 50:
+            lines.append(f"Showing the first 50 of {len(rows):,} rows.")
     line_ids = [_add({"component": "Text", "text": t}) for t in lines]
     list_id = _add({"component": "List", "children": line_ids})
     col_id = _add({"component": "Column", "children": [heading_id, list_id]})

@@ -67,6 +67,27 @@ def list_kbs(ctx: click.Context, as_json: bool) -> None:
         )
 
 
+def _source_line(src: dict) -> str:
+    """One source's health: files, newest arrival, what this sync added, and a
+    QUIET flag when it has produced nothing for longer than its quiet_after_days."""
+    if src.get("error"):
+        return str(src["error"])
+    parts = [f"{src.get('files', '?')} files"]
+    newest = src.get("lastArrivalAt")
+    if newest:
+        parts.append("newest " + time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(float(newest))))
+    if src.get("newSinceLastSync"):
+        parts.append(f"{src['newSinceLastSync']} new or changed in this sync")
+    line = ", ".join(parts)
+    if src.get("quiet"):
+        if newest:
+            days = int((time.time() - float(newest)) // 86400)
+            line += f"  QUIET: nothing new for {days} days"
+        else:
+            line += "  QUIET: no files"
+    return line
+
+
 @kb.command("status")
 @click.argument("kb_ref")
 @click.option("--json", "as_json", is_flag=True)
@@ -81,7 +102,7 @@ def status(ctx: click.Context, kb_ref: str, as_json: bool) -> None:
     summary = st.get("lastSyncSummary") or {}
     click.echo(f"last sync: {_summary_line(summary)}")
     for label, src in (summary.get("sources") or {}).items():
-        click.echo(f"  {label}: {src.get('error') or str(src.get('files', '?')) + ' files'}")
+        click.echo(f"  {label}: {_source_line(src)}")
     failed = st.get("failed") or []
     if failed:
         click.echo(f"{len(failed)} failed:")

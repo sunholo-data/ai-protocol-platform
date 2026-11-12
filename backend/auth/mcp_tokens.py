@@ -35,6 +35,13 @@ DEFAULT_DAYS = 90
 MAX_DAYS = 365
 MAX_TOKENS_PER_USER = 10
 _TOUCH_INTERVAL = timedelta(minutes=10)
+# Scopes. Every token opens /mcp. An "approve" token may also decide routine
+# human approvals (auth.approvals) from an MCP client or the CLI, so it is
+# minted only on request, lives shorter, and every use is pushed to the owner.
+MCP_SCOPE = "mcp"
+APPROVE_SCOPE = "approve"
+APPROVE_DEFAULT_DAYS = 30
+APPROVE_MAX_DAYS = 90
 
 
 class TokenError(ValueError):
@@ -52,23 +59,38 @@ def _public(token_id: str, doc: dict[str, Any]) -> dict[str, Any]:
         "createdAt": doc.get("created_at"),
         "expiresAt": doc.get("expires_at"),
         "lastUsedAt": doc.get("last_used_at"),
+        "scopes": _scopes(doc),
     }
+
+
+def _scopes(doc: dict[str, Any]) -> list[str]:
+    """A token's scopes; tokens minted before scopes existed open /mcp only."""
+    return list(doc.get("scopes") or [MCP_SCOPE])
 
 
 def is_mcp_token(token: str) -> bool:
     return token.startswith(TOKEN_PREFIX)
 
 
-def create_token(uid: str, name: str, days: int = DEFAULT_DAYS) -> tuple[str, dict[str, Any]]:
-    """Mint a token for ``uid``. Returns (plaintext, public record)."""
+def create_token(uid: str, name: str, days: int | None = None, *, approve: bool = False) -> tuple[str, dict[str, Any]]:
+    """Mint a token for ``uid``, with approval rights only if ``approve``. Returns (plaintext, public record)."""
     name = (name or "").strip()[:60] or "MCP client"
-    if not 1 <= days <= MAX_DAYS:
-        raise TokenError(f"A token can last 1 to {MAX_DAYS} days.")
+    longest = APPROVE_MAX_DAYS if approve else MAX_DAYS
+    days = (APPROVE_DEFAULT_DAYS if approve else DEFAULT_DAYS) if days is None else days
+    if not 1 <= days <= longest:
+        raise TokenError(f"A token {'with approval rights ' if approve else ''}can last 1 to {longest} days.")
     if len(list_tokens(uid)) >= MAX_TOKENS_PER_USER:
         raise TokenError(f"You already have {MAX_TOKENS_PER_USER} tokens. Revoke one you no longer use first.")
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)
     now = datetime.now(UTC)
-    doc = {"uid": uid, "name": name, "created_at": now, "expires_at": now + timedelta(days=days), "last_used_at": None}
+    doc = {
+        "uid": uid,
+        "name": name,
+        "created_at": now,
+        "expires_at": now + timedelta(days=days),
+        "last_used_at": None,
+        "scopes": [MCP_SCOPE, APPROVE_SCOPE] if approve else [MCP_SCOPE],
+    }
     token_id = _hash(token)
     set_document(COLLECTION, token_id, doc)
     logger.info("mcp_tokens: created token %s for uid=%s (%d days)", token_id[:12], uid, days)
@@ -95,6 +117,12 @@ def revoke_token(uid: str, token_id: str) -> bool:
 
 def resolve_token(token: str) -> str | None:
     """The owner uid of a live token, or None (unknown, malformed or expired)."""
+    record = resolve_token_record(token)
+    return record["uid"] if record else None
+
+
+def resolve_token_record(token: str) -> dict[str, Any] | None:
+    """``{uid, id, name, scopes}`` of a live token, or None (unknown, malformed or expired)."""
     if not is_mcp_token(token):
         return None
     token_id = _hash(token)
@@ -111,4 +139,4 @@ def resolve_token(token: str) -> str | None:
             update_document(COLLECTION, token_id, {"last_used_at": now})
         except Exception:
             logger.debug("mcp_tokens: last_used_at touch failed", exc_info=True)
-    return str(doc["uid"])
+    return {"uid": str(doc["uid"]), "id": token_id[:12], "name": doc.get("name", ""), "scopes": _scopes(doc)}

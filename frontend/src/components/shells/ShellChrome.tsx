@@ -9,6 +9,8 @@ import { SkillsBar } from "@/components/navigation/SkillsBar";
 import { skillHref } from "@/components/navigation/skillHref";
 import { ShellActionsProvider } from "./ShellActionsContext";
 import { getActiveProject } from "@/lib/activeProject";
+import { useProjects } from "@/hooks/useProjects";
+import { useProjectChatHref } from "@/hooks/useProjectChatHref";
 
 export interface ShellChromeProps {
   skillId: string;
@@ -31,9 +33,11 @@ export interface ShellChromeProps {
  */
 export function ShellChrome({ skillId, user, children }: ShellChromeProps) {
   const { skills, isLoading } = useUserSkills(user.uid);
-  const defaultSkillId = useTenantDefaultSkill(skills);
+  const defaultSkillId = useTenantDefaultSkill(skills, user.uid);
   const defaultSkill = skills.find((s) => s.skillId === defaultSkillId);
   const router = useRouter();
+  const { projects } = useProjects();
+  const projectHref = useProjectChatHref(user.uid);
   const hasActiveSkill = skills.some((s) => s.skillId === skillId);
   // Offered again inside a body's phone menu sheet (AccountPanel), where the
   // header hides its own Configure / Create buttons.
@@ -73,9 +77,19 @@ export function ShellChrome({ skillId, user, children }: ShellChromeProps) {
         // the most-recent session on (the bug: a tenant with no default_skill
         // had New chat bounce back to the last thread). 2026-07-16.
         onNewConversation={() => {
-          const target = defaultSkill ?? skills.find((s) => s.skillId === skillId) ?? skills[0];
-          // In a project, a new chat stays in it (ChatShell consumes ?project=).
+          // In a project, a new chat stays in it (ChatShell consumes ?project=),
+          // on the project's own assistant ("New chats open on") — the same rule
+          // as opening the project from the sidebar.
           const project = getActiveProject();
+          if (project) {
+            const defaultForProject = projects.find((p) => p.id === project)?.defaultSkillId ?? null;
+            const href = projectHref({ id: project, defaultSkillId: defaultForProject });
+            if (href) {
+              router.push(href);
+              return;
+            }
+          }
+          const target = defaultSkill ?? skills.find((s) => s.skillId === skillId) ?? skills[0];
           const href = target ? skillHref(target) : "/";
           router.push(target && project ? `${href}?project=${encodeURIComponent(project)}` : href);
         }}

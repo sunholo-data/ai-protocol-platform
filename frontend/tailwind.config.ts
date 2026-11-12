@@ -19,11 +19,7 @@ const config = {
       // (public/brand/<fork>/theme.css). If this merged with a conflict, take
       // upstream's version; UPGRADING.md (2026-10-01) has the steps.
       fontFamily: {
-        // Euclid Circular B — the customer's brand face, declared as @font-face
-        // in globals.css. Was 'Euclid Circular A': a different family, and one
-        // nothing ever loaded, so this stack silently resolved to system-ui on
-        // every render.
-        sans: ['Euclid Circular B', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-sans)', 'Montserrat', 'Segoe UI', 'system-ui', 'sans-serif'],
         serif: ['Crimson Pro', 'Georgia', 'serif'],
       },
       colors: {
@@ -51,6 +47,21 @@ const config = {
         destructive: {
           DEFAULT: 'hsl(var(--destructive))',
           foreground: 'hsl(var(--destructive-foreground))',
+        },
+        // Status tones. Use these (or <Badge tone>) instead of raw
+        // emerald/amber/red/blue classes, so a fork theme and dark mode can
+        // restyle them.
+        success: {
+          DEFAULT: 'hsl(var(--success))',
+          foreground: 'hsl(var(--success-foreground))',
+        },
+        warning: {
+          DEFAULT: 'hsl(var(--warning))',
+          foreground: 'hsl(var(--warning-foreground))',
+        },
+        info: {
+          DEFAULT: 'hsl(var(--info))',
+          foreground: 'hsl(var(--info-foreground))',
         },
         // Floating surfaces (menus, popovers, hover cards) and cards. Without
         // these, `bg-popover` / `bg-card` compiled to NOTHING and menus were

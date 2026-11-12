@@ -53,7 +53,7 @@ export function AudienceBand() {
   return (
     <section className="mx-auto w-full max-w-7xl px-6 py-16 md:px-10 md:py-20">
       <div className="mb-8 flex items-end justify-between">
-        <h2 className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+        <h2 className="font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
           Built for the people who read the contract
         </h2>
       </div>
@@ -64,10 +64,10 @@ export function AudienceBand() {
             className="group relative flex flex-col gap-3 bg-background p-6"
           >
             <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] tabular-nums text-primary">
+              <span className="font-mono text-[11px] tabular-nums text-primary">
                 {String(i + 1).padStart(2, "0")}
               </span>
-              <span className="inline-flex items-center rounded-full border border-primary/25 bg-primary/5 px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-primary">
+              <span className="inline-flex items-center rounded-full border border-primary/25 bg-primary/5 px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-[0.14em] text-primary">
                 {a.role}
               </span>
             </div>

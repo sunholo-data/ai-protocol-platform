@@ -101,14 +101,8 @@ describe("useUserSkills", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/proxy/api/skills?ownerId=uid-1",
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/proxy/api/skills?ownerId=aitana-platform",
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
+    expect(mockFetch).toHaveBeenCalledWith("/api/proxy/api/skills?ownerId=uid-1");
+    expect(mockFetch).toHaveBeenCalledWith("/api/proxy/api/skills?ownerId=aitana-platform");
     // Own skills come first, platform skills last.
     expect(result.current.skills.map((s) => s.skillId)).toEqual([
       "own-1",
@@ -150,20 +144,48 @@ describe("useUserSkills", () => {
     expect(result.current.skills).toEqual([]);
   });
 
-  it("aborts in-flight request when uid changes", async () => {
-    mockFetch.mockReturnValue(new Promise(() => {})); // never resolves
-    const { rerender, unmount } = renderHook(({ uid }) => useUserSkills(uid), {
+  it("a uid change fetches that uid's skills and ignores the previous uid's late result", async () => {
+    let releaseFirst!: (r: Response) => void;
+    mockFetch.mockImplementation((url: string) =>
+      url.endsWith("uid-1")
+        ? new Promise<Response>((r) => (releaseFirst = r))
+        : makeResponse(url.endsWith("uid-2") ? [ownSkill({ skillId: "own-2" })] : []),
+    );
+    const { result, rerender } = renderHook(({ uid }) => useUserSkills(uid), {
       initialProps: { uid: "uid-1" as string | null },
     });
-    // 2 fetches per uid (own + platform).
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-    const firstSignal = (mockFetch.mock.calls[0][1] as { signal: AbortSignal }).signal;
-    expect(firstSignal.aborted).toBe(false);
-
     rerender({ uid: "uid-2" });
-    expect(firstSignal.aborted).toBe(true);
+    await waitFor(() => expect(result.current.skills.map((s) => s.skillId)).toEqual(["own-2"]));
+    // Each uid gets its own platform list (it is filtered by the caller's
+    // access), so 4 requests: own + platform, per uid.
     expect(mockFetch).toHaveBeenCalledTimes(4);
+    releaseFirst({ ok: true, json: () => Promise.resolve([ownSkill({ skillId: "own-1" })]) } as Response);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(result.current.skills.map((s) => s.skillId)).toEqual(["own-2"]);
+  });
 
-    unmount();
+  it("several readers on one page share one pair of requests", async () => {
+    mockFetch.mockImplementation(makeRouter([ownSkill({ skillId: "own-1" })], []));
+    const a = renderHook(() => useUserSkills("uid-1"));
+    const b = renderHook(() => useUserSkills("uid-1"));
+    const c = renderHook(() => useUserSkills("uid-1"));
+    await waitFor(() => expect(c.result.current.isLoading).toBe(false));
+    expect(a.result.current.skills).toEqual(b.result.current.skills);
+    expect(mockFetch).toHaveBeenCalledTimes(2); // was 6 (ShellChrome + 2× useProjectChatHref)
+  });
+
+  it("never shares one viewer's platform list with the next viewer", async () => {
+    // The platform list is filtered by the CALLER's access. Two people signing
+    // in on one tab inside the share window must each get their own fetch.
+    mockFetch.mockImplementation((input: string) =>
+      input.includes("aitana-platform") ? makeResponse([platformSkill()]) : makeResponse([]),
+    );
+    const first = renderHook(() => useUserSkills("uid-a"));
+    await waitFor(() => expect(first.result.current.isLoading).toBe(false));
+    const second = renderHook(() => useUserSkills("uid-b"));
+    await waitFor(() => expect(second.result.current.isLoading).toBe(false));
+
+    const platformCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes("aitana-platform"));
+    expect(platformCalls).toHaveLength(2);
   });
 });

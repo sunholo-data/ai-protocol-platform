@@ -3,24 +3,29 @@
   "version": "6.0.0",
   "private": true,
   "scripts": {
-    "predev": "[ ! -f ../scripts/user-guide/bundle.mjs ] || node ../scripts/user-guide/bundle.mjs",
+    "predev": "node scripts/bundle-content.mjs",
     "dev": "next dev",
-    "prebuild": "[ ! -f ../scripts/user-guide/bundle.mjs ] || node ../scripts/user-guide/bundle.mjs",
+    "prebuild": "node scripts/bundle-content.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "pretypecheck": "node scripts/bundle-content.mjs i18n",
     "typecheck": "npx tsc --noEmit",
+    "pretest": "node scripts/bundle-content.mjs",
     "test": "vitest",
-    "pretest:run": "[ ! -f ../scripts/user-guide/bundle.mjs ] || node ../scripts/user-guide/bundle.mjs",
+    "pretest:run": "node scripts/bundle-content.mjs",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "quality:check": "npm run lint && npm run typecheck && CI=true npm run test:run && npm run build",
     "quality:check:fast": "npm run lint && npm run typecheck && npm run check:auth-fetch",
     "check:auth-fetch": "! grep -rn --include='*.ts' --include='*.tsx' 'fetch(`/api/proxy' src/hooks/ src/components/ src/app/ 2>/dev/null | grep -v fetchWithAuth | grep -v '//.*fetch' | grep -v '.test.' | grep .",
-    "seed": "node src/scripts/seed-skills.mjs"
+    "seed": "node src/scripts/seed-skills.mjs",
+    "postinstall": "node scripts/patch-legacy-zod.mjs"
   },
   "dependencies": {
+    "@a2ui/markdown-it": "0.1.0",
     "@a2ui/react": "^0.10.2",
+    "@a2ui/web_core": "^0.10.5",
     "@ag-ui/client": "1.0.3",
     "@ag-ui/core": "1.0.3",
     "@google-cloud/firestore": "^7.10.0",
@@ -48,6 +53,7 @@
     "lowlight": "^3.3.0",
     "lucide-react": "^0.400.0",
     "next": "^15.5.28",
+    "next-intl": "^4.14.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^9.0.0",
@@ -56,8 +62,7 @@
     "remark-gfm": "^4.0.0",
     "remark-math": "^6.0.0",
     "tailwind-merge": "^2.0.0",
-    "@a2ui/web_core": "^0.10.5",
-    "@a2ui/markdown-it": "0.1.0"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.0.0",
@@ -75,9 +80,9 @@
     "jsdom": "^29.0.2",
     "postcss": "^8.5.23",
     "tailwindcss": "^3.4.0",
+    "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.4.0",
-    "vitest": "^4.1.12",
-    "tailwindcss-animate": "^1.0.7"
+    "vitest": "^4.1.12"
   },
   "overrides": {
     "katex": "$katex",
@@ -88,12 +93,12 @@
     "baseline-browser-mapping": "^2.11.0",
     "browserslist": "^4.28.7",
     "dompurify": "$dompurify",
-    "fast-uri": "^3.1.7",
+    "fast-uri": "^3.1.9",
     "fast-xml-builder": "^1.2.0",
     "fast-xml-parser": "^5.10.1",
     "form-data": "^4.0.6",
     "hono": "^4.13.11",
-    "ip-address": "^10.4.0",
+    "ip-address": "^10.7.4",
     "js-yaml": "^4.3.2",
     "linkify-it": "^5.0.2",
     "markdown-it": "^14.3.3",
@@ -105,10 +110,14 @@
     "proxy-addr": "^2.0.8",
     "sharp": "^0.35.5",
     "source-map-js": "^1.2.2",
-    "undici": "^7.29.0",
+    "undici": "^7.30.1",
     "uuid": "^11.1.1",
     "vite": "^8.3.5",
     "websocket-driver": "^0.7.5",
-    "body-parser": "^2.3.0"
+    "body-parser": "^2.4.0",
+    "zod@>=4": "^4.6.6"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

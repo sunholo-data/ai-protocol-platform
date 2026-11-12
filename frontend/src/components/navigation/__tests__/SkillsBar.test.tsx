@@ -11,9 +11,11 @@ vi.mock("next/navigation", () => ({
 
 // SkillsBar now renders <UserMenu>, which calls useAuth — stub it so the bar
 // renders without a real AuthProvider.
+vi.mock("@/hooks/useAdminScope", () => ({ useAdminScope: () => ({ isAdmin: false }) }));
+
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
-    user: null,
+    user: { displayName: "Ada", email: "ada@example.com", photoURL: null },
     loading: false,
     signIn: vi.fn(),
     signOut: vi.fn(),
@@ -79,7 +81,7 @@ describe("SkillsBar", () => {
     );
 
     // The switcher trigger shows the active skill.
-    const trigger = screen.getByLabelText("Switch skill");
+    const trigger = screen.getByRole("button", { name: /switch skill/i });
     expect(trigger).toHaveTextContent("Writer");
   });
 
@@ -108,10 +110,10 @@ describe("SkillsBar", () => {
         onNewConversation={() => {}}
       />,
     );
-    expect(screen.getByText(/no skills yet/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create your first skill/i })).toBeInTheDocument();
   });
 
-  it("calls onCreateClick when the create button is pressed", async () => {
+  it("calls onCreateClick from the empty state", async () => {
     const handleCreate = vi.fn();
     render(
       <SkillsBar
@@ -123,11 +125,11 @@ describe("SkillsBar", () => {
         onNewConversation={() => {}}
       />,
     );
-    await userEvent.click(screen.getByLabelText(/create a new skill/i));
+    await userEvent.click(screen.getByRole("button", { name: /create your first skill/i }));
     expect(handleCreate).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onConfigureClick when the config gear is pressed (active skill present)", async () => {
+  it("offers Edit and Create at the foot of the skill picker", async () => {
     const handleConfigure = vi.fn();
     const skills = [makeSkill({ skillId: "s1", displayName: "Research" })];
     render(
@@ -140,8 +142,11 @@ describe("SkillsBar", () => {
         onNewConversation={() => {}}
       />,
     );
-    await userEvent.click(screen.getByLabelText(/configure this skill/i));
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
+    await userEvent.click(screen.getByRole("button", { name: /edit the research skill/i }));
     expect(handleConfigure).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("button", { name: /switch skill/i }));
+    expect(screen.getByRole("button", { name: /create a skill/i })).toBeInTheDocument();
   });
 
   it("calls onNewConversation when the New chat button is pressed", async () => {

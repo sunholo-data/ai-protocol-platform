@@ -100,7 +100,27 @@ def list_folders(user_id: str) -> list[dict[str, Any]]:
     return results
 
 
-def list_folder_documents(user_id: str, folder_id: str) -> list[dict[str, Any]]:
+# What a folder listing shows (useDocBrowser's mapApiDocument, the Add documents
+# picker). Never `blocks` (up to ~700 KB each), `editedBlocks` or
+# `sourceMarkdown`: one folder of 11 documents used to be a 2.2 MB response.
+LISTING_FIELDS = [
+    "originalFilename",
+    "source",
+    "sourceFormat",
+    "parseStatus",
+    "parseError",
+    "status",
+    "folderId",
+    "userId",
+    "blockCount",
+    "a2uiComponents",
+    "createdAt",
+    "updatedAt",
+    "projectIds",
+]
+
+
+def list_folder_documents(user_id: str, folder_id: str, *, fields: list[str] | None = None) -> list[dict[str, Any]]:
     """Documents in one of the user's folders, newest first.
 
     This used to stream `users/{uid}/folders/{fid}/documents` — a subcollection
@@ -114,10 +134,14 @@ def list_folder_documents(user_id: str, folder_id: str) -> list[dict[str, Any]]:
     equality-only conjunction from single-field indexes, so this needs no
     composite index (the dedup query in `ingest.py` relies on the same shape).
     Sorting therefore happens here, not in the query.
+
+    ``fields``: only these (plus ``createdAt``, for the order) — a caller that
+    needs ids must not pull every document's parsed blocks.
     """
     docs = query_documents(
         _DOCS_COLLECTION,
         filters=[("userId", "==", user_id), ("folderId", "==", folder_id)],
+        select=None if fields is None else sorted({*fields, "createdAt"}),
     )
     for data in docs:
         # `query_documents` returns the id as `__id`; callers and the API
@@ -129,7 +153,11 @@ def list_folder_documents(user_id: str, folder_id: str) -> list[dict[str, Any]]:
 
 def count_folder_documents(user_id: str, folder_id: str) -> int:
     """Documents actually in the folder (the `docCount` counter can drift)."""
-    return len(query_documents(_DOCS_COLLECTION, filters=[("userId", "==", user_id), ("folderId", "==", folder_id)]))
+    return len(
+        query_documents(
+            _DOCS_COLLECTION, filters=[("userId", "==", user_id), ("folderId", "==", folder_id)], select=["__name__"]
+        )
+    )
 
 
 def find_folder_by_name(user_id: str, name: str) -> dict[str, Any] | None:
@@ -143,6 +171,30 @@ def find_folder_by_name(user_id: str, name: str) -> dict[str, Any] | None:
 
 def rename_folder(user_id: str, folder_id: str, name: str) -> None:
     _folders_ref(user_id).document(folder_id).update({"name": name})
+
+
+def subfolders(user_id: str, name: str) -> list[dict[str, Any]]:
+    """The folders under `name`: those called `name/...` (case-insensitive).
+
+    Folders are flat, so a folder upload's subfolder `Reports/2026` is just a
+    folder whose name starts with `Reports/`.
+    """
+    prefix = (name or "").strip().casefold() + "/"
+    return [f for f in list_folders(user_id) if str(f.get("name") or "").strip().casefold().startswith(prefix)]
+
+
+def rename_folders(user_id: str, names: dict[str, str]) -> None:
+    """Rename several folders (a folder and its subfolders) as one batch.
+
+    One batch holds 500 writes; a rename larger than that is split, which is
+    only reachable with folder trees far beyond what an upload creates.
+    """
+    items = list(names.items())
+    for start in range(0, len(items), 400):
+        batch = get_client().batch()
+        for folder_id, name in items[start : start + 400]:
+            batch.update(_folders_ref(user_id).document(folder_id), {"name": name})
+        batch.commit()
 
 
 def delete_folder(user_id: str, folder_id: str) -> None:

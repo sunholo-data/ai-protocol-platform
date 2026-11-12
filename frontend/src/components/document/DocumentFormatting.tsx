@@ -176,8 +176,8 @@ export function DocumentFormatting({
 
   return (
     <div className="flex flex-col gap-2 px-3 py-2">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Formatting</p>
-      <p className="text-[10px] leading-snug text-muted-foreground">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Formatting</p>
+      <p className="text-[11px] leading-snug text-muted-foreground">
         Re-render this document using another document&apos;s look — its fonts, colours, heading
         styles, headers and footers. The words stay the same.
       </p>
@@ -186,7 +186,7 @@ export function DocumentFormatting({
           Without this the panel could only ever describe an intention, never a
           state — so there was no way to tell an applied template from a
           forgotten one. */}
-      <p className="text-[10px] leading-snug" data-testid="current-template">
+      <p className="text-[11px] leading-snug" data-testid="current-template">
         {currentTemplate ? (
           !currentTemplate.filename ? (
             // Styled before the template's name was recorded. Saying "no
@@ -240,7 +240,7 @@ export function DocumentFormatting({
             const file = e.target.files?.[0];
             if (file) void handleUploadTemplate(file);
           }}
-          className="min-w-0 flex-1 text-[10px] file:mr-2 file:rounded file:border-0 file:bg-accent file:px-1.5 file:py-0.5 file:text-[10px]"
+          className="min-w-0 flex-1 text-[11px] file:mr-2 file:rounded file:border-0 file:bg-accent file:px-1.5 file:py-0.5 file:text-[11px]"
         />
       </label>
 
@@ -249,7 +249,7 @@ export function DocumentFormatting({
           is needed for the common case of "make it look like this". Folded away
           with an explanation of what they actually do. */}
       <details className="text-[11px]">
-        <summary className="cursor-pointer text-[10px] text-muted-foreground hover:text-foreground">
+        <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
           More options
         </summary>
         <div className="mt-1.5 flex flex-col gap-1.5 border-l pl-2">
@@ -265,7 +265,7 @@ export function DocumentFormatting({
                 disabled={!template}
                 className="w-full rounded border bg-background px-1 py-0.5 text-[11px] disabled:opacity-50"
               />
-              <span className="mt-0.5 block text-[10px] text-muted-foreground">
+              <span className="mt-0.5 block text-[11px] text-muted-foreground">
                 Name of a table style in the template to use for this document&apos;s tables. Leave
                 blank to use the template&apos;s default.
               </span>
@@ -285,7 +285,7 @@ export function DocumentFormatting({
                 disabled={!template}
                 className="w-20 rounded border bg-background px-1 py-0.5 text-[11px] disabled:opacity-50"
               />
-              <span className="mt-0.5 block text-[10px] text-muted-foreground">
+              <span className="mt-0.5 block text-[11px] text-muted-foreground">
                 Which part of the template supplies the margins, headers and footers. Most templates
                 have one — leave blank.
               </span>
@@ -304,7 +304,7 @@ export function DocumentFormatting({
           {busy ? "Applying…" : "Apply formatting"}
         </button>
         {outcome && !error && (
-          <span className="text-[10px] text-emerald-600" role="status">
+          <span className="text-[11px] text-emerald-600" role="status">
             {outcome.templateUsed
               ? outcome.referenceDocApplied
                 ? `Applied ${outcome.templateUsed} — ${outcome.templatePartsCarried ?? 0} parts carried`
@@ -315,7 +315,7 @@ export function DocumentFormatting({
       </div>
 
       {error && (
-        <p className="text-[10px] text-destructive" role="alert">
+        <p className="text-[11px] text-destructive" role="alert">
           {error}
         </p>
       )}

@@ -9,7 +9,7 @@ import { addDocumentsToProject, createProject, useProjects, type ProjectSummary 
 import { NewProjectInline } from "./NewProjectInline";
 
 /** How many projects the sidebar lists before "See all". */
-export const SIDEBAR_PROJECT_LIMIT = 8;
+export const SIDEBAR_PROJECT_LIMIT = 3;
 
 /** How long a success line stays under a project row. Errors stay until dismissed. */
 const FEEDBACK_MS = 4000;
@@ -109,7 +109,7 @@ export function ProjectsSection({
               href="/projects"
               className="rounded px-1 py-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
-              See all ({projects.length})
+              All projects ({projects.length})
             </Link>
           )}
         </div>
@@ -177,16 +177,11 @@ function ProjectRow({ project, href, active }: { project: ProjectSummary; href: 
         <Link
           href={href}
           aria-current={active ? "page" : undefined}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-2 py-1.5 text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          title={`${project.name} · ${project.docCount} document${project.docCount === 1 ? "" : "s"}`}
+          className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2 rounded px-2 text-sm hover:bg-background/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:min-h-[32px]"
         >
           <FolderKanban className="h-3.5 w-3.5 shrink-0 text-primary/80" aria-hidden />
-          <span className="min-w-0 flex-1 truncate font-medium text-foreground">{project.name}</span>
-          <span
-            className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-            title={`${project.docCount} document${project.docCount === 1 ? "" : "s"}`}
-          >
-            {project.docCount}
-          </span>
+          <span className="min-w-0 flex-1 truncate text-foreground">{project.name}</span>
         </Link>
         <Link
           href={`/projects/${encodeURIComponent(project.id)}`}
@@ -198,17 +193,17 @@ function ProjectRow({ project, href, active }: { project: ProjectSummary; href: 
         </Link>
       </div>
       {feedback?.kind === "pending" && (
-        <p role="status" className="px-2 pb-1 text-[10px] leading-tight text-muted-foreground">
+        <p role="status" className="px-2 pb-1 text-[11px] leading-tight text-muted-foreground">
           Adding {docLabel(feedback.doc)}…
         </p>
       )}
       {(feedback?.kind === "added" || feedback?.kind === "already") && (
-        <p role="status" className="px-2 pb-1 text-[10px] leading-tight text-emerald-700 dark:text-emerald-400">
+        <p role="status" className="px-2 pb-1 text-[11px] leading-tight text-emerald-700 dark:text-emerald-400">
           {feedback.kind === "added" ? `Added to ${project.name}` : `Already in ${project.name}`}
         </p>
       )}
       {feedback?.kind === "error" && (
-        <div role="alert" className="flex items-start gap-2 px-2 pb-1 text-[10px] leading-tight text-destructive">
+        <div role="alert" className="flex items-start gap-2 px-2 pb-1 text-[11px] leading-tight text-destructive">
           <span className="flex-1">{feedback.message}</span>
           <button type="button" onClick={() => void add(feedback.doc)} className="shrink-0 hover:underline">
             Retry

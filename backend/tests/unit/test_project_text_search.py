@@ -106,12 +106,32 @@ def test_missing_input_or_project_is_visible(world, monkeypatch):
 
 def test_search_result_and_empty_result_have_registered_ui(world):
     from adk.a2ui_result_render import is_render_payload_tool, render_for_emit
-    from adk.project_tools import project_function_tools
+    from adk.project_tools import project_tool_names
 
-    assert search.TOOL_NAME in {t.name for t in project_function_tools()}
+    assert search.TOOL_NAME in project_tool_names()
     assert is_render_payload_tool(search.TOOL_NAME)
     out = asyncio.run(search.grep_project_documents(["cure"], tool_context=context()))
     surface = render_for_emit(search.TOOL_NAME, out)
     assert surface is not None and surface.artifact["kind"] == "sources"
     empty = project_text_matches_to_a2ui({"status": "ok", "message": "No matching passages", "results": []})
     assert "No matching passages" in json.dumps(empty)
+
+
+def test_the_tool_is_offered_only_inside_a_project_chat(world, monkeypatch):
+    """Outside a project the tool can only refuse, and a model that sees it calls
+    it anyway (a news skill rendered the refusal as a card). Not offered at all."""
+    from adk.project_tools import project_function_tools
+
+    (toolset,) = [t for t in project_function_tools() if isinstance(t, search.ProjectTextSearchToolset)]
+    assert search.TOOL_NAME not in {getattr(t, "name", None) for t in project_function_tools()}
+    monkeypatch.setattr(search, "current_project", lambda ctx: None)
+    assert asyncio.run(toolset.get_tools(context())) == []
+    assert asyncio.run(toolset.get_tools(None)) == []
+    monkeypatch.setattr(search, "current_project", lambda ctx: {"id": "p1", "name": "Client A"})
+    assert [t.name for t in asyncio.run(toolset.get_tools(context()))] == [search.TOOL_NAME]
+
+    def boom(ctx):
+        raise RuntimeError("firestore down")
+
+    monkeypatch.setattr(search, "current_project", boom)
+    assert asyncio.run(toolset.get_tools(context())) == []  # fails closed, never raises

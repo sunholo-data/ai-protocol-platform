@@ -105,11 +105,14 @@ class TestResolveMcpTools:
             "tools.mcp.registry.get_mcp_tools_with_status",
             return_value=([fake_a, fake_b], []),
         ) as mock:
-            result = resolve_mcp_tools({"mcp": {"servers": ["srv-1", "srv-2"]}}, "alice@example.com", "example.com")
+            result = resolve_mcp_tools(
+                {"mcp": {"servers": ["srv-1", "srv-2"]}}, "alice@example.com", "example.com", frozenset({"staff"})
+            )
 
         # The identity rides along: a per-user MCP server gates on email and
         # domain, and ADK's user_id is the Firebase UID, which matches nothing.
-        mock.assert_called_once_with(["srv-1", "srv-2"], "alice@example.com", "example.com")
+        # Group tags too, for servers whose access follows the platform's rules.
+        mock.assert_called_once_with(["srv-1", "srv-2"], "alice@example.com", "example.com", frozenset({"staff"}))
         assert result == [fake_a, fake_b]
 
     def test_g42_raises_when_some_declared_servers_dont_resolve(self):

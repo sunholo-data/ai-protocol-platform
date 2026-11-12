@@ -518,3 +518,88 @@ class TestTellsExtensions:
             event = stack.enter_context(patch("tools.documents.ingest.document_event"))
             result = await _ingest()
         event.assert_called_once_with("upserted", {"uid": "user123", "doc_id": result.doc_id, "folder_id": "folder1"})
+
+
+class TestUploadIntoProject:
+    """An upload from a project's page is added to the project in the same
+    request — so an aborted folder upload leaves every finished file in it."""
+
+    @pytest.mark.asyncio
+    async def test_tagged_before_the_one_upserted_event(self):
+        from contextlib import ExitStack
+        from unittest.mock import MagicMock
+
+        calls = MagicMock()
+        calls.tag.return_value = {"added": ["x"], "failed": []}
+        with ExitStack() as stack:
+            for p in _patches():
+                stack.enter_context(p)
+            stack.enter_context(patch("db.projects.tag_documents", side_effect=calls.tag))
+            stack.enter_context(patch("tools.documents.ingest.document_event", side_effect=calls.event))
+            result = await _ingest(project_id="p1")
+        assert result.project_error is None
+        # Tagging first, without its own event: the datastore refuses a second
+        # import of the same document in the same second ("Too frequent update").
+        assert [c[0] for c in calls.mock_calls] == ["tag", "event"]
+        assert calls.tag.call_args.args == ("user123", "p1", [result.doc_id])
+        assert calls.tag.call_args.kwargs == {"announce": False}
+
+    @pytest.mark.asyncio
+    async def test_not_added_is_reported_but_the_upload_stands(self):
+        from contextlib import ExitStack
+
+        failed = {"failed": [{"id": "x", "filename": "report.docx", "reason": "Already in 20 projects."}]}
+        with ExitStack() as stack:
+            for p in _patches():
+                stack.enter_context(p)
+            stack.enter_context(patch("db.projects.tag_documents", return_value=failed))
+            result = await _ingest(project_id="p1")
+        assert result.status == "parsed"
+        assert result.project_error == "Already in 20 projects."
+
+    @pytest.mark.asyncio
+    async def test_tagging_crash_never_fails_the_upload(self):
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            for p in _patches():
+                stack.enter_context(p)
+            stack.enter_context(patch("db.projects.tag_documents", side_effect=RuntimeError("firestore down")))
+            result = await _ingest(project_id="p1")
+        assert result.doc_id
+        assert result.project_error == "Could not be added to the project. Try again."
+
+    @pytest.mark.asyncio
+    async def test_unchanged_reupload_still_joins_the_project(self):
+        import hashlib
+        from contextlib import ExitStack
+
+        existing = [
+            {
+                "__id": "doc-1",
+                "parseStatus": "parsed",
+                "originalFilename": "report.docx",
+                "folderId": "folder1",
+                "contentSha256": hashlib.sha256(b"fake content").hexdigest(),
+            }
+        ]
+        with ExitStack() as stack:
+            for p in _patches(existing=existing):
+                stack.enter_context(p)
+            tag = stack.enter_context(patch("db.projects.tag_documents", return_value={"failed": []}))
+            result = await _ingest(skip_unchanged=True, project_id="p1")
+        assert result.unchanged is True
+        # No upserted event on this path, so tagging announces its own change.
+        tag.assert_called_once_with("user123", "p1", ["doc-1"], announce=True)
+
+    @pytest.mark.asyncio
+    async def test_no_project_no_tagging(self):
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            for p in _patches():
+                stack.enter_context(p)
+            tag = stack.enter_context(patch("db.projects.tag_documents"))
+            result = await _ingest()
+        tag.assert_not_called()
+        assert result.project_error is None

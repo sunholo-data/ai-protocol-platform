@@ -26,6 +26,7 @@ import yaml
 
 from config.local_mode import is_local_mode
 from db import firestore as fs
+from i18n import validate_locales_block
 from skills import skill_config
 from skills.platform import PLATFORM_OWNER_UID
 from skills.slugify import slugify, unique_slug
@@ -270,6 +271,14 @@ def _parse_template(skill_md: Path) -> dict[str, Any]:
     if "name" not in front:
         raise ValueError(f"frontmatter missing 'name' in {skill_md}")
 
+    # v6.43.0 MULTI-LANG M3: per-locale display_name / description /
+    # initial_message. A malformed block fails this template loudly (it lands in
+    # SeedSummary.failed) rather than seeding a skill with translations missing.
+    try:
+        locales = validate_locales_block(front.get("locales"))
+    except ValueError as e:
+        raise ValueError(f"{e} in {skill_md}") from e
+
     # v6.4.0 4.5 SKILL-ONBOARDING: extract welcome + access_control + initial_message
     # + tags from frontmatter so SKILL.md becomes the source of truth for these
     # fields (previously hardcoded to access_control={type: public} in the create
@@ -289,6 +298,7 @@ def _parse_template(skill_md: Path) -> dict[str, Any]:
         "display_name": front.get("display_name") or front.get("displayName") or "",
         "tags": front.get("tags") or [],
         "avatar": front.get("avatar") or "",
+        "locales": locales,
     }
 
 
@@ -464,6 +474,10 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
     existing_by_name = _existing_platform_skill_by_name()
     include_demos = _include_demo_skills()
     fork_skipped = _fork_skipped_skills(root)
+    # Every template this run does NOT seed, under both its directory and its
+    # declared name. The post-seed MCP gate ignores these: a skill that isn't
+    # seeded can't hard-500, whatever the reason it was left out.
+    not_seeded: set[str] = set()
 
     for child in sorted(root.iterdir()):
         if not child.is_dir():
@@ -477,6 +491,7 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
                 child.name,
             )
             summary.skipped += 1
+            not_seeded.add(child.name)
             continue
 
         try:
@@ -491,11 +506,13 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
             logger.warning("platform_seed: skipping %s: %s", parsed["name"], e)
             summary.skipped += 1
             summary.notes.append(f"{parsed['name']}: skipped — {e}")
+            not_seeded.update({child.name, parsed["name"]})
             continue
 
         disabled = _disabled_provider(parsed["metadata"])
         by_fork = child.name in fork_skipped or parsed["name"] in fork_skipped
         if disabled or by_fork:
+            not_seeded.update({child.name, parsed["name"]})
             if by_fork:
                 logger.info("platform_seed: skipping %r — listed in %s", parsed["name"], FORK_SKIP_FILE)
                 summary.skipped_by_fork.append(parsed["name"])
@@ -554,6 +571,10 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
                 refresh_payload["accessControl"] = declared_access
             if parsed.get("initial_message"):
                 refresh_payload["initialMessage"] = parsed["initial_message"]
+            # Always pushed, even when empty: SKILL.md is the source of truth for a
+            # template skill, so a translation removed from disk leaves the live
+            # skill too (the base text it fell back from is already on disk).
+            refresh_payload["locales"] = parsed.get("locales") or {}
             if parsed.get("display_name"):
                 refresh_payload["displayName"] = parsed["display_name"]
             if parsed.get("tags"):
@@ -609,6 +630,8 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
                 create_kwargs["shell"] = parsed["shell"]
             if parsed.get("initial_message"):
                 create_kwargs["initialMessage"] = parsed["initial_message"]
+            if parsed.get("locales"):
+                create_kwargs["locales"] = parsed["locales"]
             if parsed.get("display_name"):
                 create_kwargs["displayName"] = parsed["display_name"]
             if parsed.get("tags"):
@@ -632,10 +655,12 @@ def seed(templates_root: Path | None = None, dry_run: bool = False) -> SeedSumma
         from admin.mcp_registry_check import verify_mcp_registry
 
         check = verify_mcp_registry(root)
-        # A skill the fork doesn't seed can't hard-500 — don't gate on it.
-        summary.mcp_missing = [
-            m for m in check["mcp_missing"] if m.split(" -> ", 1)[0] not in set(summary.skipped_by_fork)
-        ]
+        # A skill this run doesn't seed can't hard-500 — don't gate on it. That
+        # is every skip, not only .fork-skip: demo skills left out by
+        # _INCLUDE_DEMO_SKILLS=false used to fail a fork's deploy here (the
+        # demo check runs before the fork-skip one, so they were never listed
+        # as skipped_by_fork), as did skills pinned to a disabled provider.
+        summary.mcp_missing = [m for m in check["mcp_missing"] if m.split(" -> ", 1)[0] not in not_seeded]
         summary.mcp_warnings = check["mcp_warnings"]
         if summary.mcp_missing:
             logger.error(

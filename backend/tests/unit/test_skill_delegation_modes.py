@@ -184,6 +184,73 @@ def test_delegate_resolved_by_slug_when_docid_is_uuid():
     fbs.assert_called()  # the fallback path was exercised
 
 
+def test_user_owned_copy_resolves_platform_delegate_slugs():
+    """A user's copy of a platform door (Studio Fork, or an admin-made per-user
+    variant) keeps the door's `allow` slugs, which name PLATFORM specialists.
+    Resolving them only in the copy owner's namespace silently wired zero
+    delegates — every fork of demo-assistant lost all its specialists
+    (2026-11-05). The slug must fall back to the platform namespace."""
+    from skills.platform import PLATFORM_OWNER_UID
+
+    parent = _skill(skill_id="my-copy", delegation=_deleg(["demo-ppa-expert"], mode="auto"))
+    parent.owner_id = "u1"
+    child = _skill(skill_id="2c031269-uuid-not-the-slug", display_name="PPA")
+    child.owner_id = PLATFORM_OWNER_UID
+    by_ns = {(PLATFORM_OWNER_UID, "demo-ppa-expert"): child}
+    with (
+        patch("adk.agent.get_skill", return_value=None),
+        patch("adk.agent.find_by_slug", side_effect=lambda ns, ref: by_ns.get((ns, ref))) as fbs,
+        patch("adk.agent.prime_refs"),
+    ):
+        agent = create_agent(parent, _user(), access_context=_ctx())
+    assert len(agent.sub_agents) == 1
+    namespaces = [c.args[0] for c in fbs.call_args_list]
+    assert namespaces.index("u1") < namespaces.index(PLATFORM_OWNER_UID)  # owner first
+
+
+def test_user_namespace_slug_shadows_platform_slug():
+    """Owner namespace wins: a user's own skill with the same slug is the one wired."""
+    from adk.agent import _resolve_delegate_skill
+    from skills.platform import PLATFORM_OWNER_UID
+
+    mine = _skill(skill_id="mine")
+    platform = _skill(skill_id="platform")
+    by_ns = {("u1", "helper"): mine, (PLATFORM_OWNER_UID, "helper"): platform}
+    with (
+        patch("adk.agent.get_skill", return_value=None),
+        patch("adk.agent.find_by_slug", side_effect=lambda ns, ref: by_ns.get((ns, ref))),
+    ):
+        assert _resolve_delegate_skill("helper", "u1").skill_id == "mine"
+        assert _resolve_delegate_skill("helper", PLATFORM_OWNER_UID).skill_id == "platform"
+
+
+def test_platform_parent_does_not_search_a_user_namespace():
+    from adk.agent import _delegate_namespaces
+    from skills.platform import PLATFORM_OWNER_UID
+
+    assert _delegate_namespaces(PLATFORM_OWNER_UID) == [PLATFORM_OWNER_UID]
+    assert _delegate_namespaces("") == [PLATFORM_OWNER_UID]
+    assert _delegate_namespaces("u1") == ["u1", PLATFORM_OWNER_UID]
+
+
+def test_platform_delegate_still_access_filtered_for_user_copy():
+    """The platform fallback widens nothing: an inaccessible platform specialist
+    is still dropped (deny-by-default)."""
+    from skills.platform import PLATFORM_OWNER_UID
+
+    parent = _skill(skill_id="my-copy", delegation=_deleg(["secret-specialist"], mode="auto"))
+    parent.owner_id = "u1"
+    child = _skill(skill_id="secret-uuid", access=AccessControl(type="tagged", tags=["nobody-has-this"]))
+    child.owner_id = PLATFORM_OWNER_UID
+    with (
+        patch("adk.agent.get_skill", return_value=None),
+        patch("adk.agent.find_by_slug", side_effect=lambda ns, ref: child if ns == PLATFORM_OWNER_UID else None),
+        patch("adk.agent.prime_refs"),
+    ):
+        agent = create_agent(parent, _user(), access_context=_ctx())
+    assert agent.sub_agents == []
+
+
 # --- graceful degradation --------------------------------------------------
 
 
@@ -292,3 +359,46 @@ def test_root_before_agent_emits_no_delegation():
     finally:
         timing.reset_current_tracker(token)
     assert timing.DELEGATION_EVENT_NAME not in [e.name for e in events]
+
+
+# --- channels (no clickable UI): confirm floors get the REAL delegate -------
+
+
+def test_channel_turn_builds_the_real_confirm_delegate():
+    """Live 2026-10-27: a text-confirmed handoff on Discord transferred into the
+    STUB (no instruction, no tools, the door's model), which then claimed to
+    have saved a document it never created."""
+    from adk.elicitation import NON_INTERACTIVE
+
+    parent = _skill(
+        skill_id="parent",
+        model="gemini-2.5-flash-lite",
+        delegation=DelegationConfig(enabled=True, allow=[{"skill": "child", "floor": "confirm"}]),
+    )
+    child = _skill(skill_id="child", display_name="Document Writer", model="gemini-2.5-pro")
+    with patch("adk.agent.get_skill", return_value=child):
+        web = create_agent(parent, _user(), access_context=_ctx())
+        token = NON_INTERACTIVE.set(True)
+        try:
+            channel = create_agent(parent, _user(), access_context=_ctx())
+        finally:
+            NON_INTERACTIVE.reset(token)
+    assert not web.sub_agents[0].instruction  # web: the stub (never executed)
+    real = channel.sub_agents[0]
+    assert real.instruction  # channel: the specialist itself
+    assert real.name == web.sub_agents[0].name  # same transfer target name
+    assert channel.before_tool_callback is not None  # the floor still gates it
+
+
+def test_agent_cache_separates_web_and_channel_builds():
+    from adk import agent_cache
+    from adk.elicitation import NON_INTERACTIVE
+
+    skill = _skill(skill_id="door")
+    web_key = agent_cache._key(skill, _ctx())
+    token = NON_INTERACTIVE.set(True)
+    try:
+        channel_key = agent_cache._key(skill, _ctx())
+    finally:
+        NON_INTERACTIVE.reset(token)
+    assert web_key != channel_key

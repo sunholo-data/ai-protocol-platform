@@ -251,6 +251,16 @@ def build_agui_adk_agent(
     }
     if user_id is not None:
         kwargs["user_id"] = user_id
+    from adk.thread_sessions import NativeThreadSessionManager, uses_vertex_sessions
+
+    if uses_vertex_sessions(kwargs["session_service"]):
+        kwargs["session_manager"] = NativeThreadSessionManager(
+            session_service=kwargs.pop("session_service"),
+            memory_service=kwargs["memory_service"],
+            use_thread_id_as_session_id=True,
+            delete_session_on_cleanup=False,
+            session_timeout_seconds=86400,
+        )
     # NOTE: every session knob above must stay passed EXPLICITLY. `from_app`
     # re-declares them with ag_ui_adk's own hostile defaults
     # (delete_session_on_cleanup=True, session_timeout_seconds=1200,
@@ -481,4 +491,13 @@ async def stream_agui_events(
             try:
                 await drain_pending_session_writes()
             finally:
-                memo.__exit__(None, None, None)
+                try:
+                    from adk.thread_sessions import NativeThreadSessionManager
+
+                    manager = getattr(agui_agent, "_session_manager", None)
+                    if isinstance(manager, NativeThreadSessionManager):
+                        # This manager belongs to one request. Its background
+                        # sweeper otherwise retains the whole request for days.
+                        await manager.stop_cleanup_task()
+                finally:
+                    memo.__exit__(None, None, None)

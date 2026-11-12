@@ -1,21 +1,27 @@
 import type { Metadata, Viewport } from "next";
-import { Montserrat } from "next/font/google";
+import localFont from "next/font/local";
 import { AppUpdater } from "@/components/AppUpdater";
 import { LocalModeBanner } from "@/components/LocalModeBanner";
 import { BRANDING } from "@/lib/branding";
+import { LOCALE_CONFIG } from "@/i18n/locale";
 import { AppProviders } from "@/providers/AppProviders";
 import "./globals.css";
+import { OfflineBanner } from "@/components/OfflineBanner";
 
 /* The template's typeface (the Sunholo brand: Montserrat 400 for reading, 700
-   for headings, 500–600 for labels). next/font downloads it at BUILD time and
-   serves it from this origin — no runtime request to Google, no layout shift.
+   for headings, 500–600 for labels). The font file is in the repo
+   (src/app/fonts, OFL) and served from this origin: no request to Google at
+   build or run time. next/font/google fetched it during the build, and crashed
+   the build whenever Google served a font URL without a file extension.
    Tailwind's `font-sans` reads --font-sans; a fork theme can still override
    font-family on body. */
-const sans = Montserrat({
-  subsets: ["latin", "latin-ext"],
-  weight: ["400", "500", "600", "700"],
+const sans = localFont({
+  src: "./fonts/montserrat-wght.woff2",
+  weight: "400 700",
+  style: "normal",
   display: "swap",
   variable: "--font-sans",
+  fallback: ["Segoe UI", "system-ui", "sans-serif"],
 });
 
 export const metadata: Metadata = {
@@ -48,7 +54,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={sans.variable}>
+    <html lang={LOCALE_CONFIG.defaultLocale} className={sans.variable}>
       {BRANDING.themeStylesheet ? (
         <head>
           {/* Fork theme hook — see BRANDING.themeStylesheet. */}
@@ -78,6 +84,7 @@ export default function RootLayout({
       <body className="font-sans bg-background text-foreground h-dvh flex flex-col antialiased">
         <AppUpdater />
         <LocalModeBanner />
+        <OfflineBanner />
         <div className="flex min-h-0 flex-1 flex-col">
           <AppProviders>{children}</AppProviders>
         </div>

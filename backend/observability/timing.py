@@ -79,6 +79,11 @@ STAGE_RUNNER_SETUP_DONE = "runner_setup_done"
 STAGE_BEFORE_AGENT_DONE = "before_agent_done"
 STAGE_BEFORE_MODEL_DONE = "before_model_done"
 STAGE_FIRST_MODEL_TOKEN = "first_model_token"
+# First visible model output of ANY kind — answer text or a tool call — marked by
+# ResilientLlm. ``first_model_token`` is the first TEXT on the wire, so on a
+# tool-using turn it includes every tool round-trip; this is the model's own
+# time-to-first-token for the turn. Compare models on this, not on ttft_ms.
+STAGE_FIRST_MODEL_OUTPUT = "first_model_output"
 STAGE_FIRST_AGUI_EVENT = "first_agui_event"
 STAGE_FIRST_SSE_BYTE = "first_sse_byte"
 STAGE_TOOL_CALL_STARTED = "tool_call_started"
@@ -118,7 +123,10 @@ class LatencyTracker:
     __slots__ = (
         "_emitted",
         "_marks",
+        "_model_call_failures",
+        "_model_calls",
         "_model_used",
+        "_outcome",
         "_pending_stage_events",
         "_routing_choice",
         "_session_id",
@@ -147,6 +155,9 @@ class LatencyTracker:
         self._model_used: str = ""
         self._routing_choice: str = ""
         self._tools_invoked: int = 0
+        self._model_calls: int = 0
+        self._model_call_failures: list[str] = []
+        self._outcome: str = ""
         self._emitted: bool = False
 
     # --- Public API ---
@@ -237,11 +248,50 @@ class LatencyTracker:
                 except Exception as exc:
                     logger.warning("MODEL_RESOLVED enqueue failed (suppressed): %s", exc)
 
+    def note_model_answered(self, model_used: str) -> None:
+        """Re-stamp the turn with the model that actually produced output.
+
+        ``set_model`` runs once, at agent creation, with the ROOT skill's model.
+        A turn answered by a transferred specialist or a fallback member ran on
+        a different one, and the log and Activity header both named the wrong
+        model. Re-emits MODEL_RESOLVED only when the model changes.
+        """
+        if not _ENABLED or not model_used or model_used == self._model_used:
+            return
+        self.set_model(model_used, self._routing_choice)
+
     def increment_tool_invocations(self) -> None:
         """Increment the tools-invoked counter for this turn."""
         if not _ENABLED:
             return
         self._tools_invoked += 1
+
+    #: Cap on failure entries kept per turn — the per-attempt ``model_call`` log
+    #: lines carry the full detail; this list only has to make a bad turn obvious.
+    _MAX_FAILURES = 20
+
+    def record_model_call(self, *, model: str, outcome: str, code: str = "", action: str = "") -> None:
+        """Count one model attempt made for this turn (written by ResilientLlm).
+
+        An attempt that is neither ``ok`` nor ``closed`` (output delivered, then
+        the consumer stopped reading, e.g. after a transfer) is kept as ``model:code:action`` so the turn's ttft
+        line shows that a stall or retry cost it time, without joining against
+        the ``model_call`` lines.
+        """
+        if not _ENABLED:
+            return
+        self._model_calls += 1
+        if outcome not in ("ok", "closed") and len(self._model_call_failures) < self._MAX_FAILURES:
+            self._model_call_failures.append(":".join(x for x in (model, code or outcome, action) if x))
+
+    def set_outcome(self, outcome: str) -> None:
+        """Record how the run ended (``ok``, ``error:<code>``, ``empty_run``).
+
+        Left blank when the stream never reached a terminal event (the client
+        went away first)."""
+        if not _ENABLED or self._outcome:
+            return
+        self._outcome = outcome
 
     def mark_delegation(self, *, parent: str, target: str, target_display: str, mode: str, avatar: str = "") -> None:
         """Record a skill→skill delegation (auto handoff or suggest proposal).
@@ -346,6 +396,11 @@ class LatencyTracker:
         return self._tools_invoked
 
     @property
+    def skill_id(self) -> str:
+        """The skill this request serves ('' on the NULL tracker)."""
+        return self._skill_id
+
+    @property
     def session_id(self) -> str:
         """The session this request serves ('' on the NULL tracker)."""
         return self._session_id
@@ -381,6 +436,9 @@ class LatencyTracker:
             "model_used": self._model_used,
             "routing_choice": self._routing_choice,
             "tools_invoked_count": self._tools_invoked,
+            "model_calls": self._model_calls,
+            "model_call_failures": list(self._model_call_failures),
+            "run_outcome": self._outcome,
             "ttft_mode": TTFT_MODE,
             **{f"{name}_ms": round(ms, 2) for name, ms in self._marks.items()},
         }
@@ -422,9 +480,10 @@ class LatencyTracker:
             # message string is just for human readability in the local
             # dev console.
             logger.info(
-                "ttft skill=%s ttft_ms=%s total_ms=%s mode=%s",
+                "ttft skill=%s ttft_ms=%s model_ttft_ms=%s total_ms=%s mode=%s",
                 self._skill_id,
                 payload.get(f"{STAGE_FIRST_MODEL_TOKEN}_ms", "n/a"),
+                payload.get(f"{STAGE_FIRST_MODEL_OUTPUT}_ms", "n/a"),
                 payload["total_response_ms"],
                 TTFT_MODE,
                 extra={"json_fields": payload},
@@ -447,7 +506,16 @@ class _NullLatencyTracker(LatencyTracker):
     def set_model(self, model_used: str, routing_choice: str = "") -> None:
         return
 
+    def note_model_answered(self, model_used: str) -> None:
+        return
+
     def increment_tool_invocations(self) -> None:
+        return
+
+    def record_model_call(self, *, model: str, outcome: str, code: str = "", action: str = "") -> None:
+        return
+
+    def set_outcome(self, outcome: str) -> None:
         return
 
     def mark_delegation(self, *, parent: str, target: str, target_display: str, mode: str, avatar: str = "") -> None:

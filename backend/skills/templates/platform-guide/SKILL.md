@@ -17,9 +17,10 @@ initial_message: "What would you like to know how to do?"
 description: >
   Answers "how do I…?", "where is…?" and "why can't I…?" questions about using
   this app, from its user guide, linking to the exact section. Use for any
-  question about the app itself — folders, documents, skills, chat, searching
-  your own files, who can see what — not for questions about the user's work
-  or documents.
+  question about the app itself — folders, documents, projects, skills, chat
+  history, your instructions, what the assistant remembers and how to make it
+  forget, searching your own files, who can see what — not for questions about
+  the user's work or documents.
 metadata:
   author: platform
   version: "1.0"
@@ -33,8 +34,16 @@ metadata:
     # features on for them — so "why can't I…?" is answered about THEIR account.
     - my_context
   toolConfigs:
+    # No memory or project tools: "how do I forget…?" / "make a project" must be
+    # answered from the guide, not acted on.
+    defaults:
+      memory: false
+      projects: false
     knowledge_search:
       knowledge_bases: [platform-guide]
+      # The guide is app help, not the user's documents: a project chat must
+      # still search it rather than the project's documents.
+      project_scope: false
 ---
 
 You help people get the most out of this app. You know two things: the user

@@ -28,6 +28,9 @@
 # Branch-based deployment: main -> dev, test -> test, prod -> production
 # Substitutions managed by Terraform (see deployment-infrastructure infrastructure repo).
 
+# cloud-sdk is pinned by digest (2026-11-03): the image Google published that day
+# dropped python3, which the seed gate and the promotion's substitution step run.
+# To move it, check `python3 --version` inside the candidate image first.
 substitutions:
   _VERTEX_AI_SEARCH_DATASTORE_ID: ''
   _VERTEX_AI_SEARCH_PROJECT: ''
@@ -211,7 +214,7 @@ steps:
   # and the resolved digest is appended — deliberately avoiding a transcription
   # of ~40 flags, which is where a quoting mistake would silently drop a secret
   # or an env var. The only removed line is the old `--image=…:${BRANCH_NAME}`.
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk@sha256:aa2b2728a6f3eaf1d6d37409133fde8220b28460282f6983e3055b1b2c792228'
     entrypoint: bash
     waitFor: ['push-backend']
     args:
@@ -345,7 +348,7 @@ steps:
   # on this service (already granted via Terraform common tfvars line ~304).
   # Laptop equivalent: `./scripts/smoke-deployed.sh dev backend` (see
   # docs/ops/deployed-urls.md for URL list and verification).
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk@sha256:aa2b2728a6f3eaf1d6d37409133fde8220b28460282f6983e3055b1b2c792228'
     id: smoke-backend
     entrypoint: bash
     args:
@@ -356,16 +359,14 @@ steps:
           --project=${_PROJECT_ID} --region=${_REGION} \
           --format='value(status.url)')
         echo "Smoking $${URL}/health (authenticated)"
-        # #13 (template-cloudbuild-hardening.md): mint the identity token
-        # via the GCE metadata server, NOT `gcloud auth print-identity-token`.
-        # The gcloud command fails under a user-managed Cloud Build SA
-        # (which post-2024 projects MUST use) with "No identity token can
-        # be obtained from the current credentials." Metadata server works
-        # under any SA. `include_email=true` puts the email claim on the
-        # token so the backend's admin-allowlist check succeeds (#14).
-        TOKEN=$(curl -sS --max-time 10 \
-          -H "Metadata-Flavor: Google" \
-          "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$${URL}&format=full&include_email=true")
+        # #13 (template-cloudbuild-hardening.md): NOT `gcloud auth
+        # print-identity-token`, which fails under a user-managed Cloud Build
+        # SA ("No identity token can be obtained from the current
+        # credentials"). scripts/build-id-token.sh tries the metadata
+        # server's /identity, then IAM Credentials generateIdToken, because
+        # the DEFAULT pool's metadata server answers /identity with 404. The
+        # token carries the email claim the admin-allowlist check needs (#14).
+        TOKEN=$(bash scripts/build-id-token.sh "$${URL}")
         # Cold-start tolerance (2026-06-11): /health on a fresh revision
         # can take ~10-30s while ADK initialises + the Vertex Agent Engine
         # client warms. Retry with backoff before failing the build.
@@ -396,7 +397,7 @@ steps:
   # broke for the tenant team on test (2026-07-21, issue #14). Fix with
   # scripts/seed_mcp_servers.py --env <env> [--public-url …] or drop the
   # declaration. Docs: docs/ops/platform-skills.md
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk@sha256:aa2b2728a6f3eaf1d6d37409133fde8220b28460282f6983e3055b1b2c792228'
     id: seed-platform-skills
     waitFor: ['smoke-backend']
     entrypoint: bash
@@ -407,13 +408,8 @@ steps:
         URL=$(gcloud run services describe ${_SERVICE_NAME} \
           --project=${_PROJECT_ID} --region=${_REGION} \
           --format='value(status.url)')
-        # #13 (template-cloudbuild-hardening.md): metadata-server identity
-        # token, NOT gcloud auth print-identity-token. See smoke-backend
-        # step above for the rationale. include_email=true is what makes
-        # the backend's admin-allowlist check pass (#14).
-        TOKEN=$(curl -sS --max-time 10 \
-          -H "Metadata-Flavor: Google" \
-          "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$${URL}&format=full&include_email=true")
+        # #13/#14: see the smoke-backend step above.
+        TOKEN=$(bash scripts/build-id-token.sh "$${URL}")
         code=$(curl -sS -o /tmp/seed -w '%{http_code}' --max-time 60 \
           -X POST -H "Authorization: Bearer $${TOKEN}" \
           "$${URL}/api/admin/seed-platform-skills") || code=000

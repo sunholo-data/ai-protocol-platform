@@ -9,7 +9,16 @@
  *   ERROR  a platform page naming a customer: any `names:` a fork's
  *          docs/customers/<c>/user-guide/guide.yaml declares
  *   ERROR  audience not user|owner|admin
+ *   ERROR  a link to an anchor (`#x`, `other.md#x`) that the page doesn't have
  *   WARN   `reviewed` missing or older than 6 months
+ *
+ * A translation (docs/user-guide/<locale>/<slug>.md, multi-language.md §5) gets
+ * the same checks. Its bold labels are looked up in THAT locale's catalogs
+ * (frontend/messages/<locale>/ + docs/customers/<c>/messages/<locale>/) and in
+ * the source corpus, since an untranslated control still shows English. Its
+ * `#anchors` are its own headings'; a link to another page resolves in that
+ * page's translation when there is one (that is what the reader sees), else the
+ * source page.
  *
  * Bold spans that end in . : ! or ? are emphasis, not labels (a label never
  * ends a sentence), so `**Your copy is a snapshot.**` is not looked up.
@@ -19,7 +28,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { GuideError, build, parseFrontMatter } from "./bundle.mjs";
+import { GuideError, SOURCE_LOCALE, build, parseFrontMatter } from "./bundle.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const AUDIENCES = new Set(["user", "owner", "admin"]);
@@ -39,8 +48,55 @@ export function uiCorpus(srcDir = path.join(ROOT, "frontend/src")) {
     }
   };
   if (fs.existsSync(srcDir)) walk(srcDir);
+  parts.push(...catalogMessages(messageDirs(SOURCE_LOCALE)));
   parts.push(...backendLabels());
   return normalise(parts.join("\n"));
+}
+
+/** One locale's catalog folders: the template's and every fork overlay's. */
+export function messageDirs(locale, { messagesDir = path.join(ROOT, "frontend/messages"), customersDir } = {}) {
+  return [path.join(messagesDir, locale), ...customerMessageDirs(customersDir).map((d) => path.join(d, locale))];
+}
+
+/** The strings a translated page's labels may name, beyond the source corpus: that locale's catalogs. */
+export function localeCorpus(locale, opts) {
+  return normalise(catalogMessages(messageDirs(locale, opts)).join("\n"));
+}
+
+/**
+ * Labels that live in interface catalogs rather than in components
+ * (multi-language.md §8): the template's frontend/messages/<locale>/*.json and
+ * any fork overlay's docs/customers/<c>/messages/<locale>/*.json. ICU markup
+ * (`<b>…</b>`, `{name}`) stays in the string; labelFragments() already splits a
+ * guide label at its placeholders.
+ */
+export function catalogMessages(dirs = [path.join(ROOT, "frontend/messages"), ...customerMessageDirs()]) {
+  const out = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".json")) {
+        let data;
+        try {
+          data = JSON.parse(fs.readFileSync(p, "utf8"));
+        } catch {
+          continue; // scripts/i18n/bundle.mjs reports invalid catalogs
+        }
+        for (const table of Object.values(data ?? {})) {
+          if (table && typeof table === "object") for (const v of Object.values(table)) if (typeof v === "string") out.push(v);
+        }
+      }
+    }
+  };
+  for (const d of dirs) if (fs.existsSync(d)) walk(d);
+  return out;
+}
+
+function customerMessageDirs(dir) {
+  dir ??= path.join(ROOT, "docs/customers");
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).map((c) => path.join(dir, c, "messages"));
 }
 
 /** Labels the UI shows but the backend defines — tool catalog entries (`"label": "Search knowledge bases"`). */
@@ -94,7 +150,23 @@ export function boldLabels(body) {
   return out;
 }
 
-export function checkPages({ platformDir, customersDir, corpus, today = new Date() } = {}) {
+/** Links to anchors in a body: `[t](#x)` and `[t](other.md#x)`, outside code. */
+export function anchorLinks(body) {
+  const out = [];
+  let fenced = false;
+  for (const line of body.split("\n")) {
+    if (/^```/.test(line)) fenced = !fenced;
+    if (fenced) continue;
+    for (const m of line.replace(/`[^`]*`/g, "").matchAll(/\]\((?:([\w-]+)\.md)?#([^)\s]+)\)/g)) out.push({ slug: m[1] ?? "", anchor: m[2] });
+  }
+  return out;
+}
+
+/**
+ * `localeCorpus(locale)` gives a translation's extra label strings (defaults to
+ * the catalogs on disk); tests pass their own.
+ */
+export function checkPages({ platformDir, customersDir, corpus, localeCorpus: corpusFor, today = new Date() } = {}) {
   const errors = [];
   const warnings = [];
   let guide;
@@ -114,45 +186,66 @@ export function checkPages({ platformDir, customersDir, corpus, today = new Date
       (Array.isArray(meta.names) ? meta.names : []).forEach((n) => names.add(n));
     }
   }
-  const text = corpus ?? uiCorpus();
+  const sourceText = corpus ?? uiCorpus();
+  corpusFor ??= (locale) => localeCorpus(locale, { customersDir });
   const platformRoot = platformDir ?? path.join(ROOT, "docs/user-guide");
-  for (const page of guide.manifest.pages) {
-    const body = guide.pages.get(page.slug) ?? "";
-    const where = `${page.slug}.md`;
-    if (!AUDIENCES.has(page.audience)) errors.push(`${where}: audience ${JSON.stringify(page.audience)} is not user|owner|admin`);
-    if (!page.summary) errors.push(`${where}: front matter needs a summary (the index card and search snippet)`);
-    for (const m of body.matchAll(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g)) {
-      if (!m[1].trim()) errors.push(`${where}: image ${m[2]} has no alt text`);
-      if (!m[3]?.trim()) errors.push(`${where}: image ${m[2]} has no caption (the "title" after the path)`);
-    }
-    for (const label of boldLabels(body)) {
-      const missing = labelFragments(label).filter((frag) => !text.includes(frag));
-      if (missing.length) errors.push(`${where}: **${label}** isn't in frontend/src (missing: ${missing.map((f) => JSON.stringify(f)).join(", ")}) — renamed?`);
-    }
-    if (page.layer === "platform" && names.size) {
-      // Check the platform SOURCE, not the merged page: overlays are allowed to name the customer.
-      const src = fs.readFileSync(path.join(platformRoot, `${page.slug}.md`), "utf8");
-      for (const n of names) {
-        const re = new RegExp(`(^|[^\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\p{L}\\p{N}])`, "u");
-        if (re.test(src)) errors.push(`${where}: names the customer ${JSON.stringify(n)} — platform pages are brand-neutral; put it in an overlay`);
-      }
-    }
-    const reviewed = Date.parse(page.reviewed || "");
-    if (Number.isNaN(reviewed)) warnings.push(`${where}: no 'reviewed: YYYY-MM-DD'`);
-    else if ((today - reviewed) / 864e5 > STALE_DAYS) warnings.push(`${where}: last reviewed ${page.reviewed}, over 6 months ago`);
+  const anchorsOf = (manifest) => new Map(manifest.pages.map((p) => [p.slug, new Set(p.sections.map((s) => s.anchor))]));
+  const sourceAnchors = anchorsOf(guide.manifest);
+
+  const variants = [{ locale: SOURCE_LOCALE, manifest: guide.manifest, pages: guide.pages, text: sourceText, anchors: sourceAnchors }];
+  for (const [locale, t] of guide.translations) {
+    variants.push({ locale, manifest: t.manifest, pages: t.pages, text: `${sourceText}\n${corpusFor(locale)}`, anchors: anchorsOf(t.manifest) });
   }
-  return { errors, warnings, pages: guide.manifest.pages.length };
+
+  for (const { locale, manifest, pages, text, anchors } of variants) {
+    const translated = locale !== SOURCE_LOCALE;
+    const corpusName = translated ? `the ${locale} catalog or frontend/src` : "frontend/src";
+    for (const page of manifest.pages) {
+      const body = pages.get(page.slug) ?? "";
+      const where = translated ? `${locale}/${page.slug}.md` : `${page.slug}.md`;
+      if (!AUDIENCES.has(page.audience)) errors.push(`${where}: audience ${JSON.stringify(page.audience)} is not user|owner|admin`);
+      if (!page.summary) errors.push(`${where}: front matter needs a summary (the index card and search snippet)`);
+      for (const m of body.matchAll(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g)) {
+        if (!m[1].trim()) errors.push(`${where}: image ${m[2]} has no alt text`);
+        if (!m[3]?.trim()) errors.push(`${where}: image ${m[2]} has no caption (the "title" after the path)`);
+      }
+      for (const label of boldLabels(body)) {
+        const missing = labelFragments(label).filter((frag) => !text.includes(frag));
+        if (missing.length) errors.push(`${where}: **${label}** isn't in ${corpusName} (missing: ${missing.map((f) => JSON.stringify(f)).join(", ")}) — renamed?`);
+      }
+      for (const { slug, anchor } of anchorLinks(body)) {
+        const target = slug || page.slug;
+        const have = (slug && anchors.get(slug)) || (slug ? sourceAnchors.get(slug) : anchors.get(page.slug));
+        if (!have) errors.push(`${where}: links to ${slug}.md, which isn't a page`);
+        else if (!have.has(anchor)) errors.push(`${where}: links to #${anchor}, which ${target}.md doesn't have — a renamed heading?`);
+      }
+      if (page.layer === "platform" && names.size) {
+        // Check the platform SOURCE, not the merged page: overlays are allowed to name the customer.
+        const src = fs.readFileSync(path.join(platformRoot, ...(translated ? [locale] : []), `${page.slug}.md`), "utf8");
+        for (const n of names) {
+          const re = new RegExp(`(^|[^\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\p{L}\\p{N}])`, "u");
+          if (re.test(src)) errors.push(`${where}: names the customer ${JSON.stringify(n)} — platform pages are brand-neutral; put it in an overlay`);
+        }
+      }
+      const reviewed = Date.parse(page.reviewed || "");
+      if (Number.isNaN(reviewed)) warnings.push(`${where}: no 'reviewed: YYYY-MM-DD'`);
+      else if ((today - reviewed) / 864e5 > STALE_DAYS) warnings.push(`${where}: last reviewed ${page.reviewed}, over 6 months ago`);
+    }
+  }
+  const translations = [...guide.translations.values()].reduce((n, t) => n + t.manifest.pages.length, 0);
+  return { errors, warnings, pages: guide.manifest.pages.length, translations };
 }
 
 function main() {
-  const { errors, warnings, pages } = checkPages();
+  const { errors, warnings, pages, translations } = checkPages();
   warnings.forEach((w) => console.log(`WARN  ${w}`));
   errors.forEach((e) => console.log(`ERROR ${e}`));
   if (errors.length) {
     console.log(`user-guide check: ${errors.length} error(s)`);
     process.exit(1);
   }
-  console.log(`user-guide check: ${pages} page(s) OK${warnings.length ? `, ${warnings.length} warning(s)` : ""}`);
+  const tr = translations ? ` + ${translations} translation(s)` : "";
+  console.log(`user-guide check: ${pages} page(s)${tr} OK${warnings.length ? `, ${warnings.length} warning(s)` : ""}`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

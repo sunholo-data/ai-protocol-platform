@@ -54,6 +54,20 @@ describe("findAuthImages", () => {
     expect(findAuthImages([imageMessage("blob:already-resolved")])).toHaveLength(0);
   });
 
+  it("finds video and audio players too (show_media)", () => {
+    const msg = {
+      version: "v0.9",
+      updateComponents: {
+        surfaceId: "media",
+        components: [
+          { id: "v", component: "Video", url: "/api/documents/clip/preview" },
+          { id: "a", component: "AudioPlayer", url: "/api/media/narration_1.wav", description: "Narration" },
+        ],
+      },
+    };
+    expect(findAuthImages([msg]).map((c) => c.id)).toEqual(["v", "a"]);
+  });
+
   it("ignores non-image components", () => {
     const msg = {
       version: "v0.9",

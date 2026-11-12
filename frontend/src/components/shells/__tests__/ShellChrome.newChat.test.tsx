@@ -7,7 +7,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockPush = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mockPush, replace: vi.fn() }) }));
-const skills = [{ skillId: "s1", slug: "assistant", ownerId: "platform", displayName: "Assistant", name: "assistant" }];
+const skills = [
+  { skillId: "s1", slug: "assistant", ownerId: "platform", displayName: "Assistant", name: "assistant" },
+  { skillId: "s2", slug: "contract-expert", ownerId: "platform", displayName: "Contract expert", name: "contract-expert" },
+];
+let projects: { id: string; name: string; defaultSkillId: string | null }[] = [];
+vi.mock("@/hooks/useProjects", () => ({ useProjects: () => ({ projects, status: "ready", retry: vi.fn() }) }));
 vi.mock("@/hooks/useUserSkills", () => ({ useUserSkills: () => ({ skills, isLoading: false, error: null }) }));
 vi.mock("@/hooks/useTenantDefaultSkill", () => ({ useTenantDefaultSkill: () => "s1" }));
 vi.mock("@/components/navigation/SkillsBar", () => ({
@@ -26,6 +31,7 @@ const user = { uid: "u1" } as unknown as Parameters<typeof ShellChrome>[0]["user
 
 afterEach(() => {
   setActiveProject(null);
+  projects = [];
   mockPush.mockReset();
 });
 
@@ -39,6 +45,18 @@ describe("ShellChrome — New chat", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     expect(mockPush).toHaveBeenCalledWith(`${skillHref(skills[0] as never)}?project=p1`);
+  });
+
+  it("opens on the project's own assistant when it has one (New chats open on)", () => {
+    projects = [{ id: "p1", name: "Supplier review", defaultSkillId: "s2" }];
+    setActiveProject("p1");
+    render(
+      <ShellChrome skillId="s1" user={user}>
+        <div />
+      </ShellChrome>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(mockPush).toHaveBeenCalledWith(`${skillHref(skills[1] as never)}?project=p1`);
   });
 
   it("is a plain new chat outside a project", () => {

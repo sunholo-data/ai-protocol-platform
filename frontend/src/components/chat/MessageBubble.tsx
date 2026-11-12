@@ -21,7 +21,9 @@ import { VisualEvidenceContext } from "@/components/chat/media/VisualEvidenceCon
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown";
 import { InlineCitation } from "@/components/chat/InlineCitation";
 import { ReadAloudButton } from "@/components/chat/ReadAloudButton";
-import { ToolCallChip } from "@/components/chat/ToolCallChip";
+import { useFormat, type Formatter } from "@/i18n";
+import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
+import { StepsSummary } from "@/components/chat/StepsSummary";
 import { useSurfaceRegistry } from "@/providers/SurfaceRegistry";
 import { useAutoReadAloud } from "@/hooks/useAutoReadAloud";
 import { useVoiceConfig } from "@/hooks/useVoiceConfig";
@@ -127,12 +129,9 @@ export function parseA2UIResult(
   }
 }
 
-function formatTime(timestamp?: number): string {
+function formatTime(fmt: Formatter, timestamp?: number): string {
   const when = typeof timestamp === "number" && Number.isFinite(timestamp) ? new Date(timestamp) : new Date();
-  return new Intl.DateTimeFormat("en", {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(when);
+  return fmt.time(when, { hour: "numeric", minute: "2-digit" });
 }
 
 export const MessageBubble = React.memo(function MessageBubble({
@@ -153,7 +152,10 @@ export const MessageBubble = React.memo(function MessageBubble({
 }: MessageBubbleProps) {
   const { enabled: autoReadEnabled } = useAutoReadAloud();
   const isBot = message.role === "assistant";
-  const time = formatTime(timestamp);
+  // The bubble clock has always used the language's own convention (12-hour
+  // in English) rather than the browser region's, so it ignores the region.
+  const fmt = useFormat({ browserRegion: false });
+  const time = formatTime(fmt, timestamp);
   // A2UI form submissions arrive as `[a2ui:action] {json}` chat messages —
   // render them as a clean "Submitted …" summary, not raw JSON (6.11 polish).
   const submission = !isBot ? parseA2uiSubmission(message.content) : null;
@@ -235,17 +237,9 @@ export const MessageBubble = React.memo(function MessageBubble({
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-semibold text-foreground">{botLabel || skillId}</span>
             <span className="text-xs text-muted-foreground">{time}</span>
-            {showReadAloud && (
-              <ReadAloudButton
-                text={message.content}
-                autoSpeakOnMount={autoSpeakAllowed && autoReadEnabled && !voiceConfig.loading}
-                provider={voiceConfig.tts.provider}
-                voice={voiceConfig.tts.voice}
-                lang={voiceConfig.tts.language ?? "es"}
-                skillId={voiceSkillId ?? skillId}
-              />
-            )}
           </div>
+          {/* The working, folded into one line above the answer. */}
+          <StepsSummary toolCalls={nonA2uiCalls} />
           <div className="min-w-0 space-y-3 text-[15px] leading-[1.7] text-foreground md:text-base">
             {message.content && (
               <VisualEvidenceContext.Provider value={{ sessionId, onChatMessage }}>
@@ -291,14 +285,24 @@ export const MessageBubble = React.memo(function MessageBubble({
                 sessionId={sessionId}
               />
             )}
-            {nonA2uiCalls.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {nonA2uiCalls.map((tc) => (
-                  <ToolCallChip key={tc.id} toolCall={tc} />
-                ))}
-              </div>
-            )}
+
           </div>
+          {/* Under the reply, where you finish reading it. */}
+          {message.content ? (
+            <div className="-ml-2 flex items-center gap-0.5" data-testid="message-actions">
+              <CopyMessageButton text={message.content} />
+              {showReadAloud && (
+                <ReadAloudButton
+                  text={message.content}
+                  autoSpeakOnMount={autoSpeakAllowed && autoReadEnabled && !voiceConfig.loading}
+                  provider={voiceConfig.tts.provider}
+                  voice={voiceConfig.tts.voice}
+                  lang={voiceConfig.tts.language ?? "es"}
+                  skillId={voiceSkillId ?? skillId}
+                />
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -308,7 +312,13 @@ export const MessageBubble = React.memo(function MessageBubble({
   // the side of the page already says who is talking; both stay available to
   // assistive tech via the group label.
   return (
-    <div className="flex justify-end" role="group" aria-label={`${userDisplayName}, ${time}`}>
+    // The sent message settles in (assistant replies already "arrive" by
+    // streaming, and re-animating the streamed → final swap would flicker).
+    <div
+      className="flex justify-end motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-200"
+      role="group"
+      aria-label={`${userDisplayName}, ${time}`}
+    >
       <div className="flex min-w-0 max-w-[85%] flex-col items-end gap-1 md:max-w-[60ch]">
         <span className="text-xs text-muted-foreground" aria-hidden="true">{time}</span>
         <div className="min-w-0 max-w-full rounded-[var(--radius)] bg-muted px-4 py-3 text-base leading-relaxed text-foreground">

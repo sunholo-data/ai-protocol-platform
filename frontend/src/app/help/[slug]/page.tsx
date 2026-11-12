@@ -2,9 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { GuideBody } from "@/components/help/GuideBody";
+import { LocaleVariant } from "@/components/help/LocaleVariant";
 import { BRANDING } from "@/lib/branding";
-import { readManifest, readPage } from "@/lib/userGuide";
-import { withAppName } from "@/lib/userGuideParse";
+import { pageTranslations, readManifest, readPage } from "@/lib/userGuide";
+import { withAppName, type GuidePageMeta } from "@/lib/userGuideParse";
 
 export const dynamicParams = false;
 
@@ -18,9 +19,22 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 }
 
 export default async function HelpPage({ params }: { params: Promise<{ slug: string }> }) {
-  const page = readPage((await params).slug);
+  const { slug } = await params;
+  const page = readPage(slug);
   if (!page) notFound();
-  const { meta, body } = page;
+  const article = <Article meta={page.meta} body={page.body} />;
+  // Translations this deployment can show (none on an English-only one): the
+  // person's language is only known in the browser, so LocaleVariant picks.
+  const translations = pageTranslations(slug);
+  if (!translations.length) return article;
+  return (
+    <LocaleVariant variants={Object.fromEntries(translations.map((t) => [t.locale, <Article key={t.locale} meta={t.meta} body={t.body} />]))}>
+      {article}
+    </LocaleVariant>
+  );
+}
+
+function Article({ meta, body }: { meta: GuidePageMeta; body: string }) {
   const toc = meta.sections.filter((s) => s.level === 2);
   return (
     <article className="space-y-6">

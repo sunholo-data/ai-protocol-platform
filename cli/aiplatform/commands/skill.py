@@ -342,9 +342,25 @@ def chat(
             click.echo(f"  {e}")
 
     click.echo(f"\n{sum(seen.values())} events: " + ", ".join(f"{k}×{v}" for k, v in sorted(seen.items())))
+    _print_pending_approvals(client, thread_id)
 
     if errors:
         raise SystemExit(1)
+
+
+def _print_pending_approvals(client: AIPlatformClient, thread_id: str) -> None:
+    """If the turn left something for a person to approve, say how to decide it.
+
+    Best effort: an older backend without /api/approvals just prints nothing.
+    """
+    try:
+        pending = (client.get("/api/approvals", params={"session": thread_id}) or {}).get("approvals") or []
+    except Exception:
+        return
+    if pending:
+        click.echo("\nWAITING FOR YOUR APPROVAL")
+        for request in pending:
+            click.echo(f"  {request['title']} — aiplatform approvals approve {request['id']}")
 
 
 @skill.command("probe")
@@ -858,7 +874,10 @@ def push_skill(
         click.secho("already up to date — nothing to push.", fg="yellow")
         return
 
-    updated = client.put(f"/api/skills/{skill_id}", json=payload)
+    # The GET resolves a slug ("sunholo-inbox"); the PUT takes only the
+    # canonical id — write to the one the GET returned (CLAUDE.md #9).
+    canonical = str(current.get("skillId") or skill_id)
+    updated = client.put(f"/api/skills/{canonical}", json=payload)
     click.echo()
     click.secho(f"✓ pushed to {updated.get('skillId', skill_id)} ({updated.get('name', '')}).", fg="green")
 

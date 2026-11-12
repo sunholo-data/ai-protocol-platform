@@ -74,12 +74,12 @@ export function NewProjectInline({ initialName = "", onCreate, onCancel, classNa
           }}
           className="min-w-0 flex-1 rounded border bg-background px-1.5 py-0.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
         />
-        <span id={`${id}-hint`} className="shrink-0 text-[10px] text-muted-foreground" role={pending ? "status" : undefined}>
+        <span id={`${id}-hint`} className="shrink-0 text-[11px] text-muted-foreground" role={pending ? "status" : undefined}>
           {pending ? "Creating…" : "Enter ↵ / Esc"}
         </span>
       </div>
       {error && (
-        <p role="alert" className="text-[10px] leading-tight text-destructive">
+        <p role="alert" className="text-[11px] leading-tight text-destructive">
           {error}
         </p>
       )}

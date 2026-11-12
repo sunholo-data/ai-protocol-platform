@@ -57,6 +57,7 @@ MAX_PROJECTS = 100
 MAX_NAME_CHARS = 80
 MAX_INSTRUCTIONS_CHARS = 8000
 MAX_PROJECTS_PER_DOCUMENT = 50
+MAX_ATTACHED_KBS = 10
 # Firestore caps a write batch at 500; stay well under it.
 _BATCH = 400
 
@@ -241,9 +242,12 @@ def update_project(
     name: str | None = None,
     instructions: str | None = None,
     default_skill_id: Any = _UNSET,
+    attached_kb_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Rename / re-instruct / re-default. Raises :class:`ProjectError` (404 when
-    the project is not the caller's, 409 on a taken name, 422 on bad input)."""
+    """Rename / re-instruct / re-default / re-attach. Raises :class:`ProjectError`
+    (404 when the project is not the caller's, 409 on a taken name, 422 on bad
+    input). ``attached_kb_ids`` must already be checked against what the caller
+    may search (the route does it); this only stores them."""
     project = get_project(user_id, project_id)
     if project is None:
         raise ProjectError("PROJECT_NOT_FOUND", "Project not found.", 404)
@@ -259,6 +263,12 @@ def update_project(
         fields["instructions"] = clean_instructions(instructions)
     if default_skill_id is not _UNSET:
         fields["defaultSkillId"] = default_skill_id or None
+    if attached_kb_ids is not None:
+        if len(attached_kb_ids) > MAX_ATTACHED_KBS:
+            raise ProjectError(
+                "TOO_MANY_KNOWLEDGE_BASES", f"A project can have at most {MAX_ATTACHED_KBS} knowledge bases.", 422
+            )
+        fields["attachedKbIds"] = list(dict.fromkeys(attached_kb_ids))
     if fields:
         fields["updatedAt"] = fields["lastOpenedAt"] = _now()
         _projects_ref(user_id).document(project_id).update(fields)
@@ -309,8 +319,32 @@ def _project_docs_query(user_id: str, project_id: str):
     )
 
 
+def project_document_locations(user_id: str, project_id: str, limit: int = 5000) -> list[tuple[str, str, str]]:
+    """``[(doc id, folder id, filename)]`` for the project's documents: what a
+    library path is built from (tools/documents/paths.py). Two small fields per
+    document, no ordering, so it needs no index beyond the project query's."""
+    rows: list[tuple[str, str, str]] = []
+    query = _project_docs_query(user_id, project_id).select(["folderId", "originalFilename"]).limit(limit)
+    for snap in query.stream():
+        data = snap.to_dict() or {}
+        rows.append((snap.id, str(data.get("folderId") or ""), str(data.get("originalFilename") or snap.id)))
+    return rows
+
+
+def project_folder_counts(user_id: str, project_id: str) -> dict[str, int]:
+    """How many of the project's documents sit in each library folder."""
+    counts: dict[str, int] = {}
+    for snap in _project_docs_query(user_id, project_id).select(["folderId"]).stream():
+        folder_id = str((snap.to_dict() or {}).get("folderId") or "")
+        if folder_id:
+            counts[folder_id] = counts.get(folder_id, 0) + 1
+    return counts
+
+
 def project_document_ids(user_id: str, project_id: str) -> list[str]:
-    return [snap.id for snap in _project_docs_query(user_id, project_id).stream() if snap.exists]
+    # Names only. Streaming whole records (parsed blocks, up to ~700 KB each)
+    # to read their ids made every project page take 8-11 s at 349 documents.
+    return [snap.id for snap in _project_docs_query(user_id, project_id).select(["__name__"]).stream() if snap.exists]
 
 
 def doc_row(doc_id: str, doc: dict[str, Any]) -> dict[str, Any]:
@@ -328,7 +362,7 @@ def list_project_documents(
     query = _project_docs_query(user_id, project_id)
     if cursor:
         query = query.where(filter=_fs.FieldFilter("createdAt", "<", cursor))
-    query = query.order_by("createdAt", direction=_fs.Query.DESCENDING).limit(page_size + 1)
+    query = query.order_by("createdAt", direction=_fs.Query.DESCENDING).limit(page_size + 1).select(list(DOC_FIELDS))
     rows: list[dict[str, Any]] = []
     for snap in query.stream():
         data = snap.to_dict() if snap.exists else None
@@ -356,12 +390,17 @@ def count_project_sessions(user_id: str, project_id: str) -> int:
     return len(ids)
 
 
-def tag_documents(user_id: str, project_id: str, doc_ids: list[str]) -> dict[str, list[Any]]:
+def tag_documents(user_id: str, project_id: str, doc_ids: list[str], *, announce: bool = True) -> dict[str, list[Any]]:
     """Tag the caller's documents into the project (writer 1).
 
     Returns ``{added: [ids], already: [ids], failed: [{id, filename, reason}]}``.
     A document that is not the caller's is reported exactly like a missing one,
     with no filename — saying whose it is would itself be a disclosure.
+
+    ``announce=False`` is for a caller that sends its own ``upserted`` event
+    right after (an upload into a project): that event re-indexes the document
+    with its tags, and a second import of the same document in the same second
+    is refused by the datastore ("Too frequent update").
     """
     added: list[str] = []
     already: list[str] = []
@@ -400,7 +439,8 @@ def tag_documents(user_id: str, project_id: str, doc_ids: list[str]) -> dict[str
         _backfill_sessions(user_id, project_id, doc_id)
     if added:
         touch_project(user_id, project_id)
-        _announce_projects_changed(user_id, added)
+        if announce:
+            _announce_projects_changed(user_id, added)
     return {"added": added, "already": already, "failed": failed}
 
 
@@ -520,7 +560,8 @@ def _count(query: Any) -> int:
                 return value
         except Exception as exc:
             log.debug("count() aggregation unavailable, streaming instead: %s", exc)
-    return sum(1 for snap in query.stream() if getattr(snap, "exists", True))
+    names = query.select(["__name__"]) if callable(getattr(query, "select", None)) else query
+    return sum(1 for snap in names.stream() if getattr(snap, "exists", True))
 
 
 def _write_updates(updates: list[tuple[str, str, dict[str, Any]]]) -> None:

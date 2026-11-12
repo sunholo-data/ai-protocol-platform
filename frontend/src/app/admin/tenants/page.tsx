@@ -18,6 +18,7 @@ import { TenantOnboardWizard } from "@/components/admin/TenantOnboardWizard";
 import type { ClientConfig, SkillOption, TenantValidation } from "@/components/admin/tenantAdmin";
 import { HealthBadge, type HealthState, ReachDot } from "@/components/admin/tenantHealth";
 import { PLATFORM_OWNER_UID } from "@/lib/platformOwner";
+import { PageLoading } from "@/components/ui/skeleton";
 
 // The subset of a /api/skills entry this page needs.
 interface SkillLite {
@@ -129,7 +130,7 @@ export default function TenantAdminPage() {
   }
 
   if (authLoading || status.kind === "loading") {
-    return <Centered>Loading…</Centered>;
+    return <PageLoading />;
   }
   if (!user) return <SignInRequired />;
   if (status.kind === "forbidden") {

@@ -56,7 +56,7 @@ export function ClausesArtefactTab({ surfaceId, className }: { surfaceId: string
                     <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{c.value || "—"}</span>
                     {c.confidence && (
                       <span
-                        className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${confidenceStyle(
+                        className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide ${confidenceStyle(
                           c.confidence,
                         )}`}
                       >

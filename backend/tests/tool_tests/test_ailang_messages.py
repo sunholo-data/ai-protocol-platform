@@ -61,8 +61,18 @@ def test_refuses_an_inbox_that_is_not_allowed():
     with patch.object(am, "load_settings", return_value=SETTINGS), patch("httpx.post") as post:
         out = _send(inbox="ailang-core")
     assert out["status"] == "error"
-    assert "daneel" in out["error"]
+    assert out["error"].startswith("Not sent") and "'ailang-core'" in out["error"]
     post.assert_not_called()
+
+
+def test_a_refusal_offers_no_substitute_inbox():
+    """2026-11-02: a refusal that listed the allowed inboxes was read as "send it
+    there instead", and a mission ruling went to an inbox that could not act on it."""
+    with patch.object(am, "load_settings", return_value=SETTINGS), patch("httpx.post"):
+        out = _send(inbox="mission-fleet")
+    assert "daneel" not in out["error"]
+    assert "Do not send it to a different inbox" in out["error"]
+    assert "Never offer to send it to another inbox" in " ".join((am.send_ailang_message.__doc__ or "").split())
 
 
 def test_disabled_or_missing_settings_fail_closed():

@@ -61,6 +61,10 @@ class ChatSessionIndex(BaseModel):
     owner_domain: str = Field(default="", alias="ownerDomain")
     access_control: AccessControl = Field(alias="accessControl")
     title: str | None = None
+    # The composer's Model pick for this chat (adk.model_choice): "fast",
+    # "thorough" or "model:<id>". None = Auto (also every row written before
+    # the field existed).
+    model_choice: str | None = Field(default=None, alias="modelChoice")
     turn_count: int = Field(default=0, alias="turnCount")
     first_message_at: datetime = Field(alias="firstMessageAt")
     last_message_at: datetime = Field(alias="lastMessageAt")

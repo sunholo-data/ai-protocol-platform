@@ -5,27 +5,33 @@ audience: user
 order: 20
 surfaces:
   - frontend/src/components/doc-browser/
-reviewed: 2026-10-16
+reviewed: 2026-10-27
 ---
 
-Your folders live in the sidebar under **Your files** → **My Documents**. Open the sidebar with the panel button at the top left.
+Your folders live in the sidebar: under **Files**, click **Browse all folders**. Open the sidebar with the button at the top left (**Show conversations and files**).
 
-![The chat page with the sidebar open. Under Your files, the My Documents list shows the Project Phoenix folder expanded with four documents, and an upload area below it.](img/folders/01-overview.png "Your folders in the sidebar.")
+A folder is where a document is kept; a [project](projects.md#make-a-project) groups documents from any folders for one piece of work. To turn a folder into a project, click **⋯** on it, then **New project from folder**.
+
+To see which projects a folder is already in, click its **⋯**. The menu starts with **Projects**: each project's name, then how many of the folder's documents it holds, subfolders included. **GitHub** means the project syncs the folder from GitHub. **Synced** means it follows the folder. Click a project to open it. If you make a new project from a folder that's already in one, you're asked **Create another?** first, so you don't make a copy by accident.
+
+To give folder names more room, drag the right edge of the sidebar. Double-click the edge to go back to the standard width. The width is remembered in this browser.
+
+![The chat page with the sidebar open. Under Files, the three recent files, then Browse all folders opened to show the Project Phoenix folder expanded with four documents.](img/folders/01-overview.png "Your folders in the sidebar.")
 
 ## Upload a whole folder
 
 Send a folder from your computer and its files arrive in a folder of the same name. You don't have to create the folder first.
 
-1. In **My Documents**, click **Upload folder** below the drop area.
+1. Under **Files**, click **Browse all folders**, then **Upload folder** below the drop area.
 2. Pick the folder on your computer and confirm. Your browser may ask whether to upload all its files. Say yes.
 3. Or drag the folder from your desktop straight onto the drop area.
 
 Files upload three at a time, and a progress bar shows how far along it is.
 
 > [!NOTE]
-> **Subfolders are kept.** A file in `Quarterly reports/2026/` goes into a folder called `Quarterly reports/2026`.
+> **Subfolders are kept.** A file in `Quarterly reports/2026/` goes into a folder called `Quarterly reports/2026`. The folder list shows it as `2026` inside `Quarterly reports`. Click the arrow next to a folder to show or hide its subfolders.
 
-![My Documents with the Upload folder button greyed out and a progress bar reading Uploading 3 of 5.](img/folders/03-folder-upload-progress.png "While uploading, the button is disabled and progress shows underneath.")
+![The folder list with the Upload folder button greyed out and a progress bar reading Uploading 3 of 5.](img/folders/03-folder-upload-progress.png "While uploading, the button is disabled and progress shows underneath.")
 
 ### Read the summary
 
@@ -50,6 +56,11 @@ Each folder you own has a **⋯** menu. It appears when you hover over the folde
 
 Two of your folders can't share a name. If you pick a name that's taken, you'll see a message and the folder keeps its old name.
 
+Renaming a folder takes its subfolders with it: rename `Quarterly reports` to `Reports` and `Quarterly reports/2026` becomes `Reports/2026`. In a subfolder you type only its own name, so it stays where it is.
+
+> [!NOTE]
+> **Folders synced from GitHub can't be renamed.** A project that syncs a GitHub repository puts its files in folders by name. The top one has a small GitHub icon. Renaming one would make the next sync bring the old name back, so its menu has no **Rename**. This includes the folders inside it and any folder that contains it.
+
 ![The folder actions menu open on Project Phoenix with Rename, Make searchable and Delete.](img/folders/05-folder-menu.png "The folder menu.")
 ![The folder name turned into a text box reading Project Phoenix 2026, with the hint Enter / Esc.](img/folders/06-folder-rename.png "Editing the name.")
 
@@ -65,7 +76,7 @@ If the folder still has documents, nothing is deleted. A red message tells you h
 > [!NOTE]
 > The **Created** folder holds documents the assistant made for you. It's managed for you and has no menu.
 
-![A confirmation under the Old drafts folder: Delete folder ‘Old drafts’? with Delete and Cancel buttons.](img/folders/08-folder-delete-confirm.png "An empty folder asks you to confirm.")
+![The confirmation: Delete folder "Old drafts"? with Cancel and Delete buttons.](img/folders/08-folder-delete-confirm.png "An empty folder asks you to confirm.")
 ![A red message under Project Phoenix 2026: ‘Project Phoenix 2026’ still has 4 documents. Move or delete them first.](img/folders/07-folder-delete-not-empty.png "A folder with documents is kept.")
 
 ## Move documents between folders
@@ -74,6 +85,8 @@ There are two ways to move a document: from its menu or by dragging it.
 
 - **From the document menu:** open a folder, hover over a document, click its **⋯** and choose a folder under **Move to…**
 - **By dragging:** drag a document row onto another folder. The folder is outlined while you're over it. Let go to move the document there.
+
+Dragging a document onto a project under **Projects** doesn't move it: it adds it to the project and the document stays in its folder.
 
 ![The menu of Risk register.csv showing Move to… with Quarterly reports and Market research.](img/folders/09-doc-move-menu.png "Move to… lists your other folders.")
 ![Phoenix budget being dragged, with the Market research folder outlined as the drop target.](img/folders/11-doc-drag-to-folder.png "Dropping onto Market research.")
@@ -181,7 +194,7 @@ Change who can search the folder through skills, without opening each skill.
 
 Skills can only reach the people this setting allows. If you narrow it, the change applies immediately, including to skills already using the folder.
 
-The folder doesn't appear in anyone else's My Documents. But search results quote passages from your documents, so anyone you allow here can read those passages through a skill.
+The folder doesn't appear in anyone else's files. But search results quote passages from your documents, so anyone you allow here can read those passages through a skill.
 
 ![The panel Who can search ‘Project Phoenix 2026’ with a dropdown set to Private – only you, explanatory text, and Save and Cancel.](img/folders/19-who-can-search.png "The access panel.")
 
@@ -194,7 +207,7 @@ Turn search off when a folder shouldn't be used by skills any more.
 
 The folder's search index is deleted, and any skill that used it loses access. *Your documents stay* in the folder, and you can make it searchable again at any time.
 
-![A confirmation: Stop searching ‘Project Phoenix 2026’? Its search index is deleted; skills using it lose access. The documents stay.](img/folders/20-stop-searching-confirm.png "The confirmation spells out what happens.")
+![The confirmation: Stop searching "Project Phoenix 2026"? Its search index is deleted; skills using it lose access. The documents stay.](img/folders/20-stop-searching-confirm.png "The confirmation spells out what happens.")
 
 ## Upload a folder from the command line
 

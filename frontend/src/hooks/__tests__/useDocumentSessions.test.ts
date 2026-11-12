@@ -34,6 +34,9 @@ describe("useDocumentSessions", () => {
 
   afterEach(() => {
     global.fetch = savedFetch;
+    // The unmount test replaces AbortController with a fake; never let it
+    // leak into later tests.
+    vi.restoreAllMocks();
   });
 
   it("returns sessions on successful fetch", async () => {

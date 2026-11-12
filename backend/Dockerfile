@@ -25,6 +25,12 @@ ENV GOOGLE_CLOUD_LOGGING=1
 ENV COMMIT_SHA=${COMMIT_SHA}
 
 RUN uv sync --frozen --no-install-project
+# Load the curated bundle before any SDK import; gRPC otherwise uses a stale
+# embedded store and OpenSSL can fall back to the system CA directory.
+ENV SSL_CERT_FILE=/app/.venv/lib/python3.12/site-packages/certifi/cacert.pem
+ENV SSL_CERT_DIR=/app/.venv/lib/python3.12/site-packages/certifi
+ENV REQUESTS_CA_BUNDLE=/app/.venv/lib/python3.12/site-packages/certifi/cacert.pem
+ENV GRPC_DEFAULT_SSL_ROOTS_FILE_PATH=/app/.venv/lib/python3.12/site-packages/certifi/cacert.pem
 
 EXPOSE 8080
 

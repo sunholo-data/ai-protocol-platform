@@ -75,7 +75,7 @@ export function DocumentHeader({ doc, onChanged, activitySink }: DocumentHeaderP
           {doc.originalFilename}
         </span>
         {doc.sourceFormat && (
-          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${fmtColor}`}>
+          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium uppercase ${fmtColor}`}>
             {doc.sourceFormat}
           </span>
         )}
@@ -101,7 +101,7 @@ export function DocumentHeader({ doc, onChanged, activitySink }: DocumentHeaderP
           filename={doc.originalFilename}
           className="flex shrink-0 items-center gap-1 rounded border border-transparent px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
         />
-        <span className="ml-auto hidden text-[10px] text-muted-foreground sm:block">
+        <span className="ml-auto hidden text-[11px] text-muted-foreground sm:block">
           Select any text to edit it
         </span>
       </div>

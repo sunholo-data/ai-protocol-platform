@@ -98,7 +98,9 @@ def test_attached_block_names_the_users_own_attached_documents(monkeypatch):
         "d-mine": {"userId": "u1", "originalFilename": "site-memo.txt"},
         "d-theirs": {"userId": "u2", "originalFilename": "secret.txt"},
     }
-    monkeypatch.setattr("db.firestore.get_document", lambda col, doc_id: docs.get(doc_id))
+    monkeypatch.setattr(
+        "db.firestore.get_documents", lambda col, ids, fields=None: {i: docs[i] for i in ids if docs.get(i) is not None}
+    )
     ctx = SimpleNamespace(state={"document_ids": ["d-mine", "d-theirs", "d-missing"]})
     block = pc.attached_block("u1", ctx)
     assert "site-memo.txt [ref: d-mine]" in block

@@ -25,12 +25,26 @@ Design: docs/design/v6.8.0/elicitation-in-chat-primitive.md
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
+
+# True while a turn runs on a channel with NO clickable UI (Discord, Telegram,
+# email). An elicitation there arrives as text with nothing to press, so a
+# confirm-floor handoff would re-ask forever. The handoff policy reads this and
+# confirms IN TEXT instead (see adk.agent.make_handoff_policy_callback). Set by
+# channels._skill_invoke around the run; the web (default) is interactive.
+NON_INTERACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar("elicitation_non_interactive", default=False)
+# Questions a non-interactive turn MUST put to the person (e.g. "hand this to the
+# Document Writer?"). The channel path appends any the model didn't ask itself,
+# so a fast model that ends its turn silently can't leave "(no response)".
+CHANNEL_QUESTIONS: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "elicitation_channel_questions", default=None
+)
 
 # Field vocabulary. ``date`` → DateTimeInput, ``text``/``number`` → TextField
 # (number gets a numeric client regexp), ``select`` → ChoicePicker, ``bool`` →

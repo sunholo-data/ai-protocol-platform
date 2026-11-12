@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchWithAuth } from "@/lib/apiClient";
 import { DocumentPreview } from "@/components/document/DocumentPreview";
+import { Button } from "@/components/ui/button";
 
 // Files we can render a hover preview for (PDF page 1 or an image).
 const PREVIEWABLE_EXT = /\.(pdf|png|jpe?g|gif|webp|bmp|tiff?)$/i;
@@ -110,9 +111,10 @@ export function GCSFileBrowser({ bucket, rootPath = "", onPick }: GCSFileBrowser
             const newPrefix = newSegments.length > 0 ? `${newSegments.join("/")}/` : "";
             setPrefix(newPrefix);
           }}
-          className="flex items-center gap-1 px-1 py-0.5 text-left font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          aria-label={`Back from ${segments[segments.length - 1] || "(root)"}`}
+          className="flex items-center gap-1 px-1 py-0.5 text-left font-mono text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
         >
-          ← {segments[segments.length - 1] || "(root)"}
+          <span aria-hidden="true">←</span> {segments[segments.length - 1] || "(root)"}
         </button>
       )}
 
@@ -121,7 +123,12 @@ export function GCSFileBrowser({ bucket, rootPath = "", onPick }: GCSFileBrowser
       )}
 
       {!loading && error && (
-        <div className="px-1 py-2 text-destructive">{error}</div>
+        <div role="alert" className="flex flex-wrap items-center gap-2 px-1 py-2 text-destructive">
+          <span>{error}</span>
+          <Button size="sm" onClick={() => fetchPage(prefix, null, false)}>
+            Try again
+          </Button>
+        </div>
       )}
 
       {!loading && !error && entries.length === 0 && (
@@ -141,9 +148,9 @@ export function GCSFileBrowser({ bucket, rootPath = "", onPick }: GCSFileBrowser
                 <button
                   type="button"
                   onClick={() => setPrefix(entry.name)}
-                  className="flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left text-foreground hover:bg-muted/50"
+                  className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-foreground hover:bg-muted/50"
                 >
-                  <FolderIcon /> {display.replace(/\/$/, "")}
+                  <FolderIcon /> <span className="min-w-0 truncate">{display.replace(/\/$/, "")}</span>
                 </button>
               </li>
             );
@@ -152,9 +159,9 @@ export function GCSFileBrowser({ bucket, rootPath = "", onPick }: GCSFileBrowser
             <button
               type="button"
               onClick={() => onPick(bucket, entry.name, display)}
-              className="flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left text-foreground hover:bg-muted/50"
+              className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-foreground hover:bg-muted/50"
             >
-              <FileIcon /> {display}
+              <FileIcon /> <span className="min-w-0 truncate">{display}</span>
             </button>
           );
           return (

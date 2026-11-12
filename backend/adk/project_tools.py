@@ -422,17 +422,40 @@ def _change_sync(action: str, uid: str, project_query: str, documents: str) -> d
     return _with_project(out, project)
 
 
-def project_function_tools() -> list[FunctionTool]:
-    """The project tools every skill gets by default (``tool_configs.defaults.projects``)."""
-    from adk.project_text_search import grep_project_documents
+def project_function_tools() -> list[Any]:
+    """The project tools every skill gets by default (``tool_configs.defaults.projects``).
 
-    return [
+    Project text search is a toolset that offers its tool only inside a project
+    chat; :func:`project_tool_names` lists every name these can offer.
+
+    Plus reading and writing the project's writable GitHub folders, on a
+    deployment that has a write credential (project-source-write.md §3); each
+    call still checks the project, the source and the person."""
+    from adk.project_text_search import ProjectTextSearchToolset
+
+    tools: list[Any] = [
         FunctionTool(list_projects),
         FunctionTool(create_project),
         FunctionTool(add_to_project),
         FunctionTool(remove_from_project),
-        FunctionTool(grep_project_documents),
+        ProjectTextSearchToolset(),
     ]
+    from sources import credentials
+
+    if any(c.can_write for c in credentials.load().values()):
+        from adk.project_write_tools import WriteFilesTool, delete_project_files, read_project_file
+
+        tools += [FunctionTool(read_project_file), WriteFilesTool(), FunctionTool(delete_project_files)]
+    return tools
+
+
+def project_tool_names() -> set[str]:
+    """Every tool name :func:`project_function_tools` can offer, including those a
+    toolset offers only inside a project chat."""
+    names: set[str] = set()
+    for tool in project_function_tools():
+        names |= set(getattr(tool, "tool_names", None) or (tool.name,))
+    return names
 
 
 __all__ = [
@@ -441,6 +464,7 @@ __all__ = [
     "create_project",
     "list_projects",
     "project_function_tools",
+    "project_tool_names",
     "remove_from_project",
     "resolve_documents",
 ]

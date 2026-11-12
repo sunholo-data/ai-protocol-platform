@@ -1,0 +1,28 @@
+{
+  "_comment": "The one resolution rule (docs/design/v6.43.0/multi-language.md §1, §5), as data. Read by backend/tests/unit/test_i18n.py (pick_locale, localized_field) AND frontend/src/i18n/__tests__/resolution-table.test.ts (resolveLocalized, localizedField), so the two sides cannot drift. fn 'pick' = a {locale: text} map or plain string resolved along locale → its language → default → its language → en → any value → \"\". fn 'field' = a base value plus per-locale variants: the locale, then its language, then the BASE (never the deployment default). 'default' is the deployment default locale; absent means en.",
+  "cases": [
+    { "name": "plain string resolves to itself", "fn": "pick", "value": "Hello", "locale": "da", "default": "en", "expect": "Hello" },
+    { "name": "map: exact locale", "fn": "pick", "value": { "en": "Projects", "da": "Projekter" }, "locale": "da", "expect": "Projekter" },
+    { "name": "map: region falls back to its language", "fn": "pick", "value": { "en": "Projects", "pt": "Projetos" }, "locale": "pt-BR", "expect": "Projetos" },
+    { "name": "map: an exact region beats its language", "fn": "pick", "value": { "pt": "Projetos", "pt-BR": "Projetos (BR)" }, "locale": "pt-BR", "expect": "Projetos (BR)" },
+    { "name": "map: unknown locale walks to the deployment default", "fn": "pick", "value": { "en": "Projects", "da": "Projekter" }, "locale": "de", "default": "da", "expect": "Projekter" },
+    { "name": "map: a regional default falls back to its language", "fn": "pick", "value": { "en": "Projects", "da": "Projekter" }, "locale": "de", "default": "da-DK", "expect": "Projekter" },
+    { "name": "map: then the source locale", "fn": "pick", "value": { "en": "Projects", "fr": "Projets" }, "locale": "de", "default": "da", "expect": "Projects" },
+    { "name": "map: an empty string is skipped", "fn": "pick", "value": { "da": "", "en": "Projects" }, "locale": "da", "default": "da", "expect": "Projects" },
+    { "name": "map: a null value is skipped", "fn": "pick", "value": { "da": null, "en": "Projects" }, "locale": "da", "expect": "Projects" },
+    { "name": "map: nothing on the chain, so any value it has", "fn": "pick", "value": { "fr": "Projets" }, "locale": "de", "default": "da", "expect": "Projets" },
+    { "name": "map: empty map is the empty string", "fn": "pick", "value": {}, "locale": "da", "expect": "" },
+    { "name": "null is the empty string", "fn": "pick", "value": null, "locale": "da", "expect": "" },
+
+    { "name": "field: the locale's variant", "fn": "field", "base": "General Assistant", "variants": { "da": { "display_name": "Generel assistent" } }, "field": "display_name", "locale": "da", "expect": "Generel assistent" },
+    { "name": "field: a field the locale doesn't list falls back to the base", "fn": "field", "base": "Hi! How can I help you today?", "variants": { "da": { "display_name": "Generel assistent" } }, "field": "initial_message", "locale": "da", "expect": "Hi! How can I help you today?" },
+    { "name": "field: region falls back to its language", "fn": "field", "base": "General Assistant", "variants": { "da": { "display_name": "Generel assistent" } }, "field": "display_name", "locale": "da-DK", "expect": "Generel assistent" },
+    { "name": "field: an exact region beats its language", "fn": "field", "base": "Assistant", "variants": { "pt": { "display_name": "Assistente" }, "pt-BR": { "display_name": "Assistente (BR)" } }, "field": "display_name", "locale": "pt-BR", "expect": "Assistente (BR)" },
+    { "name": "field: English chosen on a da-default deployment gets the base, not the da variant", "fn": "field", "base": "General Assistant", "variants": { "da": { "display_name": "Generel assistent" } }, "field": "display_name", "locale": "en", "default": "da", "expect": "General Assistant" },
+    { "name": "field: a locale with no variant gets the base", "fn": "field", "base": "General Assistant", "variants": { "da": { "display_name": "Generel assistent" } }, "field": "display_name", "locale": "de", "default": "da", "expect": "General Assistant" },
+    { "name": "field: an empty variant is skipped", "fn": "field", "base": "General Assistant", "variants": { "da": { "display_name": "" } }, "field": "display_name", "locale": "da", "expect": "General Assistant" },
+    { "name": "field: no variants at all", "fn": "field", "base": "General Assistant", "variants": null, "field": "display_name", "locale": "da", "expect": "General Assistant" },
+    { "name": "field: a variant fills a missing base", "fn": "field", "base": null, "variants": { "da": { "initial_message": "Hej!" } }, "field": "initial_message", "locale": "da", "expect": "Hej!" },
+    { "name": "field: no base and no variant is the empty string", "fn": "field", "base": null, "variants": { "da": { "display_name": "Generel assistent" } }, "field": "initial_message", "locale": "da", "expect": "" }
+  ]
+}

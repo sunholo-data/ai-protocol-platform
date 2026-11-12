@@ -23,7 +23,8 @@
 #   2 — script setup error (missing tool, malformed lockfile, etc.)
 #
 # Explicit exception (see UPGRADING.md#dependency-security):
-#   PYSEC-2026-4066 (LiteLLM / CVE-2026-84377) affects its proxy service.
+#   PYSEC-2026-4066 (LiteLLM / CVE-2026-84377) and GHSA-g5ff-637f-6q2m
+#   (LiteLLM /utils/transform_request file read) affect its proxy service.
 #   This platform runs the SDK, not that proxy; preserve #78's reviewed pin.
 # No Starlette exception: upstream already locks the patched 1.x line.
 # No OpenTelemetry exception: the coordinated ADK 2 / OTel 1.45.1 upgrade
@@ -58,7 +59,7 @@ audit_npm() {
   local label="$2"
   echo
   echo "${C_BOLD}[$label] npm audit ${NPM_SCOPE[*]} --audit-level=high${C_RESET}"
-  if (cd "$dir" && npm audit --package-lock-only "${NPM_SCOPE[@]}" --audit-level=high); then
+  if node scripts/audit-npm.mjs "$dir" "${NPM_SCOPE[@]}"; then
     echo "${C_GREEN}PASS${C_RESET} $label"
   else
     echo "${C_RED}FAIL${C_RESET} $label"
@@ -72,7 +73,7 @@ audit_python() {
   echo
   echo "${C_BOLD}[$label] pip-audit (uv export --frozen --no-dev, OSV)${C_RESET}"
   # --no-emit-project drops the local "-e ." line which pip-audit can't hash.
-  # --ignore-vuln: only the LiteLLM proxy-only advisory documented above.
+  # --ignore-vuln: only the LiteLLM proxy-only advisories documented above.
   if (cd "$dir" && requirements="$(mktemp)" && trap 'rm -f "$requirements"' EXIT && \
       uv export --frozen --no-dev --no-emit-project --output-file "$requirements" >/dev/null && \
       uvx pip-audit \
@@ -80,6 +81,7 @@ audit_python() {
        --no-deps --disable-pip \
        --strict \
        --ignore-vuln PYSEC-2026-4066 \
+       --ignore-vuln GHSA-g5ff-637f-6q2m \
        --vulnerability-service osv); then
     echo "${C_GREEN}PASS${C_RESET} $label"
   else

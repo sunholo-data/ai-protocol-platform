@@ -123,3 +123,9 @@ scripts/one-brand-template/*.docx
 # user-guide screenshot harness deps
 /scripts/user-guide/shots/node_modules/
 /scripts/user-guide/shots/package-lock.json
+
+# Cloud Build / scripts/ci/check.sh scratch (AG-UI wire capture, uv caches)
+.ci-cache/
+# Interface catalogs merged from frontend/messages + docs/customers/*/messages
+# by scripts/i18n/bundle.mjs (multi-language.md §4) — a build output.
+/frontend/src/i18n/generated/

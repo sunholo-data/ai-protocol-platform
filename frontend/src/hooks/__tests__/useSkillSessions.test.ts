@@ -174,4 +174,13 @@ describe("useSharedSessions", () => {
     await waitFor(() => expect(result.current.error).toBe("Failed to load sessions"));
     expect(result.current.isLoading).toBe(false);
   });
+
+  it("a window focus right after loading does not fetch the list again", async () => {
+    const { result } = renderHook(() => useSkillSessions(null));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const calls = mockFetch.mock.calls.length;
+    window.dispatchEvent(new Event("focus"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockFetch.mock.calls.length).toBe(calls);
+  });
 });

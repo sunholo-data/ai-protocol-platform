@@ -606,3 +606,23 @@ describe("SurfaceRegistry", () => {
     });
   });
 });
+
+it("private review is visible but excluded from subsequent ordinary-turn snapshots", () => {
+  const { result } = renderHook(() => useSurfaceRegistry(), { wrapper: withProvider });
+  const id = "private:board:review";
+  act(() => {
+    result.current.appendMessages("workspace", [createMsg("workspace"), updateData("workspace", { count: 1 })], "safe");
+    result.current.appendPrivateMessages(id, [createMsg(id), updateData(id, { purpose: "secret-canary" })], "review", { kind: "review", title: "Review" });
+    result.current.register(id, createRef(), { persistence: "indefinite", modelExport: true });
+  });
+  expect(result.current.getState(id)?.surface?.dataModel.get("/")).toEqual({ purpose: "secret-canary" });
+  expect(result.current.listArtifacts().some(a => a.surfaceId === id)).toBe(true);
+  expect(result.current.getPolicy(id).modelExport).toBe(false);
+  expect(result.current.getPolicy(id).persistence).toBe("session-scoped");
+  // Both chat-send and action-run use exactly this outbound registry snapshot.
+  const ordinaryTurn = { forwardedProps: { a2ui_surface_state: result.current.readA2uiSurfaceState() } };
+  expect(JSON.stringify(ordinaryTurn)).not.toContain("secret-canary");
+  expect(Object.keys(ordinaryTurn.forwardedProps.a2ui_surface_state)).toEqual(["workspace"]);
+  act(() => { result.current.clearByPersistence("session-scoped"); });
+  expect(result.current.getState(id)).toBeNull();
+});

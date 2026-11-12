@@ -386,6 +386,27 @@ async def test_empty_clause_list_rejected_loudly():
 
 
 @pytest.mark.asyncio
+async def test_no_clauses_at_all_is_a_visible_error_not_an_empty_card():
+    """A scan's empty text layer extracted to "OK — 0 clauses" and rendered an
+    empty card (2026-11-02). Finding nothing must come back as an error the
+    agent tells the user about, and must not be cached as a result."""
+    from tools.extract_ppa_clauses import extract_ppa_clauses
+
+    blocks = [{"type": "text", "text": "Registro copia autentica", "block_id": "b0"}]
+    empty = json.dumps({"doc_id": "doc-1", "other_clauses": []})
+    ctx = _make_ctx()
+    with (
+        patch("tools.extract_ppa_clauses.build_document_context", return_value=("{}", blocks)),
+        patch("tools.extract_ppa_clauses._run_clause_extraction", new=AsyncMock(return_value=empty)),
+    ):
+        parsed = json.loads(await extract_ppa_clauses("doc-1", tool_context=ctx))
+
+    assert parsed["error_code"] == "no_clauses_found"
+    assert "no PPA clauses" in parsed["error"]
+    assert ctx.state == {}
+
+
+@pytest.mark.asyncio
 async def test_max_other_clauses_per_call_override_respected():
     """Per-call max_other_clauses beats the env-default cap; transparency
     fields (other_clauses_total / other_clauses_truncated) still populated."""

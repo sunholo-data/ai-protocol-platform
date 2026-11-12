@@ -1,0 +1,67 @@
+# Checks only — the same jobs as .github/workflows/ci.yml, run by Cloud Build
+# from a second-generation GitHub connection (scripts/ci/check.sh does the work).
+# The trigger supplies a dedicated identity with logging.logWriter only: pull
+# request code runs here, so it must never be a deploy identity. No application
+# credentials or deployment steps are part of this pipeline. Forks may use this
+# or the Actions workflow; platform-source runs this one.
+substitutions:
+  _UV_VERSION: '0.11.16'
+  _AUDIT_INCLUDE_DEV: '1'
+steps:
+  # GitHub app sources can arrive as an archive without .git. Build the local
+  # source index before checks that use git ls-files; no remote or credentials.
+  - id: source-index
+    name: gcr.io/cloud-builders/git
+    entrypoint: bash
+    args: ['-ceu', 'if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then git init -q && git add .; fi']
+  - id: backend
+    name: python:3.12-slim
+    waitFor: ['source-index']
+    entrypoint: bash
+    args: ['-ceu', 'apt-get update -qq && apt-get install -y -qq git curl && pip install --quiet uv==${_UV_VERSION} && bash scripts/ci/check.sh backend']
+  - id: cli
+    name: python:3.12-slim
+    waitFor: ['source-index']
+    entrypoint: bash
+    args: ['-ceu', 'apt-get update -qq && apt-get install -y -qq git curl && pip install --quiet uv==${_UV_VERSION} && bash scripts/ci/check.sh cli']
+  - id: frontend
+    name: node:22-slim
+    # Avoid running the two largest test processes simultaneously on 8 GiB.
+    waitFor: ['backend']
+    entrypoint: bash
+    args: ['scripts/ci/check.sh', 'frontend']
+  - id: safety
+    name: python:3.12-slim
+    waitFor: ['source-index']
+    entrypoint: bash
+    args: ['-ceu', 'apt-get update -qq && apt-get install -y -qq git curl && bash scripts/ci/check.sh safety']
+  - id: user-guide
+    name: node:22-slim
+    waitFor: ['source-index']
+    entrypoint: bash
+    args: ['scripts/ci/check.sh', 'guide']
+  - id: security
+    name: node:22-slim
+    waitFor: ['backend']
+    entrypoint: bash
+    env:
+      - AUDIT_INCLUDE_DEV=${_AUDIT_INCLUDE_DEV}
+      - UV_PYTHON=3.12
+    args:
+      - -ceu
+      - |
+        apt-get update -qq
+        apt-get install -y -qq python3 python3-venv git curl
+        python3 -m venv /tmp/audit-tools
+        /tmp/audit-tools/bin/pip install --quiet uv==${_UV_VERSION}
+        export PATH="/tmp/audit-tools/bin:$$PATH"
+        bash scripts/ci/check.sh security
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+  env:
+    - CI=true
+    - NEXT_TELEMETRY_DISABLED=1
+    - UV_CACHE_DIR=/workspace/.ci-cache/uv
+    - UV_PYTHON_INSTALL_DIR=/workspace/.ci-cache/python
+timeout: 1800s

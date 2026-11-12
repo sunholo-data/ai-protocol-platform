@@ -23,6 +23,7 @@ import { VolumeX } from "lucide-react";
 import { VoiceIcon } from "@/components/icons";
 import { useEffect, useRef, useState } from "react";
 import { fetchWithAuth } from "@/lib/apiClient";
+import { notify } from "@/components/ui/toast";
 
 interface ReadAloudButtonProps {
   /** Text to speak. Stripped of markdown / HTML before utterance. */
@@ -311,7 +312,12 @@ export function ReadAloudButton({
     for (let i = 0; i < chunks.length; i++) {
       if (cancelled) break;
       const url = await prefetch;
-      if (cancelled || url === null) break;
+      if (cancelled) break;
+      if (url === null) {
+        // Say so rather than quietly resetting the button.
+        notify.error(i === 0 ? "Couldn't read this aloud. Try again." : "Reading aloud stopped: the rest couldn't load.");
+        break;
+      }
 
       if (url === "__browser__") {
         // GCP told us to use browser — hand off remaining chunks locally.

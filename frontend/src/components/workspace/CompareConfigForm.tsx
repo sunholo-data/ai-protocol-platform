@@ -183,7 +183,7 @@ export function CompareConfigForm({
       className="space-y-4 rounded-md border border-border bg-muted/20 p-4"
     >
       <div className="space-y-1">
-        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           Scope the comparison
         </p>
         <p className="text-xs text-muted-foreground">

@@ -33,7 +33,7 @@ export function StreamErrorBanner({
     : "border-destructive/40 hover:bg-destructive/20";
   const offerReload = error.kind === "network" && Boolean(onReload);
   return (
-    <div className={`inline-block max-w-[80%] space-y-2 rounded-md border px-3 py-2 text-sm ${boxTone}`}>
+    <div role="alert" className={`inline-block max-w-[80%] space-y-2 rounded-md border px-3 py-2 text-sm ${boxTone}`}>
       <p>{error.message}</p>
       {offerReload && (
         <p className="text-xs opacity-80">

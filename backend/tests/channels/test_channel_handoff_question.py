@@ -34,7 +34,9 @@ async def _reply(fake) -> str:
         patch("channels._skill_invoke.build_access_context", lambda user: None),
     ):
         return await collect_reply(
-            stream_skill_events(skill_id="memo-writer", firebase_uid="u1", message="write a memo", channel_name="discord")
+            stream_skill_events(
+                skill_id="memo-writer", firebase_uid="u1", message="write a memo", channel_name="discord"
+            )
         )
 
 

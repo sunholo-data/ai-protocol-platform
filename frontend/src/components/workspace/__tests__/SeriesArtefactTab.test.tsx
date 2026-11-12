@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SeriesArtefactTab, rowsToCsv } from "../SeriesArtefactTab";
 
@@ -8,6 +8,11 @@ let dataRoot: unknown = null;
 vi.mock("@/providers/SurfaceRegistry", () => ({
   useSurfaceState: () => ({ surface: { dataModel: { get: (p: string) => (p === "/" ? dataRoot : undefined) } } }),
 }));
+
+/** The sort control is a real button inside the column header. */
+function sortButton(key: string): HTMLElement {
+  return within(screen.getByTestId(`series-col-${key}`)).getByRole("button");
+}
 
 function setData(d: unknown) {
   dataRoot = d;
@@ -259,11 +264,12 @@ describe("SeriesArtefactTab (6.12 M3 — table + CSV)", () => {
     setData(pricesFixture());
     const { container } = render(<SeriesArtefactTab surfaceId="entsoe_prices" />);
 
-    fireEvent.click(screen.getByTestId("series-col-price_eur_mwh"));
+    fireEvent.click(sortButton("price_eur_mwh"));
     let prices = rowCells(container).map((cells) => cells[1]);
     expect(prices).toEqual(["-7.60 EUR/MWh", "55.30 EUR/MWh", "80.00 EUR/MWh", "141.01 EUR/MWh"]);
+    expect(screen.getByTestId("series-col-price_eur_mwh")).toHaveAttribute("aria-sort", "ascending");
 
-    fireEvent.click(screen.getByTestId("series-col-price_eur_mwh"));
+    fireEvent.click(sortButton("price_eur_mwh"));
     prices = rowCells(container).map((cells) => cells[1]);
     expect(prices).toEqual(["141.01 EUR/MWh", "80.00 EUR/MWh", "55.30 EUR/MWh", "-7.60 EUR/MWh"]);
   });
@@ -280,7 +286,7 @@ describe("SeriesArtefactTab (6.12 M3 — table + CSV)", () => {
       }),
     );
     const { container } = render(<SeriesArtefactTab surfaceId="entsoe_prices" />);
-    const header = screen.getByTestId("series-col-price_eur_mwh");
+    const header = sortButton("price_eur_mwh");
 
     fireEvent.click(header); // ascending
     let prices = rowCells(container).map((cells) => cells[1]);
@@ -343,7 +349,7 @@ describe("SeriesArtefactTab (6.12 M3 — table + CSV)", () => {
     });
 
     render(<SeriesArtefactTab surfaceId="entsoe_prices" />);
-    fireEvent.click(screen.getByTestId("series-col-price_eur_mwh")); // sort ascending
+    fireEvent.click(sortButton("price_eur_mwh")); // sort ascending
     fireEvent.click(screen.getByTestId("series-csv-download"));
 
     expect(capturedBlob).not.toBeNull();

@@ -2,11 +2,12 @@
 
 /** AIPLA's talk-to-type: stop recording, transcribe, review the draft, send. */
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Mic, Square, X } from "lucide-react";
+import { Mic, Square, X } from "lucide-react";
 import { fetchWithAuth } from "@/lib/apiClient";
 import { AudioRecorder, isAudioCaptureSupported } from "@/lib/audioCapture";
 import { cancelVoicePlayback } from "@/hooks/useAutoReadAloud";
 import { RecordingLevelMeter } from "./RecordingLevelMeter";
+import { Spinner } from "@/components/ui/spinner";
 
 interface Props {
   skillId: string;
@@ -122,7 +123,7 @@ export function VoiceComposerControls({ skillId, lang = "auto", voiceInputEnable
         aria-label={mode === "recording" ? "Stop dictation" : mode === "transcribing" ? "Transcribing" : "Talk to type"}
         title={mode === "recording" ? "Stop dictation" : "Talk to type"}
         onClick={() => void (mode === "recording" ? stopAndTranscribe() : begin())}>
-        {mode === "starting" || mode === "transcribing" ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === "recording" ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+        {mode === "starting" || mode === "transcribing" ? <Spinner /> : mode === "recording" ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
       </button>
       {mode !== "idle" && <button type="button" className={style} aria-label="Cancel dictation" onClick={cancel}><X className="h-4 w-4" /></button>}
     </div>

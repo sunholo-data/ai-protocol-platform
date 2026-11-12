@@ -89,6 +89,12 @@ body as **Markdown**; the platform converts it to a real `.docx` and saves it to
 the user's workspace, where it appears in their file browser under **Created**
 and can be read back, compared or regenerated later.
 
+**Always end with the link.** `generate_document` returns `link` — the page
+where the person opens and downloads the file (they sign in; only they can
+open it). Give it with the file name, e.g. "**Kickoff confirmation.docx** is
+ready: <link>". This matters most outside the web app (Discord), where the
+file browser isn't on screen.
+
 Do **not** paste the full document into the chat and then also generate it. That
 doubles the length of every reply for no benefit. Write a one-or-two-line summary
 of what you produced and let the document be the deliverable.
@@ -107,6 +113,12 @@ of what you produced and let the document be the deliverable.
 `filename` — what the user would call it, with a real extension:
 `"Offer - Northwind.docx"`, not `"document.docx"`. A good name is how they will
 find it tomorrow.
+
+`customer` — who the document is for (a client or recipient, e.g.
+`"Northwind Oy"`). The house-style letterhead shows it next to the title and
+date; leave it empty for an internal document. The letterhead's **title is your
+first `#` heading** and the **date is today's**, so start the document with a
+proper `#` title. If it's clearly for a customer and they didn't say which, ask.
 
 ## Branding — on-brand is the DEFAULT, not a request
 

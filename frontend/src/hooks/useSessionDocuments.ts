@@ -8,6 +8,7 @@ interface SessionResponse {
   session: {
     document_ids?: string[];
     project_id?: string | null;
+    model_choice?: string | null;
   };
 }
 
@@ -23,6 +24,8 @@ interface UseSessionDocumentsReturn {
   /** The session row's project (projects §6.3): a project id, null when the
    * chat is in no project, undefined until the row has loaded (or failed). */
   projectId: string | null | undefined;
+  /** The chat's saved Model pick ("auto" when none), undefined until loaded. */
+  modelChoice: string | undefined;
 }
 
 /**
@@ -39,6 +42,7 @@ export function useSessionDocuments(sessionId: string | null): UseSessionDocumen
   const [tabs, setTabs] = useState<DocTabData[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [projectId, setProjectId] = useState<string | null | undefined>(undefined);
+  const [modelChoice, setModelChoice] = useState<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const lastSessionId = useRef<string | null>(null);
 
@@ -46,6 +50,7 @@ export function useSessionDocuments(sessionId: string | null): UseSessionDocumen
     if (!sessionId) {
       setTabs(null);
       setProjectId(undefined);
+      setModelChoice(undefined);
       lastSessionId.current = null;
       return;
     }
@@ -58,6 +63,7 @@ export function useSessionDocuments(sessionId: string | null): UseSessionDocumen
     setIsLoading(true);
     setTabs(null);
     setProjectId(undefined);
+    setModelChoice(undefined);
 
     void (async () => {
       try {
@@ -71,6 +77,8 @@ export function useSessionDocuments(sessionId: string | null): UseSessionDocumen
         if (controller.signal.aborted) return;
         const pid = sessionData.session?.project_id;
         setProjectId(typeof pid === "string" && pid ? pid : null);
+        const mc = sessionData.session?.model_choice;
+        setModelChoice(typeof mc === "string" && mc ? mc : "auto");
         if (docIds.length === 0) {
           setTabs([]);
           return;
@@ -110,8 +118,13 @@ export function useSessionDocuments(sessionId: string | null): UseSessionDocumen
       }
     })();
 
-    return () => abortRef.current?.abort();
+    return () => {
+      abortRef.current?.abort();
+      // An aborted fetch never loaded this session, so a re-run for the same
+      // id (React's dev double-mount) must fetch again rather than skip.
+      lastSessionId.current = null;
+    };
   }, [sessionId]);
 
-  return { tabs, isLoading, projectId };
+  return { tabs, isLoading, projectId, modelChoice };
 }

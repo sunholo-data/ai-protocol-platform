@@ -234,8 +234,10 @@ describe("ChatMessageList", () => {
     // ToolCallChip renders the friendly tool label as visible text. Pre-fix this
     // assertion fails because "Web search" appears in BOTH a1 and a2
     // bubbles (every non-keyed bubble falls back to __unparented__).
-    const occurrences = screen.queryAllByText("Web search");
+    // The steps line under the reply names it ("Used Web search").
+    const occurrences = screen.queryAllByTestId("steps-summary");
     expect(occurrences).toHaveLength(1);
+    expect(occurrences[0].textContent).toContain("Web search");
   });
 });
 

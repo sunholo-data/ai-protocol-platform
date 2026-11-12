@@ -5,7 +5,7 @@
 // the one that made a deliberate Workspace click appear not to register.
 
 import { describe, expect, it } from "vitest";
-import { forgetFocusedResult, nextFocusedResult } from "@/lib/workbenchFocus";
+import { forgetFocusedResult, nextFocusedResult, requestWorkbenchFocus, subscribeWorkbenchFocus } from "@/lib/workbenchFocus";
 
 describe("nextFocusedResult", () => {
   it("focuses the first result to arrive", () => {
@@ -59,5 +59,16 @@ describe("nextFocusedResult", () => {
   it("survives an empty workbench without focusing anything", () => {
     const seen = new Set<string>();
     expect(nextFocusedResult([], seen)).toBeNull();
+  });
+});
+
+describe("requestWorkbenchFocus", () => {
+  it("reaches each subscriber until it unsubscribes", () => {
+    const got: string[] = [];
+    const unsubscribe = subscribeWorkbenchFocus((id) => got.push(id));
+    requestWorkbenchFocus("daneel_approvals");
+    unsubscribe();
+    requestWorkbenchFocus("workspace");
+    expect(got).toEqual(["daneel_approvals"]);
   });
 });

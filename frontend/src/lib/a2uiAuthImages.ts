@@ -32,6 +32,9 @@ import { logger } from "@/lib/logger";
 /** Backend paths reachable only through the authenticated proxy. */
 const BACKEND_PATH = /^\/api\//;
 const PROXY_PREFIX = "/api/proxy";
+/** Basic-catalog components whose `url` is media an element loads by itself
+ * (`show_media`: pictures, video and audio). */
+const MEDIA_COMPONENTS = new Set(["Image", "Video", "AudioPlayer"]);
 
 interface ImageComponent {
   id?: string;
@@ -40,7 +43,7 @@ interface ImageComponent {
   [k: string]: unknown;
 }
 
-/** Every `Image` component in these messages whose url needs authenticating. */
+/** Every media component (Image, Video, AudioPlayer) in these messages whose url needs authenticating. */
 export function findAuthImages(messages: readonly Record<string, unknown>[]): ImageComponent[] {
   const found: ImageComponent[] = [];
   for (const message of messages) {
@@ -49,7 +52,8 @@ export function findAuthImages(messages: readonly Record<string, unknown>[]): Im
     for (const raw of update.components) {
       const c = raw as ImageComponent;
       if (
-        c?.component === "Image" &&
+        typeof c?.component === "string" &&
+        MEDIA_COMPONENTS.has(c.component) &&
         typeof c.url === "string" &&
         BACKEND_PATH.test(c.url) &&
         !c.url.startsWith(PROXY_PREFIX)

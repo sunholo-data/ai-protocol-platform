@@ -5,12 +5,14 @@
 //      Thinking…). Wins over toolName so the per-stage breakdown the agent emits
 //      stays the source of truth — see docs/design/v6.1.0/ttft-instrumentation.md.
 //   2. activeToolName — fallback when no stage label, but a tool is running.
-//   3. Bouncing dots — pure waiting, no signal yet.
+//   3. Bouncing dots — pure waiting, no signal yet. After a few seconds of
+//      that the dots say so in words, so a slow start never looks like a hang.
 // Disappears on first token.
 // See: docs/talks/workshop.md §W5
 
 "use client";
 
+import { useEffect, useState } from "react";
 import { BrandAvatar } from "@/components/chat/BrandAvatar";
 import { useToolLabels } from "@/hooks/useToolLabels";
 
@@ -29,10 +31,16 @@ export function TypingIndicator({ stageLabel, activeToolName }: TypingIndicatorP
   const labelText = stageLabel ?? null;
   const labelFor = useToolLabels();
   const toolText = !labelText && activeToolName ? labelFor(activeToolName) : null;
+  const waited = useSecondsSinceMount();
+  const waitText = waited >= 20 ? "Still working…" : waited >= 5 ? "Working on it…" : null;
 
   return (
     // Unboxed, like the assistant message it stands in for; avatar on desktop only.
-    <div className="flex items-start gap-3" role="status" aria-live="polite">
+    <div
+      className="flex items-start gap-3 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300"
+      role="status"
+      aria-live="polite"
+    >
       <div className="hidden shrink-0 md:block">
         <BrandAvatar />
       </div>
@@ -63,9 +71,21 @@ export function TypingIndicator({ stageLabel, activeToolName }: TypingIndicatorP
               className="h-1.5 w-1.5 rounded-full bg-primary motion-safe:animate-bounce"
               style={{ animationDelay: "300ms" }}
             />
+            {waitText && <span className="ml-1 text-sm text-muted-foreground">{waitText}</span>}
           </>
         )}
       </div>
     </div>
   );
+}
+
+/** Whole seconds since the indicator appeared (ticks once a second). */
+function useSecondsSinceMount(): number {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const id = window.setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return seconds;
 }

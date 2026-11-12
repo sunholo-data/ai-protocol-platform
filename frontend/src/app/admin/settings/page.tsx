@@ -12,6 +12,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/apiClient";
 import { SignInRequired } from "@/components/chat/SignInRequired";
 import { CompactionSettingsSection, type CompactionSettings } from "./CompactionSettings";
+import { PageLoading } from "@/components/ui/skeleton";
+import { useFormat } from "@/i18n";
 
 type PlatformConfig = {
   preamble: string;
@@ -28,6 +30,7 @@ type Probe = "loading" | "admin" | "forbidden" | "error";
 
 export default function PlatformSettingsPage() {
   const { user, loading } = useAuth();
+  const fmt = useFormat();
   const [probe, setProbe] = useState<Probe>("loading");
 
   const [preamble, setPreamble] = useState("");
@@ -94,7 +97,7 @@ export default function PlatformSettingsPage() {
     }
   };
 
-  if (loading) return <Centered>Loading…</Centered>;
+  if (loading) return <PageLoading />;
   if (!user) return <SignInRequired />;
   if (probe === "forbidden") {
     return (
@@ -108,7 +111,7 @@ export default function PlatformSettingsPage() {
       </Centered>
     );
   }
-  if (probe === "loading") return <Centered>Loading…</Centered>;
+  if (probe === "loading") return <PageLoading />;
   if (probe === "error") return <Centered>Something went wrong loading platform settings.</Centered>;
 
   const overLimit = preamble.length > PREAMBLE_MAX_LEN;
@@ -139,12 +142,12 @@ export default function PlatformSettingsPage() {
         />
         <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
           <span className={overLimit ? "text-red-600" : undefined}>
-            {preamble.length.toLocaleString()} / {PREAMBLE_MAX_LEN.toLocaleString()} characters
+            {fmt.number(preamble.length)} / {fmt.number(PREAMBLE_MAX_LEN)} characters
           </span>
           {meta.updatedBy && (
             <span>
               Last edited by <code>{meta.updatedBy}</code>
-              {meta.updatedAt ? ` · ${new Date(meta.updatedAt * 1000).toLocaleString()}` : ""}
+              {meta.updatedAt ? ` · ${fmt.dateTime(meta.updatedAt * 1000)}` : ""}
             </span>
           )}
         </div>

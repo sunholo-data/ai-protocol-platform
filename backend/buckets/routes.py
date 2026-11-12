@@ -26,6 +26,7 @@ from auth import AccessContext, User, get_current_user
 from buckets import bucket_config, folder_config
 from db.clients import UnmappedTenantError, resolve_documents_bucket
 from db.models import AccessControl, BucketConfig, BucketFolderConfig
+from tools.documents.media import MEDIA_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -656,6 +657,8 @@ _CONTENT_TYPE_BY_EXT = {
     "html": "text/html",
     "htm": "text/html",
     "csv": "text/csv",
+    # Video and audio play from /preview (tools/documents/media.py).
+    **{ext.lstrip("."): mime for ext, mime in MEDIA_TYPES.items()},
 }
 
 

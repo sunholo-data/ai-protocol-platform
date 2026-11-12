@@ -125,7 +125,7 @@ describe("mutations", () => {
   it("a network failure is a message, not a throw", async () => {
     mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     const r = await removeDocumentFromProject("p1", "d1");
-    expect(r).toEqual({ ok: false, message: "Couldn't remove it from the project (network error)." });
+    expect(r).toEqual({ ok: false, message: "Couldn't remove it from the project (network error).", code: "NETWORK" });
   });
 });
 

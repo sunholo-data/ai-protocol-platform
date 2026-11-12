@@ -16,13 +16,24 @@ A fake placeholder + channel is used; no real discord.py wiring.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from channels.discord import DiscordChannel
+
+
+@pytest.fixture(autouse=True)
+def isolated_discord_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Patching time.monotonic on the shared module also changes asyncio's
+    # scheduler clock. Give the adapter its own namespace so background tasks
+    # cannot exhaust the batching test's finite ticks (StopIteration in CI).
+    monkeypatch.setattr("channels.discord.time", SimpleNamespace(monotonic=time.monotonic))
 
 
 async def _events(seq: list[dict[str, Any]]) -> AsyncIterator[dict[str, Any]]:
@@ -119,6 +130,9 @@ class TestStreaming:
         # 1.0s threshold so the second delta crosses the gate.
         ticks = iter([0.0, 5.0, 5.1])
         monkeypatch.setattr("channels.discord.time.monotonic", lambda: next(ticks))
+        # Ambient scheduler bookkeeping must not consume the adapter's ticks.
+        for _ in range(4):
+            asyncio.get_running_loop().time()
 
         events = [
             {"type": "TEXT_MESSAGE_CONTENT", "delta": "first"},

@@ -75,7 +75,7 @@ function ProjectChoices({ docId, filename, projectIds, onFeedback, onNewProject 
   return (
     <>
       {status === "loading" && projects.length === 0 && (
-        <DropdownMenu.Label className="px-2 py-1 text-[10px] text-muted-foreground">Loading projects…</DropdownMenu.Label>
+        <DropdownMenu.Label className="px-2 py-1 text-[11px] text-muted-foreground">Loading projects…</DropdownMenu.Label>
       )}
       {status === "error" && (
         <DropdownMenu.Item

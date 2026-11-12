@@ -175,15 +175,34 @@ async def list_documents(
         "Refer to them by name (+ upload date to disambiguate duplicates); do NOT "
         "show the [ref] ids to the user:\n"
     ]
-    lines += [_document_line(doc) for doc in docs]
+    names = _folder_names_or_empty(user_id)
+    lines += [_document_line(doc, names) for doc in docs]
     return "\n".join(lines)
 
 
-def _document_line(doc: dict) -> str:
-    """One friendly listing line: filename, format, size, upload date, then the
-    opaque ref the model uses and never shows (CLAUDE.md #9)."""
+def _folder_names_or_empty(user_id: str) -> dict[str, str]:
+    """Folder names for library paths; a listing without them still works."""
+    from tools.documents.paths import folder_names
+
+    try:
+        return folder_names(user_id)
+    except Exception as exc:
+        logger.warning("list_documents: could not read folder names for %s: %s", user_id, exc)
+        return {}
+
+
+def _document_line(doc: dict, folder_names: dict[str, str] | None = None) -> str:
+    """One friendly listing line: path (folder/filename), format, size, upload
+    date, then the opaque ref the model uses and never shows (CLAUDE.md #9).
+    The folder matters: a synced repository has an ``index.md`` in every folder,
+    and Markdown documents link to each other by path."""
+    from tools.documents.paths import path_of
+
     doc_id = doc.get("__id") or doc.get("id") or "?"
-    filename = doc.get("originalFilename", "Unknown")
+    filename = path_of(
+        {"originalFilename": doc.get("originalFilename", "Unknown"), "folderId": doc.get("folderId")},
+        folder_names or {},
+    )
     status = doc.get("status") or doc.get("parseStatus") or "unknown"
     fmt = doc.get("sourceFormat", "")
     summary = doc.get("summary") or {}
@@ -247,32 +266,59 @@ def _list_found_project(user_id: str, found: dict, limit: int, by_default: bool)
         else ""
     )
     header = (
-        f"{scope_note}The project \u201c{name}\u201d has these documents.{more} Refer to them by name (+ upload "
-        "date to disambiguate duplicates); do NOT show the [ref] ids to the user:\n"
+        f"{scope_note}The project \u201c{name}\u201d has these documents, by path (folder/file).{more} Refer to "
+        "them by name (+ upload date to disambiguate duplicates); do NOT show the [ref] ids to the user:\n"
     )
-    return header + "\n".join(_document_line(doc) for doc in docs)
+    names = _folder_names_or_empty(user_id)
+    return header + "\n".join(_document_line(doc, names) for doc in docs)
 
 
 async def get_document_content(
-    doc_id: str,
+    doc_id: str = "",
     section: str | None = None,
     mode: str = "markdown",
+    path: str = "",
     tool_context: ToolContext = None,
 ) -> str:
-    """Get content of a parsed document.
+    """Get content of a parsed document — whole, by section, or just its outline.
+
+    For a long document (a report, a filing, a contract with many clauses), call
+    mode="outline" FIRST: it lists every section with an id, title, printed page
+    range and size, for a small fraction of the full text. Then open only the
+    sections you need by id, e.g. section="4.2" or section="2, 4.2". Cite the
+    page numbers the result shows.
+
+    Documents in folders (a synced repository, a Markdown wiki, an Open Knowledge
+    Format bundle) link to each other by path. To follow such a link, pass it as
+    path= instead of doc_id: "tables/customers.md", "/tables/customers.md" or the
+    full "<folder>/<file>" path list_documents shows. A link that starts with ../
+    is relative to the linking document's Path (shown at the top of its content).
 
     Args:
-        doc_id: The document ID from list_documents.
-        section: Optional section heading to extract (case-insensitive substring). Omit for full document.
-        mode: Output format — "markdown" for reading/chat (default), "blocks" for extraction tasks
-              where table structure and tracked changes must be preserved exactly.
+        doc_id: The document ID (ref) from list_documents or search. Omit when giving path.
+        section: Optional. Outline ids ("4.2", or several comma-separated), or a heading
+            title (exact, else a unique part of it; when several headings match, their ids
+            are listed for you to choose). Returns that section with all its subsections.
+            Omit for the full document.
+        mode: "markdown" for reading/chat (default); "outline" for the section list without
+              the text (with section=, the subsections of that section); "blocks" for
+              extraction tasks where table structure and tracked changes must be preserved
+              exactly.
+        path: Instead of doc_id, the document's library path or a Markdown link's target.
 
     Returns:
-        Document content as markdown, or JSON blocks string when mode="blocks".
+        Document content as markdown, its outline, or a JSON blocks string when mode="blocks".
     """
     from tools.documents.context import DocumentAccessError, resolve_caller_uid
 
     caller_uid = resolve_caller_uid(tool_context)
+    doc_id = (doc_id or "").strip()
+    if not doc_id:
+        if not (path or "").strip():
+            return "Nothing was opened: give doc_id (a ref from list_documents or search) or path."
+        doc_id, problem = await _resolve_document_path(caller_uid, path, tool_context)
+        if problem:
+            return problem
     try:
         content, blocks = await asyncio.to_thread(build_document_context, doc_id, mode, section, caller_uid=caller_uid)
     except DocumentAccessError:
@@ -293,6 +339,27 @@ async def get_document_content(
 
     await _record_session_document(tool_context, doc_id)
     return content
+
+
+async def _resolve_document_path(caller_uid: str, path: str, tool_context: ToolContext | None) -> tuple[str, str]:
+    """``(ref, "")`` for the caller's document at ``path``, else ``("", message)``. Inside a project chat only the project's documents are candidates (the
+    project rule); elsewhere the caller's library folders."""
+    from adk.project_scope import current_project
+    from tools.documents import paths
+
+    if not caller_uid:
+        logger.warning("get_document_content: no caller uid resolved — refusing a path lookup")
+        return "", "Could not identify the current user, so no document can be opened by path."
+    project = await asyncio.to_thread(current_project, tool_context) if tool_context is not None else None
+    project_id = str((project or {}).get("id") or "")
+    try:
+        found = await asyncio.to_thread(paths.resolve, caller_uid, path, project_id)
+    except Exception as exc:
+        logger.warning("get_document_content: path lookup failed for %r: %s", path, exc)
+        return "", f"Could not look up the path '{path}': {exc}"
+    if not found.doc_id:
+        return "", paths.not_found_message(path, found, in_project=bool(project_id))
+    return found.doc_id, ""
 
 
 async def _record_session_document(tool_context: ToolContext | None, doc_id: str) -> None:
@@ -322,6 +389,20 @@ async def _record_session_document(tool_context: ToolContext | None, doc_id: str
 # Model-aware tools (ai_search, google_search, code_execution) are resolved
 # directly in agent.py's create_agent() based on the skill's model.
 # MCP tools are loaded via tools/mcp/registry.py and returned as McpToolset.
+
+
+def _speak_tool() -> FunctionTool:
+    """Lazy import: adk.speak pulls in the voice layer."""
+    from adk.speak import speak
+
+    return FunctionTool(speak)
+
+
+def _generate_image_tool() -> FunctionTool:
+    """Lazy import: adk.generate_image pulls in the image-generation layer."""
+    from adk.generate_image import generate_image
+
+    return FunctionTool(generate_image)
 
 
 def _extract_ppa_clauses_factory(_config: dict) -> FunctionTool:
@@ -411,6 +492,8 @@ def _ailang_messages_factory(_config: dict) -> FunctionTool:
 TOOL_REGISTRY: dict[str, Callable[[dict], FunctionTool]] = {
     "list_documents": lambda _config: FunctionTool(list_documents),
     "get_document_content": lambda _config: FunctionTool(get_document_content),
+    "speak": lambda _config: _speak_tool(),
+    "generate_image": lambda _config: _generate_image_tool(),
     # v6.32.0 DOC-CREATE M2: markdown in, a real document in the workspace.
     "generate_document": _generate_document_factory,
     "url_processing": lambda _config: FunctionTool(url_processing),
@@ -547,6 +630,18 @@ TOOL_CATALOG: list[dict[str, str]] = [
         "category": "Documents",
     },
     {
+        "name": "speak",
+        "label": "Speak",
+        "description": "Turn text into a recording the user can play, in any of the deployment's voices.",
+        "category": "Media",
+    },
+    {
+        "name": "generate_image",
+        "label": "Generate images",
+        "description": "Make or edit pictures from a description, with the deployment's image engines.",
+        "category": "Media",
+    },
+    {
         "name": "generate_document",
         "label": "Create a document",
         "description": "Write a Word document into the workspace, optionally styled from a template.",
@@ -662,7 +757,9 @@ def resolve_tools(tool_names: list[str], tool_configs: dict[str, dict]) -> list[
                 f"Unknown tool {name!r} — not in TOOL_REGISTRY and not model-aware. "
                 "Check the skill config or add the tool to TOOL_REGISTRY."
             )
-        config = tool_configs.get(name, {})
+        # A factory may read another tool's config (``config_key``): tools that
+        # share one binding, e.g. knowledge_new uses knowledge_search's.
+        config = tool_configs.get(getattr(factory, "config_key", None) or name, {})
         resolved.append(factory(config))
     return resolved
 
@@ -682,7 +779,12 @@ class McpServerResolutionError(RuntimeError):
     """
 
 
-def resolve_mcp_tools(tool_configs: dict[str, dict], user_email: str = "", user_domain: str = "") -> list:
+def resolve_mcp_tools(
+    tool_configs: dict[str, dict],
+    user_email: str = "",
+    user_domain: str = "",
+    group_tags: frozenset[str] = frozenset(),
+) -> list:
     """Return McpToolset instances for any MCP servers listed in tool_configs.
 
     Called from agent.py when "mcp" appears in the skill's tool list.
@@ -694,6 +796,8 @@ def resolve_mcp_tools(tool_configs: dict[str, dict], user_email: str = "", user_
             Firebase UID — every policy on this platform is keyed on email and
             domain, so passing the UID silently fails every gate.
         user_domain: the authenticated user's domain, same reason.
+        group_tags: the user's group tags, for servers whose access follows the
+            platform's access rules (``auth: github_app``).
 
     Returns:
         List of McpToolset instances (empty if no mcp config).
@@ -709,7 +813,7 @@ def resolve_mcp_tools(tool_configs: dict[str, dict], user_email: str = "", user_
         return []
     from tools.mcp.registry import get_mcp_tools_with_status
 
-    resolved, missing = get_mcp_tools_with_status(server_ids, user_email, user_domain)
+    resolved, missing = get_mcp_tools_with_status(server_ids, user_email, user_domain, group_tags)
     if missing:
         # G42: fail-loud at agent-build time. The agent built with a
         # subset of declared servers can't fulfil the SKILL.md's

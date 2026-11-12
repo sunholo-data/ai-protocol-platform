@@ -41,22 +41,16 @@ describe("AdminHub IA", () => {
     asPlatform();
   });
 
-  it("renders five task-shaped areas for a platform admin", async () => {
+  it("renders four task-shaped areas for a platform admin", async () => {
     render(<AdminHub />);
-    for (const title of ["Your tenant", "People & access", "Skills", "Activity & audit", "Platform"]) {
+    for (const title of ["Workspace", "People", "Skills and activity", "Platform"]) {
       expect(screen.getByText(title)).toBeTruthy();
     }
   });
 
-  it("names the question each area answers, not the API it wraps", () => {
-    render(<AdminHub />);
-    expect(screen.getByText(/what do my users actually see/i)).toBeTruthy();
-    expect(screen.getByText(/who is here, and what may they use/i)).toBeTruthy();
-  });
-
   it("surfaces the effective-access entry point", () => {
     render(<AdminHub />);
-    expect(screen.getByText("What your users actually see")).toBeTruthy();
+    expect(screen.getByText("What your users see")).toBeTruthy();
   });
 
   it("hides the Platform area from a tenant admin (no door that always slams)", () => {
@@ -64,8 +58,8 @@ describe("AdminHub IA", () => {
     render(<AdminHub />);
     expect(screen.queryByText("Platform")).toBeNull();
     // ...but the areas they CAN use are still there.
-    expect(screen.getByText("Your tenant")).toBeTruthy();
-    expect(screen.getByText("People & access")).toBeTruthy();
+    expect(screen.getByText("Workspace")).toBeTruthy();
+    expect(screen.getByText("People")).toBeTruthy();
   });
 
   it("tells a tenant admin their view is scoped, so a short list isn't confusing", () => {

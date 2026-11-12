@@ -43,16 +43,6 @@ describe("UserMenu", () => {
     expect(auth.signOut).toHaveBeenCalledOnce();
   });
 
-  it("runs a phone-only header action and closes the menu", () => {
-    auth.user = { displayName: "Mark", email: "owner@yourcompany.com", photoURL: null };
-    const onSelect = vi.fn();
-    render(<UserMenu phoneItems={[{ label: "Create a new skill", icon: null, onSelect }]} />);
-    fireEvent.click(screen.getByLabelText("Account menu"));
-    fireEvent.click(screen.getByText("Create a new skill"));
-    expect(onSelect).toHaveBeenCalledOnce();
-    expect(screen.queryByText("Sign out")).toBeNull();
-  });
-
   it("falls back to an initial chip when there is no photoURL", () => {
     auth.user = { displayName: "Zara", email: "z@x.com", photoURL: null };
     render(<UserMenu />);

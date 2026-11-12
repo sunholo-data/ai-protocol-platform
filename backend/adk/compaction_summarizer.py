@@ -284,6 +284,10 @@ def build_compaction_summarizer() -> LlmEventSummarizer | None:
         # TUNING-CONSOLE (1b): an admin may override the tier; the resolver
         # rejects raw api names so a bad value can't silently take a fallback.
         llm = resolve_model_chain(summarizer_model_ref("pro"))
+        # Housekeeping, not the turn: don't announce its calls in Activity or
+        # relabel the turn's model as the summariser's.
+        if hasattr(llm, "reports_model"):
+            llm.reports_model = False
     except Exception as exc:
         logger.warning(
             "compaction summarizer unavailable (%s); ADK will use its default, which drops tool results from summaries",

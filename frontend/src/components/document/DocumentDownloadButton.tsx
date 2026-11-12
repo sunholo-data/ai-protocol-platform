@@ -63,7 +63,7 @@ export function DocumentDownloadButton({ docId, filename, className }: DocumentD
   return (
     <span className="flex shrink-0 items-center gap-1">
       {error && (
-        <span className="text-[10px] text-destructive" role="alert">
+        <span className="text-[11px] text-destructive" role="alert">
           {error}
         </span>
       )}

@@ -2,6 +2,8 @@
 
 import { useEffect, useId, useState } from "react";
 
+import { useFormat } from "@/i18n";
+
 interface InstructionsEditorProps {
   label: string;
   description?: string;
@@ -11,6 +13,8 @@ interface InstructionsEditorProps {
   /** Persist. Resolve to an error message to show, or null when saved. */
   onSave: (text: string) => Promise<string | null>;
   className?: string;
+  /** The surrounding page already titles the field (Settings → Instructions). */
+  hideLabel?: boolean;
 }
 
 type SaveState = { kind: "idle" } | { kind: "saving" } | { kind: "saved" } | { kind: "error"; message: string };
@@ -31,8 +35,10 @@ export function InstructionsEditor({
   maxLength,
   onSave,
   className = "",
+  hideLabel = false,
 }: InstructionsEditorProps) {
   const id = useId();
+  const fmt = useFormat();
   const [draft, setDraft] = useState(value);
   const [focused, setFocused] = useState(false);
   const [save, setSave] = useState<SaveState>({ kind: "idle" });
@@ -47,7 +53,7 @@ export function InstructionsEditor({
 
   async function commit(text: string) {
     if (tooLong) {
-      setSave({ kind: "error", message: `At most ${maxLength.toLocaleString()} characters — this is ${draft.length.toLocaleString()}.` });
+      setSave({ kind: "error", message: `At most ${fmt.number(maxLength)} characters — this is ${fmt.number(draft.length)}.` });
       return;
     }
     setSave({ kind: "saving" });
@@ -57,11 +63,11 @@ export function InstructionsEditor({
 
   return (
     <div className={`space-y-1.5 ${className}`}>
-      <label htmlFor={id} className="block text-sm font-medium text-foreground">
+      <label htmlFor={id} className={hideLabel ? "sr-only" : "block text-sm font-medium text-foreground"}>
         {label}
       </label>
       {description && (
-        <p id={`${id}-desc`} className="text-xs text-muted-foreground">
+        <p id={`${id}-desc`} className={hideLabel ? "sr-only" : "text-xs text-muted-foreground"}>
           {description}
         </p>
       )}
@@ -107,7 +113,7 @@ export function InstructionsEditor({
         </span>
         {(focused || tooLong) && (
           <span className={tooLong ? "text-destructive" : "text-muted-foreground"}>
-            {draft.length.toLocaleString()} / {maxLength.toLocaleString()}
+            {fmt.number(draft.length)} / {fmt.number(maxLength)}
           </span>
         )}
       </div>

@@ -461,3 +461,33 @@ def test_nested_subcollections(client):
     deep.document("x").set({"v": 1})
     assert deep.document("x").get().to_dict() == {"v": 1}
     assert deep.document("x").path == "a/b/c/d/e/x"
+
+
+def test_select_projects_fields_like_firestore():
+    from db.firestore_inmemory import InMemoryFirestoreClient
+
+    client = InMemoryFirestoreClient()
+    client.collection("docs").document("d1").set({"name": "a", "blocks": [1, 2], "createdAt": "x"})
+    rows = list(client.collection("docs").order_by("createdAt").select(["name"]).stream())
+    assert [r.to_dict() for r in rows] == [{"name": "a"}]
+    # __name__ alone: the document, no fields.
+    assert [(r.id, r.to_dict()) for r in client.collection("docs").select(["__name__"]).stream()] == [("d1", {})]
+    # A projection survives later chaining.
+    assert next(iter(client.collection("docs").select(["name"]).limit(5).stream())).to_dict() == {"name": "a"}
+
+
+def test_get_documents_batches_with_a_projection():
+    import db.firestore as fs
+    from db.firestore_inmemory import InMemoryFirestoreClient
+
+    client = InMemoryFirestoreClient()
+    for i in range(150):
+        client.collection("docs").document(f"d{i}").set({"name": f"n{i}", "blocks": [1] * 50})
+    saved = fs._client
+    fs._client = client
+    try:
+        got = fs.get_documents("docs", [f"d{i}" for i in range(150)] + ["missing", "d0"], fields=["name"])
+    finally:
+        fs._client = saved
+    assert len(got) == 150 and "missing" not in got
+    assert got["d7"] == {"name": "n7"}  # projected: no blocks

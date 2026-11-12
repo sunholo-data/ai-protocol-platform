@@ -28,6 +28,7 @@ from db.models.platform_config import (
     CompactionSettings,
     PlatformConfig,
 )
+from i18n import validate_locales_block
 
 # Agent Skills spec: lowercase kebab-case, no leading/trailing/consecutive hyphens
 _NAME_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
@@ -228,6 +229,12 @@ class SkillMetadata(BaseModel):
     # (map_ppa_obligations) — a skill may have both. See v6.12.0
     # mcp-elicitation-adoption.md (same envelope, agent-sourced).
     enable_confirmation: bool = Field(default=True, alias="enableConfirmation")
+    # The composer's Model menu (adk.model_choice). Default ON: the person's
+    # Fast / Thorough / specific-model pick replaces `model` for this skill.
+    # False keeps `model` whatever they pick — a front door that only routes
+    # (its delegates still follow the pick), a model-branded assistant, or a
+    # skill whose A2UI output was proven on one model.
+    model_choice: bool = Field(default=True, alias="modelChoice")
 
     model_config = {"populate_by_name": True}
 
@@ -488,6 +495,12 @@ class SkillConfig(BaseModel):
     access_control: AccessControl = Field(default_factory=AccessControl, alias="accessControl")
     protocols: Protocols = Field(default_factory=Protocols)
     initial_message: str = Field(default="", alias="initialMessage")
+    # v6.43.0 MULTI-LANG M3: per-locale text for the three fields a person reads,
+    # `{tag: {display_name?, description?, initial_message?}}` — inner keys are
+    # snake_case exactly as in SKILL.md, and the API returns the map unchanged.
+    # Resolved for display by the frontend (`localizedField`); the instruction
+    # body is never localised (design §5). Validated by i18n.validate_locales_block.
+    locales: dict[str, dict[str, str]] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
     featured: bool = False
     usage_count: int = Field(default=0, alias="usageCount")
@@ -541,6 +554,11 @@ class SkillConfig(BaseModel):
         if len(v) > 1024:
             raise ValueError("description must be at most 1024 characters")
         return v
+
+    @field_validator("locales", mode="before")
+    @classmethod
+    def _validate_locales(cls, v: object) -> dict[str, dict[str, str]]:
+        return validate_locales_block(v)
 
     @field_validator("instructions")
     @classmethod

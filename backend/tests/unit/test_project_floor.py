@@ -224,12 +224,19 @@ _CLASSIFIED_SAFE = {
     "browse",  # the web
     "entsoe_day_ahead_prices",  # market data
     "generate_document",  # writes a NEW document from the model's markdown
+    "speak",  # makes a NEW recording; reads no document
     "my_context",
     "url_processing",  # the web
     "knowledge_search",  # project-filtered in scoped chats (private/knowledge/tools.py)
     "list_documents",  # project-only in scoped chats (adk/tools.py)
 }
-_DOC_ARG_TOOLS = {"get_document_content", "extract_ppa_clauses", "map_ppa_obligations", "compare_ppa_contracts"}
+_DOC_ARG_TOOLS = {
+    "generate_image",
+    "get_document_content",
+    "extract_ppa_clauses",
+    "map_ppa_obligations",
+    "compare_ppa_contracts",
+}
 
 
 def test_every_registered_tool_is_classified():

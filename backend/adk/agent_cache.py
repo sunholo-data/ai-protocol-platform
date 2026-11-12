@@ -52,8 +52,13 @@ def clear() -> None:
 
 def _key(skill: SkillConfig, access: AccessContext) -> tuple:
     # AccessContext is a frozen dataclass (group_tags is a frozenset), so it is
-    # hashable and safe to embed directly.
-    return (skill.skill_id, skill.updated_at, access)
+    # hashable and safe to embed directly. Interactivity is part of the build:
+    # a channel turn gets real confirm-floor delegates, the web gets stubs.
+    from adk.elicitation import NON_INTERACTIVE
+    from adk.model_choice import ACTIVE_CHOICE
+
+    # The person's Model pick changes every agent's model in the tree.
+    return (skill.skill_id, skill.updated_at, access, NON_INTERACTIVE.get(), ACTIVE_CHOICE.get())
 
 
 def get_or_build(skill: SkillConfig, access: AccessContext, builder: Callable[[], Any]) -> tuple[Any, bool]:

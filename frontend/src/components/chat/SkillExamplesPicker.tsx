@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import type { ExampleDocument, ExamplePrompt } from "@/types/skill";
 import type { RecentDocument, RecentDocumentsStatus } from "@/hooks/useRecentDocuments";
 import { cn } from "@/lib/utils";
-import { relativeTime } from "@/lib/relativeTime";
+import { useFormat } from "@/i18n";
 import { DocumentThumbnail } from "@/components/document/DocumentThumbnail";
 
 interface SkillExamplesPickerProps {
@@ -113,7 +113,7 @@ export function SkillExamplesPicker({
       {showPrompts && (
         <section className="space-y-3" data-testid="example-prompts">
           <div className="space-y-1">
-            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
               Try one of these
             </p>
             <h3 className="text-lg font-semibold tracking-tight text-foreground">
@@ -137,7 +137,7 @@ export function SkillExamplesPicker({
                   className="group flex h-full w-full flex-col gap-1 rounded-lg border border-border bg-background p-3 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/40 hover:shadow-md focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   {p.badge && (
-                    <span className="w-fit rounded-md bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-primary">
+                    <span className="w-fit rounded-md bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wider text-primary">
                       {p.badge}
                     </span>
                   )}
@@ -169,7 +169,7 @@ export function SkillExamplesPicker({
 
       {showExamples && (
         <div className="space-y-1">
-          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
             {showPrompts ? "Or start from a document" : "Try with an example"}
           </p>
           <h3 className="text-lg font-semibold tracking-tight text-foreground">
@@ -217,7 +217,7 @@ export function SkillExamplesPicker({
           <button
             type="button"
             onClick={onUploadOwn}
-            className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-primary"
+            className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-primary"
           >
             Or upload your own document ↑
           </button>
@@ -250,10 +250,11 @@ function RecentDocuments({
   onResumeSession?: (sessionId: string) => void;
   heading?: { eyebrow: string; title: string; description: string };
 }) {
+  const fmt = useFormat();
   return (
     <section className="space-y-3" data-testid="recent-documents" aria-labelledby="recent-documents-heading">
       <div className="space-y-1">
-        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           {heading?.eyebrow ?? "Your documents"}
         </p>
         <h3 id="recent-documents-heading" className="text-lg font-semibold tracking-tight text-foreground">
@@ -289,7 +290,7 @@ function RecentDocuments({
                     {doc.originalFilename}
                   </p>
                   <p className="text-xs leading-snug text-muted-foreground">
-                    {doc.lastSessionId ? "Last used" : "Added"} {relativeTime(doc.lastUsedAt)}
+                    {doc.lastSessionId ? "Last used" : "Added"} {fmt.relative(doc.lastUsedAt)}
                   </p>
                 </div>
               </button>

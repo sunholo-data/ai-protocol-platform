@@ -104,6 +104,30 @@ class TestStructuredShape:
         with pytest.raises(json.JSONDecodeError):
             json.loads(out.splitlines()[-1])
 
+    def test_plain_text_keeps_json_fields(self, fresh_module, capsys):
+        """A self-hosted log must keep what the browser's error boundary sent."""
+        mod = fresh_module(on_cloud_run=False)
+        mod.setup_logging()
+        logging.getLogger("browser").warning(
+            "surface_render_failed",
+            extra={"json_fields": {"event": "surface_render_failed", "error": "Budget exceeded", "component": "Card"}},
+        )
+        line = capsys.readouterr().out.strip().splitlines()[-1]
+        assert line.startswith("WARNING browser: surface_render_failed ")
+        fields = json.loads(line[len("WARNING browser: surface_render_failed ") :])
+        assert fields == {"event": "surface_render_failed", "error": "Budget exceeded", "component": "Card"}
+
+    def test_plain_text_unserialisable_fields_never_raise(self, fresh_module, capsys):
+        mod = fresh_module(on_cloud_run=False)
+        mod.setup_logging()
+
+        class Exploding:
+            def __str__(self):
+                raise RuntimeError("boom")
+
+        logging.getLogger("x").info("msg", extra={"json_fields": {"bad": Exploding()}})
+        assert capsys.readouterr().out.strip().splitlines()[-1] == "INFO x: msg [json_fields not serialisable]"
+
     def test_unserialisable_extra_never_raises(self, fresh_module, capsys):
         """Logging must never break the request path it is instrumenting."""
         mod = fresh_module(on_cloud_run=True)

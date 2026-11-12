@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
+import { forgetSharedRequests } from "@/lib/sharedRequest";
 
 // jsdom doesn't implement ResizeObserver — provide a no-op stub so components
 // that use it don't crash in tests. The actual scroll behaviour is a browser
@@ -18,4 +19,6 @@ global.ResizeObserver = class ResizeObserver {
 // both modes behave identically.
 afterEach(() => {
   cleanup();
+  // Module-level request sharing must not carry one test's data into the next.
+  forgetSharedRequests();
 });

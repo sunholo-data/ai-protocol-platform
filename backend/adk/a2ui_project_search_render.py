@@ -15,8 +15,12 @@ def project_text_matches_to_a2ui(result: Any, tool_context: Any = None) -> list[
         return None
     sources = []
     for row in result.get("results") or []:
-        location = f"page {row['page']}, " if row.get("page") is not None else ""
-        location += f"block {row['block_id']}"
+        # Where a person would look: the heading path and printed page. The block
+        # id is only the fallback for a document with neither.
+        where = [str(row["heading_path"])] if row.get("heading_path") else []
+        if row.get("page") is not None:
+            where.append(f"page {row['page']}")
+        location = ", ".join(where) or f"block {row['block_id']}"
         sources.append({"title": f"{row['filename']} — {location}", "uri": "", "snippet": row["snippet"]})
     messages = sources_to_a2ui(sources, surface_id=SURFACE, title="Project text matches")
     notice = result.get("notice") or result.get("message") or "No matching passages."

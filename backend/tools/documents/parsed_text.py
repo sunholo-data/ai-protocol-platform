@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from db.firestore import get_document
+from tools.documents.block_store import load_blocks
 from tools.documents.context import apply_edits, assert_document_readable, blocks_to_markdown
 
 
@@ -31,7 +32,7 @@ def parsed_text_from_record(doc_id: str, record: dict[str, Any], *, caller_uid: 
     assert_document_readable(record, caller_uid, doc_id)
     if (record.get("parseStatus") or record.get("status")) != "parsed":
         raise ValueError("The document is not successfully parsed yet; use its parse status to explain why.")
-    blocks = apply_edits(record.get("blocks") or [], record.get("editedBlocks") or {})
+    blocks = apply_edits(load_blocks(doc_id, record), record.get("editedBlocks") or {})
     text = blocks_to_markdown(blocks)
     if not text.strip():
         raise ValueError("The parsed document has no searchable text. It needs extraction or OCR first.")

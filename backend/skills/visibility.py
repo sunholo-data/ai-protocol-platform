@@ -6,7 +6,8 @@ combination lived inline in ``skills/routes.py::list_skills``:
   1. ``accessControl`` — the 5-type access model (public / owner / domain /
      specific / tagged), evaluated by ``AccessContext.can_access``.
   2. the tenant's ``enabled_skills`` **narrowing** — a strict subset filter, never
-     a widen.
+     a widen. It narrows the shared catalogue only: a skill's OWNER always passes
+     it, or a user's own created/forked skill vanishes from their list.
   3. the **admin bypass** — skill-admins skip plane 2 so they can see and test
      WIP/demo skills that aren't in the tenant's production set.
 
@@ -114,9 +115,19 @@ def evaluate_visibility(
         access_reason = f"access_control.type={ac_type} → {'allow' if access_allowed else 'deny'}"
 
         slug = getattr(cfg, "slug", None) or ""
+        owner_id = getattr(cfg, "owner_id", "") or ""
         if allowed_slugs is None:
             tenant_allowed = True
             tenant_reason = "tenant has no enabled_skills filter (all skills)"
+        elif owner_id and owner_id == getattr(access, "uid", None):
+            # enabled_skills narrows the SHARED catalogue a tenant's users are
+            # offered. It was never meant to hide a skill from the person who
+            # made it — yet it did, silently: any non-admin in a narrowed tenant
+            # who created or forked a skill got a 201 and then never saw it
+            # (2026-11-05). Showing an owner their own skill widens nothing for
+            # anyone else.
+            tenant_allowed = True
+            tenant_reason = "you own it (enabled_skills narrows the shared catalogue, not your own skills)"
         elif slug and slug in allowed_slugs:
             tenant_allowed = True
             tenant_reason = "in the tenant's enabled_skills"

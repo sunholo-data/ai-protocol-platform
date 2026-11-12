@@ -20,7 +20,11 @@ import { StreamingBubble } from "./StreamingBubble";
 import { TypingIndicator } from "./TypingIndicator";
 import { AssistantIntroBubble } from "./AssistantIntroBubble";
 import { PinnedWelcome } from "./PinnedWelcome";
+import { Button } from "@/components/ui/button";
 import { ChatPlacementForm, useChatSurfaces, type ChatSurfaceItem } from "./ChatPlacementForms";
+import { ResultCard } from "./ResultCard";
+import { useArtifacts } from "@/providers/SurfaceRegistry";
+import { artifactsExcludingOpenableDocuments } from "@/lib/createdDocument";
 import type React from "react";
 
 interface ChatMessageListProps {
@@ -34,6 +38,11 @@ interface ChatMessageListProps {
   /** Skill display name shown in the intro bubble headline. */
   skillDisplayName?: string;
   historyError?: string | null;
+  /** Retry a failed history load (shown beside `historyError`). */
+  onRetryHistory?: () => void;
+  /** A resumed conversation's history is still loading: show a transcript
+   * skeleton instead of the empty "start the conversation" prompt. */
+  isLoadingHistory?: boolean;
   /** Conversation is listed and had turns, but its transcript is gone from the
    * session store. Renders an explicit notice — resuming it would otherwise
    * show an unexplained blank thread (CLAUDE.md #8, NEVER SILENT). */
@@ -147,6 +156,8 @@ export function ChatMessageList({
   introMessage,
   skillDisplayName,
   historyError,
+  onRetryHistory,
+  isLoadingHistory = false,
   transcriptUnavailable = false,
   toolCalls,
   thinkingContent,
@@ -316,7 +327,8 @@ export function ChatMessageList({
     if (!messageSeenAtRef.current.has(m.id)) messageSeenAtRef.current.set(m.id, Date.now());
   }
   const messageArrival = (id: string) => messageSeenAtRef.current.get(id) ?? 0;
-  const surfaceList = chatSurfaces ?? [];
+  const surfaceList = (chatSurfaces ?? []).filter((s) => !(s.result && s.replayed));
+  const earlierResults = (chatSurfaces ?? []).filter((s) => s.result && s.replayed);
   const surfacesByAfter = new Map<string, ChatSurfaceItem[]>();
   const leadingSurfaces: ChatSurfaceItem[] = [];
   for (const s of surfaceList) {
@@ -353,7 +365,12 @@ export function ChatMessageList({
   // No margin of its own: leading surfaces are direct children of the
   // transcript column and interleaved ones sit inside a per-message block
   // (see stableMessages.map) — both get the same `space-y-6` turn rhythm.
-  const renderChatSurface = (s: ChatSurfaceItem) => (
+  const renderChatSurface = (s: ChatSurfaceItem) =>
+    s.result ? (
+      <div key={`result-${s.surfaceId}`} className="flex justify-start md:pl-10">
+        <ResultCard surfaceId={s.surfaceId} title={s.title || "Result"} />
+      </div>
+    ) : (
     <div key={`surface-${s.surfaceId}`} className="flex justify-start">
       <ChatPlacementForm
         surfaceId={s.surfaceId}
@@ -364,7 +381,7 @@ export function ChatMessageList({
         title={s.title}
       />
     </div>
-  );
+    );
 
   // Tool calls grouped by parentMessageId for use in MessageBubble.
   // chat-history-deep-fixes-3 / Bug G: when AG-UI emits a tool call without
@@ -394,8 +411,23 @@ export function ChatMessageList({
   // Show the most recent running tool name in the TypingIndicator
   const activeToolName = toolCalls.find((tc) => tc.status === "running")?.name ?? null;
 
+  // Screen readers hear when a reply finishes or fails, not every streamed token.
+  const [announcement, setAnnouncement] = useState("");
+  const wasLoading = useRef(isLoading);
+  useEffect(() => {
+    if (wasLoading.current && !isLoading) {
+      setAnnouncement(error ? "The reply failed." : "Reply finished.");
+    } else if (!wasLoading.current && isLoading) {
+      setAnnouncement("");
+    }
+    wasLoading.current = isLoading;
+  }, [isLoading, error]);
+
   return (
     <div className="relative flex flex-col flex-1 overflow-hidden">
+      <div aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
       {(activeDocumentContext !== undefined || instructionsOn || projectContext) && (
         <ContextBanner
           context={activeDocumentContext ?? null}
@@ -414,7 +446,14 @@ export function ChatMessageList({
             gutter as the composer (32px from md). space-y-6 is the turn rhythm. */}
         <div ref={innerRef} className="mx-auto w-full max-w-3xl space-y-6 px-5 py-6 md:px-8">
           {historyError && (
-            <p className="text-xs text-muted-foreground italic">{historyError}</p>
+            <div role="alert" className="flex items-center gap-3 text-sm text-muted-foreground">
+              <span>{historyError}</span>
+              {onRetryHistory && (
+                <Button variant="secondary" size="sm" onClick={onRetryHistory}>
+                  Try again
+                </Button>
+              )}
+            </div>
           )}
 
           {transcriptUnavailable && (
@@ -475,16 +514,40 @@ export function ChatMessageList({
                   timestamp={m.createdAt}
                 />
               ))}
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <div className="flex-1 border-t" />
-                <span>Earlier in this conversation</span>
-                <div className="flex-1 border-t" />
-              </div>
+              {/* Results restored with the history: one card, not one per
+                  result stacked after the last reply. */}
+              {earlierResults.length > 0 && (
+                <div className="flex justify-start md:pl-10">
+                  <ResultCard
+                    surfaceId={earlierResults[earlierResults.length - 1].surfaceId}
+                    title={
+                      earlierResults.length === 1
+                        ? earlierResults[0].title || "Result"
+                        : `${earlierResults.length} results from this chat`
+                    }
+                    note={earlierResults.length === 1 ? undefined : "Open the latest; the rest are under All results"}
+                  />
+                </div>
+              )}
+              {/* Only once something new follows: under the last reply on its
+                  own it reads as though the rest failed to load. */}
+              {(messages.length > 0 || isLoading) && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <div className="flex-1 border-t" />
+                  <span>Earlier in this conversation ↑</span>
+                  <div className="flex-1 border-t" />
+                </div>
+              )}
             </>
+          )}
+
+          {messages.length === 0 && !initialMessages?.length && isLoadingHistory && (
+            <TranscriptSkeleton />
           )}
 
           {messages.length === 0 &&
             !initialMessages?.length &&
+            !isLoadingHistory &&
             !introMessage &&
             !error &&
             !isLoading && (
@@ -555,6 +618,7 @@ export function ChatMessageList({
               botLabel={attrFor(lastMessage.id).label}
               thinkingContent={thinkingContent}
               isThinking={isThinking}
+              activeToolName={activeToolName}
             />
           )}
 
@@ -577,7 +641,7 @@ export function ChatMessageList({
           onClick={() => scrollToBottom("smooth")}
           className="absolute bottom-4 left-1/2 min-h-9 -translate-x-1/2 rounded-[var(--radius)] border border-border bg-background px-4 text-sm font-medium text-foreground hover:bg-muted"
         >
-          ↓ New message
+          <span aria-hidden>↓ </span>New message
         </button>
       )}
     </div>
@@ -591,7 +655,37 @@ export function ChatMessageList({
  * chat page instead of `ChatMessageList` directly; `ChatMessageList` stays
  * registry-agnostic for consumers (rich-media / drawer) that lack the provider.
  */
+/** Placeholder bubbles while a resumed conversation's history loads. */
+function TranscriptSkeleton() {
+  return (
+    <div role="status" aria-label="Loading conversation" className="space-y-6 py-2">
+      {[["ml-auto w-2/3", "h-10"], ["w-5/6", "h-20"], ["ml-auto w-1/2", "h-8"]].map(([width, height], i) => (
+        <div key={i} className={`${width} ${height} motion-safe:animate-pulse rounded-lg bg-muted`} />
+      ))}
+    </div>
+  );
+}
+
 export function ChatMessageListWithSurfaces(props: ChatMessageListProps) {
   const chatSurfaces = useChatSurfaces();
-  return <ChatMessageList {...props} chatSurfaces={chatSurfaces} />;
+  // Workbench results get a card in the transcript under the reply that made
+  // them — the way to a result on a phone, and a reminder on a desktop.
+  const artifacts = useArtifacts();
+  const results = useMemo(
+    () =>
+      artifactsExcludingOpenableDocuments(artifacts.filter((a) => a.placement !== "chat")).map(
+        (a): ChatSurfaceItem => ({
+          surfaceId: a.surfaceId,
+          createdAt: a.createdAt,
+          submitted: false,
+          isConfirm: false,
+          title: a.title || a.kind || "Result",
+          replayed: Boolean(a.replayed),
+          result: true,
+        }),
+      ),
+    [artifacts],
+  );
+  const all = useMemo(() => [...chatSurfaces, ...results], [chatSurfaces, results]);
+  return <ChatMessageList {...props} chatSurfaces={all} />;
 }

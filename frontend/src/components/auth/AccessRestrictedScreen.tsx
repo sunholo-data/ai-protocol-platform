@@ -43,7 +43,7 @@ export function AccessRestrictedScreen({
         </p>
         <div className="mt-4 rounded-md border border-border bg-muted/30 p-3 text-left text-xs text-muted-foreground">
           <div className="flex items-baseline gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-wider opacity-70">
+            <span className="font-mono text-[11px] uppercase tracking-wider opacity-70">
               Signed in as
             </span>
             <span className="font-mono text-foreground">{email ?? "(unknown account)"}</span>

@@ -39,7 +39,7 @@ interface ContextBannerProps {
 export function ContextBanner({
   context,
   instructionsOn = false,
-  instructionsHref = "/settings/instructions",
+  instructionsHref = "/settings#instructions",
   project = null,
   onLeaveProject,
 }: ContextBannerProps) {

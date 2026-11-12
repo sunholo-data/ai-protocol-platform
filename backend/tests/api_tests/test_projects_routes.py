@@ -247,3 +247,106 @@ def test_get_project_carries_search_status_and_queues_a_backfill(store, monkeypa
 
     monkeypatch.setattr(extensions, "project_search_status", lambda uid, pid: None)
     assert alice.get(f"/api/projects/{pid}").json()["search"] is None
+
+
+def test_add_whole_folder_includes_subfolders(store):
+    import db.folders as folders_db
+
+    root = folders_db.create_folder("alice", "client")["id"]
+    sub = folders_db.create_folder("alice", "client/sessions/02")["id"]
+    other = folders_db.create_folder("alice", "client-archive")["id"]  # a prefix, not a subfolder
+    _doc(store, "top", folder=root)
+    _doc(store, "deep", folder=sub)
+    _doc(store, "unrelated", folder=other)
+    alice = _client("alice")
+    pid = alice.post("/api/projects", json={"name": "Client"}).json()["id"]
+
+    body = alice.post(f"/api/projects/{pid}/documents", json={"folder_id": root}).json()
+    assert sorted(body["added"]) == ["deep", "top"]
+    # Running it again (after an aborted upload, say) only reports what's there.
+    again = alice.post(f"/api/projects/{pid}/documents", json={"folder_id": root}).json()
+    assert again["added"] == [] and sorted(again["already"]) == ["deep", "top"]
+
+
+def test_add_folder_without_subfolders(store):
+    import db.folders as folders_db
+
+    root = folders_db.create_folder("alice", "client")["id"]
+    sub = folders_db.create_folder("alice", "client/deep")["id"]
+    _doc(store, "top", folder=root)
+    _doc(store, "deep", folder=sub)
+    alice = _client("alice")
+    pid = alice.post("/api/projects", json={"name": "Client"}).json()["id"]
+    body = alice.post(f"/api/projects/{pid}/documents", json={"folder_id": root, "include_subfolders": False}).json()
+    assert body["added"] == ["top"]
+
+
+def test_add_another_users_folder_is_404(store):
+    import db.folders as folders_db
+
+    theirs = folders_db.create_folder("bob", "private")["id"]
+    _doc(store, "secret", owner="bob", folder=theirs)
+    alice = _client("alice")
+    pid = alice.post("/api/projects", json={"name": "Client"}).json()["id"]
+    resp = alice.post(f"/api/projects/{pid}/documents", json={"folder_id": theirs})
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "FOLDER_NOT_FOUND"
+
+
+def test_project_queries_never_stream_parsed_blocks(store, monkeypatch):
+    """Ids and listings use a field projection: streaming whole records (blocks
+    up to ~700 KB each) made every project page take 8-11 s at 349 documents."""
+    from db import firestore_inmemory
+
+    projections: list[tuple[str, list[str] | None]] = []
+    real_stream = firestore_inmemory._Query.stream
+
+    def spy(self):
+        projections.append((self._collection, self._select))
+        return real_stream(self)
+
+    monkeypatch.setattr(firestore_inmemory._Query, "stream", spy)
+    _doc(store, "d1")
+    alice = _client("alice")
+    pid = alice.post("/api/projects", json={"name": "Iberia"}).json()["id"]
+    alice.post(f"/api/projects/{pid}/documents", json={"doc_ids": ["d1"]})
+    projections.clear()
+    alice.get(f"/api/projects/{pid}")
+    alice.get(f"/api/projects/{pid}/documents")
+    alice.get(f"/api/projects/{pid}/sessions")
+    doc_queries = [sel for col, sel in projections if col == "parsed_documents"]
+    assert doc_queries, "expected the project routes to query parsed_documents"
+    assert all(sel is not None and "blocks" not in sel for sel in doc_queries), doc_queries
+
+
+# --- attached knowledge bases (github-sources.md D9) -------------------------------
+
+
+def test_attaching_needs_knowledge_bases_in_the_deployment(store, monkeypatch):
+    import extensions
+
+    monkeypatch.setattr(extensions, "attachable_knowledge_bases", lambda access: None)
+    alice = _client("alice")
+    pid = alice.post("/api/projects", json={"name": "Iberia"}).json()["id"]
+    resp = alice.patch(f"/api/projects/{pid}", json={"attachedKbIds": ["method"]})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "KNOWLEDGE_BASES_UNAVAILABLE"
+
+
+def test_only_searchable_knowledge_bases_can_be_attached(store, monkeypatch):
+    import extensions
+
+    monkeypatch.setattr(extensions, "attachable_knowledge_bases", lambda access: [{"id": "method", "name": "Method"}])
+    alice = _client("alice")
+    pid = alice.post("/api/projects", json={"name": "Iberia"}).json()["id"]
+    refused = alice.patch(f"/api/projects/{pid}", json={"attachedKbIds": ["method", "secret"]})
+    assert refused.status_code == 422
+    assert refused.json()["detail"]["code"] == "KNOWLEDGE_BASE_NOT_ATTACHABLE"
+    assert alice.get(f"/api/projects/{pid}").json()["attachedKbIds"] == []
+
+    ok = alice.patch(f"/api/projects/{pid}", json={"attachedKbIds": ["method", "method"]})
+    assert ok.status_code == 200 and ok.json()["attachedKbIds"] == ["method"]
+    # Other edits leave the attachments alone; an empty list detaches.
+    assert alice.patch(f"/api/projects/{pid}", json={"name": "Iberia 2"}).json()["attachedKbIds"] == ["method"]
+    assert alice.patch(f"/api/projects/{pid}", json={"attachedKbIds": []}).json()["attachedKbIds"] == []
+    assert _client("bob").patch(f"/api/projects/{pid}", json={"attachedKbIds": []}).status_code == 404

@@ -17,12 +17,12 @@ usually break) is backend — see `backend/adk/CLAUDE.md` and the memory
   state to exist.
 - **Tabs & index come from `artifact` metadata.** `useArtifacts()` lists
   surfaces that have BOTH a live surface AND `artifact` metadata; each becomes a
-  workbench Result tab (7.5) and a row in the Workspace/Home index
-  (`WorkbenchHome` / `WorkbenchIndex`). `placement: "chat"` renders inline in the
+  workbench Result tab (7.5) and an entry in the tab strip's All results menu
+  (`AllResultsMenu`). `placement: "chat"` renders inline in the
   transcript instead (elicitation forms), NOT as a tab.
 - **Auto-focus new workbench elements** (repo principle #7) — a new artifact
-  surface focuses its tab; a dominant `workspace` surface focuses the Workspace
-  tab. Don't just badge.
+  surface focuses its tab; a dominant `workspace` surface gets its own
+  "Assistant" result tab and focuses it. Don't just badge.
 
 ## Verify in a real browser
 

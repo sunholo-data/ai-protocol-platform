@@ -6,6 +6,8 @@
 
 import { useEffect, useState } from "react";
 
+import type { Formatter } from "@/i18n";
+
 /** Re-render on an interval so relative timestamps stay fresh without per-row timers. */
 export function useNow(intervalMs = 10_000): number {
   const [now, setNow] = useState(() => Date.now());
@@ -16,22 +18,15 @@ export function useNow(intervalMs = 10_000): number {
   return now;
 }
 
-export function formatRelative(ts: number, now: number): string {
+/** "12s ago" … "3h ago", then the full date — `fmt` from `useFormat()`. */
+export function formatRelative(ts: number, now: number, fmt: Formatter): string {
   if (!ts) return "";
-  const diff = Math.max(0, now - ts);
-  const s = Math.floor(diff / 1000);
-  if (s < 5) return "just now";
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return new Date(ts).toLocaleDateString();
+  return fmt.relative(ts, now, { seconds: true, maxDays: 1, dateOptions: {} });
 }
 
-export function absoluteTime(ts: number): string {
+export function absoluteTime(ts: number, fmt: Formatter): string {
   if (!ts) return "";
-  return new Date(ts).toLocaleString(undefined, { timeZoneName: "short" });
+  return fmt.dateTime(ts, { timeZoneName: "short" });
 }
 
 function tryParse(s: string): unknown {
@@ -119,10 +114,8 @@ export function formatResult(result?: string): ResultView {
 }
 
 /** Clock time stays visible even when the relative label becomes a date. */
-export function activityTime(ts: number, now: number): string {
+export function activityTime(ts: number, now: number, fmt: Formatter): string {
   if (!ts) return "";
-  const clock = new Date(ts).toLocaleTimeString(undefined, {
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-  });
-  return `${clock} · ${formatRelative(ts, now)}`;
+  const clock = fmt.time(ts, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return `${clock} · ${formatRelative(ts, now, fmt)}`;
 }

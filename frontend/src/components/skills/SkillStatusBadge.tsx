@@ -92,7 +92,7 @@ export function SkillStatusBadge({ tags, variant = "badge" }: SkillStatusBadgePr
       {styled.map((s) => (
         <span
           key={s.label}
-          className={`inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${s.className}`}
+          className={`inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider ${s.className}`}
         >
           {s.label}
         </span>

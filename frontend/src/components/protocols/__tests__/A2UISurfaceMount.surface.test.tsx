@@ -11,6 +11,9 @@
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { A2UISurfaceMount } from "../A2UISurfaceMount";
+import { logger } from "@/lib/logger";
+import { subscribeWorkbenchConfirmation } from "@/lib/workbenchConfirmation";
+import { subscribeWorkbenchFocus } from "@/lib/workbenchFocus";
 import {
   SurfaceRegistryProvider,
   useSurfaceRegistry,
@@ -316,10 +319,12 @@ describe("A2UISurfaceMount — direct actions", () => {
   beforeEach(() => fetchWithAuthMock.mockReset());
 
   it("POSTs to surface-action-direct and shows the server's message", async () => {
+    const replies: unknown[] = [];
+    const unsubscribe = subscribeWorkbenchConfirmation(reply => replies.push(reply));
     fetchWithAuthMock.mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ status: "ok", message: "Marked 2 read (#1, #3).", messages: [] }),
+      json: async () => ({ status: "ok", message: "Marked 2 read (#1, #3).", messages: [], confirmation: { id: "reply-1", content: "Marked two messages read." } }),
     });
     const fire = setup();
     fire({ name: "direct:mark_read", context: { selected: { m1: true, m3: true } } });
@@ -331,6 +336,8 @@ describe("A2UISurfaceMount — direct actions", () => {
     const bar = screen.getByTestId("a2ui-surface-direct-status");
     expect(bar).toHaveAttribute("data-kind", "ok");
     expect(bar).toHaveTextContent("Marked 2 read (#1, #3).");
+    expect(replies).toEqual([{ sessionId: "sess-1", id: "reply-1", content: "Marked two messages read." }]);
+    unsubscribe();
   });
 
   it("shows a refusal or handler error as a visible alert", async () => {
@@ -354,5 +361,143 @@ describe("A2UISurfaceMount — direct actions", () => {
     fire({ name: "direct:mark_read", context: {} });
     await act(async () => {});
     expect(screen.getByTestId("a2ui-surface-direct-status")).toHaveTextContent("Tick one or more");
+  });
+
+  it("reports every failed action to the client log, not only the status bar", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const fire = setup();
+
+    fetchWithAuthMock.mockResolvedValue({ ok: false, status: 503, json: async () => ({ detail: "Service is down." }) });
+    fire({ name: "direct:refresh", context: {} });
+    await act(async () => {});
+    fetchWithAuthMock.mockResolvedValue({
+      ok: true, status: 200, json: async () => ({ status: "error", message: "This request changed.", messages: [] }),
+    });
+    fire({ name: "direct:approve", context: {} });
+    await act(async () => {});
+    fetchWithAuthMock.mockRejectedValue(new TypeError("Load failed"));
+    fire({ name: "direct:history", context: {} });
+    await act(async () => {});
+    fetchWithAuthMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ status: "ok", messages: [] }) });
+    fire({ name: "direct:pending", context: {} });
+    await act(async () => {});
+
+    const reports = warn.mock.calls.filter(([name]) => name === "surface_direct_action_failed");
+    expect(reports.map(([, attrs]) => attrs)).toEqual([
+      expect.objectContaining({ kind: "direct:refresh", status: 503, errorMessage: "Service is down." }),
+      expect.objectContaining({ kind: "direct:approve", status: 200, errorMessage: "This request changed." }),
+      expect.objectContaining({ kind: "direct:history", errorName: "TypeError", errorMessage: "Load failed" }),
+    ]);
+    warn.mockRestore();
+  });
+});
+
+it("direct review registers a private display-only surface and never exports it", async () => {
+  const id = "private:workspace:review";
+  fetchWithAuthMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({
+    status: "ok", message: "Review opened.", messages: [], private_surfaces: [{
+      surface_id: id, messages: [createMsg(id)], artifact: { kind: "review", title: "Review" },
+    }],
+  }) });
+  renderMount({ surfaceId: "workspace", sessionId: "sess-1" });
+  act(() => capturedRegistry!.appendMessages("workspace", [createMsg("workspace")], "control"));
+  const surface = capturedRegistry!.getState("workspace")?.surface as unknown as { _fireAction: (a: unknown) => void };
+  act(() => surface._fireAction({ name: "direct:review", context: { id: "safe-id" } }));
+  await act(async () => {});
+  expect(capturedRegistry!.getState(id)?.surface).toBeTruthy();
+  expect(capturedRegistry!.readA2uiSurfaceState()).not.toHaveProperty(id);
+  expect(capturedRegistry!.getPolicy(id).modelExport).toBe(false);
+});
+
+it("private display surfaces never dispatch action context back to the server", async () => {
+  const id = "private:workspace:review";
+  fetchWithAuthMock.mockReset();
+  renderMount({ surfaceId: id, sessionId: "sess-1", onChatMessage: vi.fn() });
+  act(() => capturedRegistry!.appendPrivateMessages(id, [createMsg(id)], "review"));
+  const surface = capturedRegistry!.getState(id)?.surface as unknown as { _fireAction: (a: unknown) => void };
+  act(() => surface._fireAction({ name: "direct:approve", context: { purpose: "canary" } }));
+  await act(async () => {});
+  expect(fetchWithAuthMock).not.toHaveBeenCalled();
+});
+
+it("a private panel's focus: button switches tabs on the client and sends nothing", async () => {
+  const id = "private:daneel_approvals:review";
+  fetchWithAuthMock.mockReset();
+  const focused: string[] = [];
+  const unsubscribe = subscribeWorkbenchFocus((target) => focused.push(target));
+  renderMount({ surfaceId: id, sessionId: "sess-1", onChatMessage: vi.fn() });
+  act(() => capturedRegistry!.appendPrivateMessages(id, [createMsg(id)], "review"));
+  const surface = capturedRegistry!.getState(id)?.surface as unknown as { _fireAction: (a: unknown) => void };
+  act(() => surface._fireAction({ name: "focus:daneel_approvals", context: { request_id: "" } }));
+  act(() => surface._fireAction({ name: "direct:approve", context: {} }));
+  await act(async () => {});
+  unsubscribe();
+  expect(focused).toEqual(["daneel_approvals"]);
+  expect(fetchWithAuthMock).not.toHaveBeenCalled();
+});
+
+it("late private review responses cannot resurrect content after session switch", async () => {
+  let resolve!: (value: unknown) => void;
+  fetchWithAuthMock.mockReturnValue(new Promise(r => { resolve = r; }));
+  const view = renderMount({ surfaceId: "workspace", sessionId: "sess-1" });
+  act(() => capturedRegistry!.appendMessages("workspace", [createMsg("workspace")], "control"));
+  const surface = capturedRegistry!.getState("workspace")?.surface as unknown as { _fireAction: (a: unknown) => void };
+  act(() => surface._fireAction({ name: "direct:review" }));
+  const registry = capturedRegistry!;
+  view.rerender(<SurfaceRegistryProvider><CaptureRegistry /><A2UISurfaceMount surfaceId="workspace" sessionId="sess-2" /></SurfaceRegistryProvider>);
+  const id = "private:workspace:review";
+  await act(async () => resolve({ ok: true, status: 200, json: async () => ({
+    status: "ok", private_surfaces: [{ surface_id: id, messages: [createMsg(id)] }],
+  }) }));
+  expect(registry.getState(id)).toBeNull();
+});
+
+describe("A2UISurfaceMount — automatic status reads", () => {
+  function seed() {
+    return renderMount({ surfaceId: "workspace", sessionId: "sess-1" });
+  }
+  function append() {
+    act(() => capturedRegistry!.appendMessages("workspace", [createMsg("workspace")], "auto-board", {
+      kind: "test_board", autoRefresh: { action: "direct:read_status", intervalSeconds: 15 },
+    }));
+  }
+  it("refreshes visible opted-in surfaces without a click and stops on unmount", async () => {
+    vi.useFakeTimers();
+    const visible = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const rects = vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([{}] as unknown as DOMRectList);
+    fetchWithAuthMock.mockReset().mockResolvedValue({ ok: true, json: async () => ({ status: "ok", messages: [] }) });
+    const view = seed();
+    try {
+      append(); await act(async () => {});
+      expect(JSON.parse(fetchWithAuthMock.mock.calls[0][1].body)).toEqual({
+        surfaceId: "workspace", automatic: true, action: { name: "direct:read_status", context: {} },
+      });
+      expect(screen.queryByTestId("a2ui-surface-direct-status")).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+      expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+      visible.mockReturnValue("hidden");
+      await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+      expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+      view.unmount();
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    } finally { view.unmount(); visible.mockRestore(); rects.mockRestore(); vi.useRealTimers(); }
+  });
+  it("does not overwrite a newer human action with an older automatic response", async () => {
+    const visible = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const rects = vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([{}] as unknown as DOMRectList);
+    let resolve!: (value: unknown) => void;
+    fetchWithAuthMock.mockReset().mockReturnValueOnce(new Promise(r => { resolve = r; }))
+      .mockResolvedValue({ ok: true, json: async () => ({ status: "ok", messages: [] }) });
+    const view = seed();
+    try {
+      append();
+      const appendSpy = vi.spyOn(capturedRegistry!, "appendMessages");
+      const surface = capturedRegistry!.getState("workspace")?.surface as unknown as { _fireAction: (a: unknown) => void };
+      await act(async () => { surface._fireAction({ name: "direct:approve", context: {} }); });
+      await act(async () => resolve({ ok: true, json: async () => ({ status: "ok", messages: [{ updateDataModel: { surfaceId: "workspace", value: { stale: true } } }] }) }));
+      expect(appendSpy).not.toHaveBeenCalled();
+      appendSpy.mockRestore();
+    } finally { view.unmount(); visible.mockRestore(); rects.mockRestore(); }
   });
 });

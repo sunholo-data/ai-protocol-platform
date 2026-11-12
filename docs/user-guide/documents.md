@@ -7,17 +7,18 @@ surfaces:
   - frontend/src/components/doc-browser/
   - frontend/src/components/document/
   - frontend/src/components/chat/InContextBadge.tsx
-reviewed: 2026-10-19
+  - frontend/src/components/chat/SkillExamplesPicker.tsx
+reviewed: 2026-10-27
 ---
 
-Every document you upload is read once and kept in your library under **Your files** → **My Documents**, so you can come back to it in any chat. This page is about single documents; to upload or organise many at once, see [Working with folders](folders.md#upload-a-whole-folder).
+Every document you upload is read once and kept in your library under **Files** in the sidebar, so you can come back to it in any chat. This page is about single documents; to upload or organise many at once, see [Working with folders](folders.md#upload-a-whole-folder).
 
 ## Upload a document
 
-There are two places to upload from.
+- **From the message box:** click **+** at its bottom left, choose **Upload a file** and pick one or more files.
+- **By dragging:** on a computer, drop files anywhere on the chat.
 
-- **On a new chat:** under *Or start from a document*, drop files onto **Drop files here or click to browse**, or click it to pick files. The document opens beside the chat as soon as it's read, ready to ask about.
-- **While chatting:** click **+** in the message box (**Attach a document**) and pick a file.
+Either way, the document opens beside the chat as soon as it's read, ready to ask about. To bring in a document you uploaded before, click **+** and choose **Add from your files**.
 
 Supported types include PDF, Word, PowerPoint, Excel, OpenDocument, EPUB, email (EML, MBOX), HTML, Markdown, CSV and plain text. You can upload several files at once.
 
@@ -26,8 +27,7 @@ A file uploaded on its own goes into a folder named for the day, such as `Upload
 > [!TIP]
 > Uploading the same file into the same folder again replaces the old copy rather than adding a second one.
 
-![A new chat with the Or start from a document divider above a drop area reading Drop files here or click to browse, and an Upload folder button below it.](img/documents/01-start-from-a-document.png "Start a chat from a document.")
-![The message box with the round + button (Attach a document) at its bottom left.](img/documents/02-attach-a-document.png "Attach a document while chatting.")
+![The message box's + menu open above it, with Upload a file, Add from your files and Use a project.](img/documents/02-attach-a-document.png "Everything optional is under +.")
 
 ## Check a document is ready
 
@@ -35,11 +35,13 @@ A file uploaded on its own goes into a folder named for the day, such as `Upload
 
 - *Green*: read and ready.
 - *Amber, pulsing*: still being read. A progress bar under the folder list counts how many are done.
-- *Red*: it couldn't be read. The reason is shown under the name, for example a scanned PDF with no text in it.
+- *Red*: it couldn't be read. The reason is shown under the name, for example a file that is damaged or password-protected.
 
-For a red document, click **Retry** to read it again. If it fails again, the file itself is the problem: export it again from the program that made it, or for a scan, use a version with selectable text.
+For a red document, click **Retry** to read it again. If it fails again, the file itself is the problem: export it again from the program that made it.
 
-![Project Phoenix with four documents: two green, Supplier shortlist amber, and Scanned site survey red with the message No readable text — the file looks like a scan and a Retry button.](img/documents/03-parse-status.png "Ready, still reading, and could not be read.")
+Scanned documents can be read too. A PDF that is only pictures of its pages, such as a signed contract that was scanned, is read from those pictures. That takes longer than a document with selectable text, about a minute for 80 pages, so its dot stays amber a little longer.
+
+![Project Phoenix with four documents: two green, Supplier shortlist amber, and Site survey red with the message The file is damaged or password-protected and a Retry button.](img/documents/03-parse-status.png "Ready, still reading, and could not be read.")
 
 ## Open a document
 
@@ -51,6 +53,17 @@ The document has two views:
 
 - **Styled** shows it as it looks, with its fonts and layout.
 - **Text** shows its plain structure: headings, lists and tables. This is what the assistant reads.
+
+## Find a document you worked on recently
+
+The three documents you used last are under **Files** in the sidebar. On a new chat with some skills, the Workbench's **Start** tab also shows **Pick up where you left off**: the documents you've worked with most recently, the ones you last discussed first.
+
+- Click a document to open it in the **Document** tab and ask about it.
+- Click **Continue** under it to go back to the conversation you last had about it.
+
+In a [project](projects.md#chat-in-a-project), the same place shows the project's documents instead.
+
+Every document is also in the sidebar: under **Files**, click **Browse all folders** and open its folder. The three you used last are listed under **Files** straight away. A document uploaded on its own is in that day's `Uploads` folder. When you open a document, **Conversations** at the bottom of the **Document** tab lists the chats that used it.
 
 ## Ask about a document
 
@@ -76,7 +89,7 @@ You can ask for a change to one part of a document without regenerating the rest
 Only the passage you selected is rewritten; everything else stays as it was. Each edit is saved as a new version, so you can go back (see the next section).
 
 > [!NOTE]
-> A scanned document, or one with no readable text, can't be edited this way.
+> A scanned document can be read and searched, but not edited this way. Neither can a document with no readable text.
 
 ![A paragraph under Next steps is selected, and a box below it shows Editing: "The team agreed that the risk register will be updated before the end…", with Make it shorter and clearer typed in and a Rewrite button.](img/documents/07-edit-a-passage.png "Select, say what to change, Rewrite.")
 
@@ -92,7 +105,7 @@ Above an open document:
 
 ## Rename a document
 
-Each document has a **⋯** menu. It appears when you hover over the document in the sidebar.
+Each document has a **⋯** menu, with **Rename**, **Move to…**, **Add to project…** and **Delete**. It appears when you hover over the document in the sidebar.
 
 1. Hover over the document and click **⋯**, then **Rename**.
 2. Type the new name in place.
@@ -109,9 +122,9 @@ The document keeps its file type: if you leave the ending off, such as `.pdf`, i
 2. Click the bin icon, or click **⋯**, then **Delete**.
 3. {{appName}} asks you to confirm, naming the document. Click **Delete** to remove it, or **Cancel** to keep it.
 
-![The confirmation under Phoenix project brief.pdf: Delete 'Phoenix project brief.pdf'? This can't be undone, with Delete and Cancel.](img/documents/09-delete-confirm.png "Confirm before it goes.")
+![The confirmation: Delete "Phoenix project brief.pdf"? This can't be undone, with Cancel and Delete.](img/documents/09-delete-confirm.png "Confirm before it goes.")
 
-The document is removed from your library and from any folder search it was part of. This can't be undone.
+The document is removed from your library, from any project it was in, and from any folder search it was part of. This can't be undone.
 
 ## Documents the assistant creates for you
 

@@ -247,3 +247,49 @@ def test_a2ui_tool_config_allow_action_triggered_runs_round_trips():
     # The two opt-ins are independent — opting into action-triggered runs
     # does NOT implicitly grant surface-context writes.
     assert cfg.allow_surface_context_writes is False
+
+
+# === direct_launchers — the documented no-model entry buttons ===
+# docs/development/a2ui-private-surfaces.md declares them under toolConfigs.a2ui; the
+# strict model must accept that shape, or every skill that follows the docs fails to
+# build its agent ("Extra inputs are not permitted") and no chat turn can start.
+
+_DOCUMENTED_LAUNCHER = {"name": "owner_board", "label": "Waiting for you", "tool": "list_owner_board"}
+
+
+def test_a2ui_tool_config_accepts_documented_direct_launchers():
+    cfg = A2uiToolConfig.from_tool_configs(
+        {"a2ui": {"allow_surface_context_writes": True, "direct_launchers": [_DOCUMENTED_LAUNCHER]}}
+    )
+    assert [(d.name, d.label, d.tool) for d in cfg.direct_launchers] == [
+        ("owner_board", "Waiting for you", "list_owner_board")
+    ]
+
+
+def test_a2ui_tool_config_direct_launchers_default_empty():
+    assert A2uiToolConfig().direct_launchers == []
+    assert A2uiToolConfig.from_tool_configs({"a2ui": {}}).direct_launchers == []
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"name": "owner_board", "label": "Waiting for you"},  # no tool
+        {"name": "", "label": "Waiting for you", "tool": "list_owner_board"},  # empty name
+        {"name": "owner_board", "label": "Waiting", "tool": "list_owner_board", "args": {"x": 1}},  # extra key
+        "owner_board",  # not an object
+    ],
+)
+def test_a2ui_tool_config_rejects_malformed_direct_launcher(entry):
+    with pytest.raises(ValidationError):
+        A2uiToolConfig.from_tool_configs({"a2ui": {"direct_launchers": [entry]}})
+
+
+def test_a2ui_tool_config_rejects_duplicate_direct_launcher_names():
+    with pytest.raises(ValidationError):
+        A2uiToolConfig.from_tool_configs({"a2ui": {"direct_launchers": [_DOCUMENTED_LAUNCHER, _DOCUMENTED_LAUNCHER]}})
+
+
+def test_a2ui_tool_config_still_rejects_unknown_keys():
+    with pytest.raises(ValidationError):
+        A2uiToolConfig.from_tool_configs({"a2ui": {"direct_launcher": [_DOCUMENTED_LAUNCHER]}})

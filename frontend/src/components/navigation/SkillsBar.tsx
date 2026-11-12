@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { Menu, PanelLeftClose, PanelLeftOpen, Plus, SquarePen } from "lucide-react";
 import type { Skill } from "@/types/skill";
-import { SettingsIcon } from "@/components/icons";
 import { useSidebarToggle } from "@/components/shells/ShellActionsContext";
 import { cn } from "@/lib/utils";
 import { headerControl, headerIconControl } from "./headerControls";
@@ -89,13 +88,17 @@ export function SkillsBar({
         {isLoading ? (
           <SkillSwitcherSkeleton />
         ) : skills.length === 0 ? (
-          <span className="text-sm text-muted-foreground">No skills yet — create your first one →</span>
+          <button type="button" onClick={onCreateClick} className={headerControl}>
+            <Plus className="h-4 w-4" aria-hidden /> Create your first skill
+          </button>
         ) : (
           <SkillSwitcher
             skills={skills}
             activeSkillId={activeSkillId}
             defaultSkillId={defaultSkillId}
             currentUserId={currentUserId}
+            onEditSkill={hasActiveSkill ? onConfigureClick : undefined}
+            onCreateSkill={onCreateClick}
           />
         )}
         {hasActiveSkill ? (
@@ -128,40 +131,11 @@ export function SkillsBar({
       <div className="hidden flex-1 sm:flex" />
 
       <div className="flex shrink-0 items-center gap-2">
-        {hasActiveSkill ? (
-          <button
-            type="button"
-            onClick={onConfigureClick}
-            title="Configure this skill"
-            aria-label="Configure this skill"
-            className={cn(headerIconControl, "hidden sm:inline-flex")}
-          >
-            <SettingsIcon className="h-4 w-4" />
-          </button>
-        ) : null}
-
-        <button
-          type="button"
-          onClick={onCreateClick}
-          title="Create a new skill"
-          aria-label="Create a new skill"
-          className={cn(headerIconControl, "hidden sm:inline-flex")}
-        >
-          <Plus className="h-4 w-4" aria-hidden />
-        </button>
-
         {/* Phones: when the body has a menu sheet, the account lives at its foot
-            (AccountPanel) and the avatar leaves the header. Otherwise the
-            avatar menu stays, carrying Configure + Create on phones. */}
+            (AccountPanel) and the avatar leaves the header. Edit / Create skill
+            are at the foot of the skill picker. */}
         <div className={sidebar ? "hidden sm:block" : undefined}>
-        <UserMenu
-          phoneItems={[
-            ...(hasActiveSkill
-              ? [{ label: "Configure this skill", icon: <SettingsIcon className="h-4 w-4" />, onSelect: onConfigureClick }]
-              : []),
-            { label: "Create a new skill", icon: <Plus className="h-4 w-4" aria-hidden />, onSelect: onCreateClick },
-          ]}
-        />
+        <UserMenu />
         </div>
       </div>
     </header>

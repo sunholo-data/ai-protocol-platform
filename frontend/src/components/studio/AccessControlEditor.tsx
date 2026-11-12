@@ -8,6 +8,8 @@
 
 "use client";
 
+import { useConfirm } from "@/components/ui/confirm";
+
 type Access = {
   type?: string;
   domain?: string | null;
@@ -45,6 +47,7 @@ export function AccessControlEditor({
   /** Restrict the access types offered (default: all five). */
   types?: string[];
 }) {
+  const confirm = useConfirm();
   const v = (value ?? { type: "private" }) as Access;
   const type = v.type ?? "private";
 
@@ -55,15 +58,19 @@ export function AccessControlEditor({
         <select
           className="w-full rounded-md border px-3 py-2 text-sm"
           value={type}
-          onChange={(e) => {
+          onChange={async (e) => {
             const nextType = e.target.value;
             // Security gate (CLAUDE.md): making a skill public lists it in the
             // unauthenticated marketplace AND exposes its A2A agent card to
             // anyone. Require an explicit confirm — never a silent switch.
             if (nextType === "public" && type !== "public") {
-              const ok = window.confirm(
-                "Make this skill PUBLIC?\n\nIt will be listed in the marketplace and reachable by anyone — unauthenticated — including its A2A agent card. Do NOT make a skill that touches confidential content public.",
-              );
+              const ok = await confirm({
+                title: "Make this skill public?",
+                description:
+                  "Anyone can find and use it without signing in, including its A2A agent card. Never make a skill that touches confidential content public.",
+                confirmLabel: "Make public",
+                destructive: true,
+              });
               if (!ok) return; // keep the current type
             }
             onChange({ ...v, type: nextType });

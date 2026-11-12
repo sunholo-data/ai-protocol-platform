@@ -22,6 +22,13 @@ The handler returns an :class:`ActionResult`: a one-line ``message`` the user
 sees (NEVER SILENT), optional A2UI ``messages`` that patch the surface (applied
 live by the browser AND appended to the stash so a reload shows them), and a
 ``record`` line the AI reads on its next turn ("Mark marked #3, #5 read").
+
+For confidential review details, return ``private_surfaces`` descriptors instead:
+``{"surface_id": "private:<control id>:review", "messages": [...], "artifact": {...}}``.
+These separate display-only surfaces live only in the current browser session.
+They are not stashed, written to history, or exported on a later model turn.
+A private response also suppresses ``record`` even when ``tell_ai=True``.
+Keep status/message and ordinary control patches nonconfidential.
 """
 
 from __future__ import annotations
@@ -90,6 +97,10 @@ class ActionResult:
     message: str
     messages: list[dict[str, Any]] = field(default_factory=list)
     record: str = ""
+    # Browser-only detail surfaces. Never added to ADK state, stash, or history.
+    # IDs must be private:<control surface id>:<detail name>. Keep status/message
+    # and ordinary messages nonconfidential; controls belong to the stashed board.
+    private_surfaces: list[dict[str, Any]] = field(default_factory=list)
 
 
 Handler = Callable[[DirectActionContext], Awaitable[ActionResult]]
@@ -102,6 +113,8 @@ class _Action:
     handler: Handler
     requires_tool: str | None
     tell_ai: bool
+    automatic: bool = False
+    confirm_in_chat: bool = False
 
 
 _registry: dict[tuple[str, str], _Action] = {}
@@ -114,6 +127,8 @@ def register_action(
     handler: Handler,
     requires_tool: str | None = None,
     tell_ai: bool = True,
+    automatic: bool = False,
+    confirm_in_chat: bool = False,
 ) -> None:
     """Register ``handler`` for ``direct:<name>`` clicks on surfaces of ``surface_kind``.
 
@@ -124,8 +139,14 @@ def register_action(
         requires_tool: A tool the session's skill must declare for the click
             to run — a direct action never grants more than the skill has.
         tell_ai: Record the outcome where the next turn's instructions read it.
+        automatic: Opt in a read-only status handler to background refresh.
+            Never enable for approvals, cancellations or other business writes.
+        confirm_in_chat: Confirm a newly recorded manual result in the chat.
+            Requires ActionResult.record; never runs on automatic status reads.
     """
-    _registry[(surface_kind, name)] = _Action(surface_kind, name, handler, requires_tool, tell_ai)
+    _registry[(surface_kind, name)] = _Action(
+        surface_kind, name, handler, requires_tool, tell_ai, automatic, confirm_in_chat
+    )
 
 
 def lookup(surface_kind: str, action_name: str) -> _Action | None:

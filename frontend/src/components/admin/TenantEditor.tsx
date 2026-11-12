@@ -20,6 +20,7 @@ import {
   TenantValidation,
   ValidationVerdicts,
 } from "./tenantAdmin";
+import { useConfirm } from "@/components/ui/confirm";
 
 interface Draft {
   display_name: string;
@@ -52,6 +53,7 @@ export function TenantEditor({
   onCancel: () => void;
   onDeleted: () => void;
 }) {
+  const confirm = useConfirm();
   const [draft, setDraft] = useState<Draft>(() => toDraft(tenant));
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
@@ -145,7 +147,13 @@ export function TenantEditor({
   }
 
   async function remove() {
-    if (!window.confirm(`Delete tenant config for ${tenant.domain}? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete the configuration for ${tenant.domain}?`,
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
     setNotice(null);
     try {
       const r = await fetchWithAuth(

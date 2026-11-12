@@ -146,6 +146,22 @@ Rules the validator enforces:
 """.strip()
 
 
+class A2uiDirectLauncher(BaseModel):
+    """One fixed, no-model entry button (`toolConfigs.a2ui.direct_launchers[]`).
+
+    The shape the launch route and the frontend read: `name` selects a handler
+    registered in `adk.a2ui_direct_launchers`, `tool` must equal that handler's
+    required tool, `label` is the button text. See
+    docs/development/a2ui-private-surfaces.md.
+    """
+
+    name: str = Field(min_length=1, max_length=128)
+    label: str = Field(min_length=1, max_length=120)
+    tool: str = Field(min_length=1, max_length=128)
+
+    model_config = {"extra": "forbid"}
+
+
 class A2uiToolConfig(BaseModel):
     """Skill-level A2UI defaults read from `tool_configs.a2ui` in SkillMetadata.
 
@@ -210,7 +226,24 @@ class A2uiToolConfig(BaseModel):
         ),
     )
 
+    direct_launchers: list[A2uiDirectLauncher] = Field(
+        default_factory=list,
+        description=(
+            "Fixed no-model entry buttons shown before the first chat turn; each "
+            "names a registered launcher and its required tool. The launch route "
+            "(protocols/a2ui_direct_launch_routes.py) re-checks the declaration, "
+            "the registry, the skill's tools and the caller's grants on every POST."
+        ),
+    )
+
     model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def _reject_duplicate_launcher_names(self) -> A2uiToolConfig:
+        names = [d.name for d in self.direct_launchers]
+        if len(names) != len(set(names)):
+            raise ValueError("direct_launchers names must be unique")
+        return self
 
     @model_validator(mode="after")
     def _reject_patch_against_turn_scoped(self) -> A2uiToolConfig:

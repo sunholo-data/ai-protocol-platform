@@ -127,7 +127,19 @@ export interface Skill {
   // v6.6.0 TENANT-FORK-CONVERGENCE — per-skill persona (avatar + style + voice).
   // Optional / nullable / additive. See docs/design/v6.6.0/…
   persona?: SkillPersona | null;
+  /** v6.43.0 MULTI-LANG — per-locale text for the fields a person reads, keyed
+   * by BCP 47 tag; inner keys are snake_case as in SKILL.md. Every field is
+   * optional and falls back to the base value. Read through `useSkillText` /
+   * `skillText` (hooks/useSkillText.ts), never directly. Mirrors backend
+   * SkillConfig.locales. */
+  locales?: SkillLocales | null;
 }
+
+/** The fields a skill's `locales:` block may translate (backend i18n.SKILL_LOCALE_FIELDS). */
+export const SKILL_LOCALE_FIELDS = ["display_name", "description", "initial_message"] as const;
+export type SkillLocaleField = (typeof SKILL_LOCALE_FIELDS)[number];
+export type SkillLocaleText = Partial<Record<SkillLocaleField, string>>;
+export type SkillLocales = Record<string, SkillLocaleText>;
 
 // === v6.4.0 4.5 SKILL-ONBOARDING types ============================
 

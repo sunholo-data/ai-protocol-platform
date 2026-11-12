@@ -35,6 +35,42 @@ def test_is_plain_text_routes_txt_not_pdf():
     assert not _is_plain_text("gs://b/deck.docx")
 
 
+def test_repository_text_formats_parse_as_plain_text():
+    from tools.documents.upload import _is_plain_text
+
+    assert _is_plain_text("gs://b/plan.yaml")
+    assert _is_plain_text("gs://b/post.mdx")
+    assert _is_plain_text("gs://b/page.qmd")
+
+
+@pytest.mark.asyncio
+async def test_repository_text_formats_come_only_from_a_git_source():
+    """github-sources.md D3: a source may store .yaml; an upload still may not."""
+    from fastapi import HTTPException
+
+    from tools.documents.ingest import ingest_document
+
+    with pytest.raises(HTTPException) as exc:
+        await ingest_document(user=_USER, file_bytes=b"a: 1", filename="plan.yaml")
+    assert exc.value.status_code == 400
+
+    patches = _common_patches()
+    for p in patches:
+        p.start()
+    try:
+        with (
+            patch("tools.documents.ingest.query_documents", return_value=[]),
+            patch("tools.documents.ingest._prior_record", return_value={}),
+        ):
+            resp = await ingest_document(
+                user=_USER, file_bytes=b"a: 1", filename="plan.yaml", source="git", source_ref={"path": "plan.yaml"}
+            )
+    finally:
+        for p in patches:
+            p.stop()
+    assert resp.status == "parsed"
+
+
 @pytest.mark.asyncio
 async def test_run_parse_txt_emits_paragraph_blocks_and_parsed_status():
     from tools.documents.upload import _run_parse
@@ -179,6 +215,10 @@ class TestUploadEndpoint:
         from the original DETERMINISTIC_EXTENSIONS gate — but as of 2026-06-11
         PDFs (and images) are in PARSEABLE_EXTENSIONS, so they hit the real
         parse path. Force the gate closed here to exercise the legacy fallback.
+
+        Uses a format vision cannot read either: since 2026-11-02 a PDF the
+        hosted parser skips goes to the Gemini vision fallback instead
+        (tools/documents/vision_parse.py), so it no longer strands here.
         """
         with (
             patch("tools.documents.ingest.resolve_documents_bucket", return_value="test-bucket"),
@@ -190,7 +230,7 @@ class TestUploadEndpoint:
         ):
             resp = upload_client.post(
                 "/api/documents/upload",
-                files={"file": ("document.pdf", io.BytesIO(b"pdf bytes"), "application/pdf")},
+                files={"file": ("book.epub", io.BytesIO(b"epub bytes"), "application/epub+zip")},
             )
 
         assert resp.status_code == 200

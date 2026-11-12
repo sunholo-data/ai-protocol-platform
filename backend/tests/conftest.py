@@ -190,15 +190,21 @@ def _reset_agent_and_mcp_caches():
     that mocks ``get_document`` would see a prior test's cached config)."""
     from adk import a2ui_sources_render as _sources
     from adk import agent_cache as _agent_cache
+    from adk import session as _session
+    from skills import skill_config as _skill_config
     from tools.mcp import registry as _mcp_registry
 
     _agent_cache.clear()
     _mcp_registry.clear_registry_cache()
     _sources.clear_resolution_cache()
+    _session._reset_memory_service_for_tests()  # one per process now: no leaks between tests
+    _skill_config._lookups.clear()  # slug / miss / jobs lookups: a TTL cache too
     yield
     _agent_cache.clear()
     _mcp_registry.clear_registry_cache()
     _sources.clear_resolution_cache()
+    _session._reset_memory_service_for_tests()
+    _skill_config._lookups.clear()
 
 
 @pytest.fixture(autouse=True)

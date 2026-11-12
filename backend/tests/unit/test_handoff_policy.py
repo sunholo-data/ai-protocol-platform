@@ -218,3 +218,73 @@ def test_transfer_to_agent_envelope_renders_via_registry():
     assert rendered is not None, "transfer_to_agent card must render (tool_names gate)"
     assert rendered.artifact and rendered.artifact.get("placement") == "chat"
     assert is_render_payload_tool("transfer_to_agent")
+
+
+# --- channels with no clickable UI: confirm in TEXT ---------------------------
+
+
+def _ctx(invocation: str, state: dict):
+    return SimpleNamespace(invocation_id=invocation, state=state)
+
+
+def _writer_cb():
+    return make_handoff_policy_callback(
+        "door", _map(("writer", _sub("dw-1", "Document Writer"), DelegateRule(skill="dw-1", floor="confirm")))
+    )
+
+
+def test_channel_confirm_asks_in_text_then_transfers_on_the_next_turn():
+    """Discord can't press an elicitation button — a form there re-asked forever."""
+    from adk.elicitation import NON_INTERACTIVE
+
+    cb, state = _writer_cb(), {}
+    token = NON_INTERACTIVE.set(True)
+    try:
+        first = cb(tool=_tool("transfer_to_agent"), args={"agent_name": "writer"}, tool_context=_ctx("inv-1", state))
+        assert first["status"] == "needs_confirmation" and "elicitation" not in first
+        assert "plain text" in first["message"]
+        # The model retrying in the SAME turn is not the person agreeing.
+        again = cb(tool=_tool("transfer_to_agent"), args={"agent_name": "writer"}, tool_context=_ctx("inv-1", state))
+        assert again is not None
+        # The person replied "yes" -> a LATER turn calls the handoff again -> transfer.
+        assert (
+            cb(tool=_tool("transfer_to_agent"), args={"agent_name": "writer"}, tool_context=_ctx("inv-2", state))
+            is None
+        )
+        assert "dw-1" not in state["channel_handoff_asked"]  # consumed: the next handoff asks again
+    finally:
+        NON_INTERACTIVE.reset(token)
+
+
+def test_stale_text_confirmation_expires(monkeypatch):
+    import time as _time
+
+    from adk.elicitation import NON_INTERACTIVE
+
+    cb, state = _writer_cb(), {}
+    token = NON_INTERACTIVE.set(True)
+    try:
+        cb(tool=_tool("transfer_to_agent"), args={"agent_name": "writer"}, tool_context=_ctx("inv-1", state))
+        state["channel_handoff_asked"]["dw-1"]["at"] = _time.time() - 31 * 60
+        out = cb(tool=_tool("transfer_to_agent"), args={"agent_name": "writer"}, tool_context=_ctx("inv-2", state))
+        assert out is not None and out["status"] == "needs_confirmation"  # asks again
+    finally:
+        NON_INTERACTIVE.reset(token)
+
+
+def test_web_still_gets_the_clickable_form():
+    out = _writer_cb()(tool=_tool("transfer_to_agent"), args={"agent_name": "writer"}, tool_context=_ctx("inv-1", {}))
+    assert out["needs_input"] is True and out["elicitation"]["kind"] == "confirm"
+
+
+def test_self_transfer_is_carried_on_not_crashed():
+    """Live 2026-10-27: after a confirmed handoff the delegate called the handoff
+    to ITSELF and ADK failed the whole run ("cannot transfer to itself")."""
+    from adk.agent import refuse_self_transfer
+
+    ctx = SimpleNamespace(agent_name="document_writer", state={})
+    out = refuse_self_transfer(_tool("transfer_to_agent"), {"agent_name": "document_writer"}, ctx)
+    assert out["status"] == "already_active"
+    # A real handoff to someone else, and other tools, are untouched.
+    assert refuse_self_transfer(_tool("transfer_to_agent"), {"agent_name": "memo-writer"}, ctx) is None
+    assert refuse_self_transfer(_tool("generate_document"), {"agent_name": "document_writer"}, ctx) is None

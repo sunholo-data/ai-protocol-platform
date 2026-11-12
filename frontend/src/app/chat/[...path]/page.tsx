@@ -11,6 +11,7 @@ import { SignInRequired } from "@/components/chat/SignInRequired";
 import { SkillNotFound } from "@/components/chat/SkillNotFound";
 import { AGUIProvider } from "@/providers/AGUIProvider";
 import { ShellRouter } from "@/components/shells/ShellRouter";
+import { ChatSkeleton } from "@/components/ui/skeleton";
 
 /**
  * Chat route entry.
@@ -41,7 +42,7 @@ export default function ChatPage({
   if (!loading && !user) return <SignInRequired />;
 
   if (loading || resolving) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
+    return <ChatSkeleton />;
   }
   if (!user) return null;
   if (notFound || !skillId) {

@@ -1,0 +1,2 @@
+# Exported API-client functions that are deliberately not mounted yet.
+# One per line: <file>::<name>  # reason (a reason is required).

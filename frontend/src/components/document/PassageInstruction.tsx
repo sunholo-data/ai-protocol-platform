@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchWithAuth } from "@/lib/apiClient";
 import { reportDocumentAction, type DocumentActivitySink } from "@/lib/documentActivity";
+import { Spinner } from "@/components/ui/spinner";
 
 interface PassageInstructionProps {
   docId: string;
@@ -261,18 +262,15 @@ export function PassageInstruction({ docId, containerRef, onChanged, activitySin
       {(busy || done || error) && (
         <div className="border-t px-3 py-1.5">
           {busy && (
-            <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground" role="status" aria-live="polite">
-              <span
-                aria-hidden
-                className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
-              />
+            <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground" role="status" aria-live="polite">
+              <Spinner size="xs" />
               <span className="min-w-0 flex-1 truncate">{stage ?? "Rewriting just this passage…"}</span>
               {elapsed > 2 && <span className="shrink-0 tabular-nums opacity-70">{elapsed}s</span>}
             </p>
           )}
-          {done && !error && <p className="text-[10px] text-emerald-600">Updated — the document has been rewritten.</p>}
+          {done && !error && <p className="text-[11px] text-emerald-600">Updated — the document has been rewritten.</p>}
           {error && (
-            <p className="text-[10px] text-destructive" role="alert">
+            <p className="text-[11px] text-destructive" role="alert">
               {error}
             </p>
           )}

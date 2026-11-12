@@ -157,13 +157,13 @@ export function DelegationEditor({ value, currentSkillId, onChange }: Delegation
                     <label className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs text-muted-foreground/70 hover:bg-muted/40">
                       <input type="checkbox" checked onChange={() => toggleAllow(id)} />
                       <span className="truncate font-mono">{id}</span>
-                      <span className="text-[10px]">(no access)</span>
+                      <span className="text-[11px]">(no access)</span>
                     </label>
                   </li>
                 ))}
               </ul>
             )}
-            <p className="text-[10px] text-muted-foreground/60">
+            <p className="text-[11px] text-muted-foreground/60">
               A user only ever sees handoffs to skills they can access — this list is a ceiling, not a grant.
             </p>
           </div>

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 COLLECTION = "tool_permissions"
 CREATED_BY = "seed_tool_permissions"
 _ENV_PROJECTS = {"dev": "your-project-id", "test": "your-project-id-test", "prod": "your-project-id-prod"}
-DEFAULT_TOOLS = ["google_search", "web_search_agent", "code_execution"]
+_WILDCARD_BASELINE = ["google_search", "web_search_agent", "code_execution"]
 FRAMEWORK_GATED_TOOLS = [
     "load_artifacts",
     "retrieve_artifact",
@@ -29,11 +29,19 @@ FRAMEWORK_GATED_TOOLS = [
     "add_to_project",
     "remove_from_project",
     "grep_project_documents",
+    "read_project_file",
+    "write_project_files",
+    "delete_project_files",
     "search_project_documents",
     "search_documents",
     "send_a2ui_json_to_client",
     "request_confirmation",
 ]
+# The wildcard grant: the baseline plus the framework tools every skill gets
+# whether or not it declares them. Each acts only on the caller's own data or is
+# UI plumbing; without them a user whose domain has no doc of its own is told
+# "not enabled" for memory, projects and artifacts.
+DEFAULT_TOOLS = [*_WILDCARD_BASELINE, *FRAMEWORK_GATED_TOOLS]
 
 
 def build_docs(*, domain=None, email=None, tools=None, wildcard=False):

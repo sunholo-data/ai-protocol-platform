@@ -12,14 +12,13 @@ import asyncio
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 import db.folders as folders_db
 import db.projects as projects_db
 from auth import User, get_current_user
 from db.chat_sessions import get_session_index, list_sessions_for_project
-from db.firestore import get_document
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +26,9 @@ router = APIRouter(tags=["projects"])
 
 _CurrentUser = Annotated[User, Depends(get_current_user)]
 _MAX_DOCS_PER_REQUEST = 100
+# "Add whole folder": a folder upload can be hundreds of files. Above this the
+# request would run long enough to look stuck; pick subfolders instead.
+_MAX_FOLDER_DOCS = 1000
 
 
 def _forget_cached(user_id: str, project_id: str) -> None:
@@ -79,6 +81,7 @@ class ProjectResponse(BaseModel):
     # Meaning-based search readiness (projects.md §11 D4): {indexed, failed,
     # total, status: ready|indexing|unavailable}. Absent in the public template.
     search: dict[str, Any] | None = None
+    attachedKbIds: list[str] = Field(default_factory=list)
 
 
 def _response(project: dict[str, Any], *, counts: bool = True, user_id: str = "") -> ProjectResponse:
@@ -90,6 +93,7 @@ def _response(project: dict[str, Any], *, counts: bool = True, user_id: str = ""
         createdAt=project.get("createdAt"),
         updatedAt=project.get("updatedAt"),
         lastOpenedAt=project.get("lastOpenedAt"),
+        attachedKbIds=[str(k) for k in project.get("attachedKbIds") or []],
     )
     if counts and user_id:
         out.docCount = projects_db.count_project_documents(user_id, project["id"])
@@ -127,15 +131,30 @@ class PatchProjectRequest(BaseModel):
     name: str | None = None
     instructions: str | None = None
     defaultSkillId: str | None = None
+    # Knowledge bases the project's chats also search (github-sources.md D9).
+    attachedKbIds: list[str] | None = None
 
 
 class AddDocumentsRequest(BaseModel):
-    doc_ids: list[str]
+    doc_ids: list[str] = Field(default_factory=list)
+    # "Add whole folder" — every document in one of the caller's folders and,
+    # unless switched off, its subfolders (folder names are paths: "a/b").
+    # Recovers a folder upload that was saved to the library but never added.
+    folder_id: str | None = None
+    include_subfolders: bool = True
 
 
 class DocumentsPage(BaseModel):
     documents: list[dict[str, Any]]
     next_cursor: str | None = None
+
+
+@router.get("/api/folders/projects")
+def folder_projects(user: _CurrentUser) -> dict[str, Any]:
+    """{folders: {folderId: [{projectId, projectName, documents, via}]}} for the sidebar chips."""
+    from projects.folder_links import folder_links
+
+    return {"folders": folder_links(user.uid)}
 
 
 @router.get("/api/projects")
@@ -152,7 +171,7 @@ def create_project(body: CreateProjectRequest, user: _CurrentUser) -> CreatedPro
         folder = folders_db.get_owned_folder(user.uid, body.fromFolderId)
         if folder is None:
             raise HTTPException(status_code=404, detail={"code": "FOLDER_NOT_FOUND", "message": "Folder not found."})
-        to_tag += [d["id"] for d in folders_db.list_folder_documents(user.uid, folder["id"]) if d.get("id")]
+        to_tag += [d["id"] for d in folders_db.list_folder_documents(user.uid, folder["id"], fields=[]) if d.get("id")]
     if body.fromSessionId:
         session = get_session_index(body.fromSessionId)
         if session is None or session.owner_uid != user.uid:
@@ -187,16 +206,48 @@ def get_project(project_id: str, user: _CurrentUser) -> ProjectResponse:
 
 
 @router.patch("/api/projects/{project_id}")
-def patch_project(project_id: str, body: PatchProjectRequest, user: _CurrentUser) -> ProjectResponse:
+def patch_project(project_id: str, body: PatchProjectRequest, request: Request, user: _CurrentUser) -> ProjectResponse:
     kwargs: dict[str, Any] = {"name": body.name, "instructions": body.instructions}
     if "defaultSkillId" in body.model_fields_set:
         kwargs["default_skill_id"] = body.defaultSkillId
+    if body.attachedKbIds is not None:
+        kwargs["attached_kb_ids"] = _attachable_or_422(request, body.attachedKbIds)
     try:
         project = projects_db.update_project(user.uid, project_id, **kwargs)
     except projects_db.ProjectError as exc:
         raise _http(exc) from exc
     _forget_cached(user.uid, project_id)
     return _response(project, user_id=user.uid)
+
+
+def _attachable_or_422(request: Request, kb_ids: list[str]) -> list[str]:
+    """Only knowledge bases the caller can search may be attached: attaching
+    never grants access (github-sources.md D9). Searches re-check it anyway."""
+    wanted = [k.strip() for k in kb_ids if k and k.strip()]
+    if not wanted:
+        return []
+    from extensions import attachable_knowledge_bases
+
+    offered = attachable_knowledge_bases(getattr(request.state, "access", None))
+    if offered is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "KNOWLEDGE_BASES_UNAVAILABLE",
+                "message": "This deployment has no knowledge bases to attach.",
+            },
+        )
+    allowed = {row["id"] for row in offered}
+    refused = [k for k in wanted if k not in allowed]
+    if refused:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "KNOWLEDGE_BASE_NOT_ATTACHABLE",
+                "message": "You can only attach knowledge bases you can search.",
+            },
+        )
+    return wanted
 
 
 @router.delete("/api/projects/{project_id}", status_code=204)
@@ -211,7 +262,19 @@ def delete_project(project_id: str, user: _CurrentUser) -> Response:
         raise _http(exc) from exc
     _forget_cached(user.uid, project_id)
     purged = _purge_memories(user.uid, project_id)
+    _drop_sources(user.uid, project_id)
     return Response(status_code=204, headers={"X-Project-Memories-Deleted": str(purged)})
+
+
+def _drop_sources(user_id: str, project_id: str) -> None:
+    """A deleted project's sources stop syncing (github-sources.md §4). Their
+    documents stay, like every other project document. Best-effort."""
+    from sources import store as sources_store
+
+    try:
+        sources_store.delete_project_sources(user_id, project_id)
+    except Exception:
+        log.exception("project %s: could not delete its sources", project_id)
 
 
 @router.post("/api/projects/{project_id}/documents")
@@ -222,9 +285,34 @@ def add_documents(project_id: str, body: AddDocumentsRequest, user: _CurrentUser
             status_code=422,
             detail={"code": "TOO_MANY_DOCUMENTS", "message": f"Add at most {_MAX_DOCS_PER_REQUEST} documents at once."},
         )
-    result = TagResult(**projects_db.tag_documents(user.uid, project_id, body.doc_ids))
+    doc_ids = list(body.doc_ids)
+    if body.folder_id:
+        doc_ids += _folder_doc_ids(user.uid, body.folder_id, body.include_subfolders)
+    result = TagResult(**projects_db.tag_documents(user.uid, project_id, doc_ids))
     _forget_cached(user.uid, project_id)
     return result
+
+
+def _folder_doc_ids(user_id: str, folder_id: str, include_subfolders: bool) -> list[str]:
+    folder = folders_db.get_owned_folder(user_id, folder_id)
+    if folder is None:
+        raise HTTPException(status_code=404, detail={"code": "FOLDER_NOT_FOUND", "message": "Folder not found."})
+    ids = [folder["id"]]
+    if include_subfolders and folder.get("name"):
+        prefix = f"{folder['name']}/"
+        ids += [f["id"] for f in folders_db.list_folders(user_id) if str(f.get("name") or "").startswith(prefix)]
+    doc_ids: list[str] = []
+    for fid in ids:
+        doc_ids += [d["id"] for d in folders_db.list_folder_documents(user_id, fid, fields=[]) if d.get("id")]
+        if len(doc_ids) > _MAX_FOLDER_DOCS:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "TOO_MANY_DOCUMENTS",
+                    "message": f"That folder has more than {_MAX_FOLDER_DOCS} documents. Add its subfolders one at a time.",
+                },
+            )
+    return doc_ids
 
 
 @router.delete("/api/projects/{project_id}/documents/{doc_id}", status_code=204)
@@ -267,7 +355,17 @@ def list_sessions(
     doc_ids = set(projects_db.project_document_ids(user.uid, project_id))
     rows, next_cursor = list_sessions_for_project(user.uid, project_id, doc_ids, page_size=page_size, cursor=cursor)
     labels = resolve_skill_labels([r["session"].skill_id for r in rows])
-    filenames: dict[str, str] = {}
+    from db.firestore import get_documents
+
+    linked_docs = get_documents(
+        "parsed_documents",
+        [r["linkedDocumentId"] for r in rows if r["linkedDocumentId"]],
+        fields=["originalFilename", "userId"],
+    )
+    filenames = {
+        doc_id: (str(doc.get("originalFilename") or "") if doc.get("userId") == user.uid else "")
+        for doc_id, doc in linked_docs.items()
+    }
     sessions: list[dict[str, Any]] = []
     for row in rows:
         idx = row["session"]
@@ -275,10 +373,7 @@ def list_sessions(
         summary["membership"] = row["membership"]
         linked = row["linkedDocumentId"]
         if linked:
-            if linked not in filenames:
-                doc = get_document("parsed_documents", linked) or {}
-                filenames[linked] = str(doc.get("originalFilename") or "") if doc.get("userId") == user.uid else ""
-            summary["linkedDocument"] = {"id": linked, "filename": filenames[linked]}
+            summary["linkedDocument"] = {"id": linked, "filename": filenames.get(linked, "")}
         else:
             summary["linkedDocument"] = None
         sessions.append(summary)

@@ -88,6 +88,40 @@ class TestTenantNarrowing:
         assert [x.slug for x in v if x.visible] == []
 
 
+class TestOwnerSeesOwnSkill:
+    """enabled_skills narrows the shared catalogue — never the owner's own skills.
+
+    Regression (2026-11-05): a non-admin in a narrowed tenant who created
+    or forked a skill got a 201 and then never saw it in their list.
+    """
+
+    def _mine(self) -> SimpleNamespace:
+        mine = _skill("my-opus-assistant", ac_type="private")
+        mine.owner_id = "u1"  # the _ctx() viewer
+        return mine
+
+    def test_owner_sees_own_skill_outside_enabled_list(self):
+        v = evaluate_visibility([self._mine()], _ctx("example-team"), _ENABLED)
+        assert v[0].visible is True
+        assert v[0].tenant_allowed is True
+        assert v[0].admin_bypass is False
+
+    def test_reason_says_why(self):
+        v = evaluate_visibility([self._mine()], _ctx("example-team"), _ENABLED)
+        assert "you own it" in v[0].reason
+
+    def test_someone_elses_skill_still_narrowed(self):
+        theirs = _skill("their-assistant")
+        theirs.owner_id = "u2"
+        v = evaluate_visibility([theirs], _ctx("example-team"), _ENABLED)
+        assert v[0].visible is False
+
+    def test_platform_skill_outside_list_still_hidden(self):
+        # The exemption is ownership, not "any non-platform skill".
+        v = {x.slug: x for x in evaluate_visibility(_ALL, _ctx("example-team"), _ENABLED)}
+        assert v["wip-demo"].visible is False
+
+
 class TestAdminBypassIsVisibleNotHidden:
     """The admin bypass is the reason the admin's own list is misleading.
 

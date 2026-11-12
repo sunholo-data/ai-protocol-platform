@@ -1,6 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { emitWorkbenchConfirmation } from "@/lib/workbenchConfirmation";
+import { LocaleProvider } from "@/i18n";
+import { UserLocaleProvider } from "@/i18n/userLocale";
 
 // Build a minimal fake AbstractAgent with just the methods the hook touches.
 // Keeping it explicit (not extending real HttpAgent) means we don't have to
@@ -151,6 +154,35 @@ beforeEach(() => {
 });
 
 describe("useSkillAgent — core", () => {
+  it("distinguishes pending from server-started work and preserves a confirmed finish", async () => {
+    let resolveRun!: () => void;
+    fake.runAgent.mockImplementationOnce(() => new Promise<{ newMessages: never[] }>((resolve) => {
+      resolveRun = () => resolve({ newMessages: [] });
+    }));
+    const { result } = renderHook(() => useSkillAgent());
+    let sent!: Promise<void>;
+    act(() => { sent = result.current.sendMessage("research this"); });
+    expect(result.current.runStatus).toBe("pending");
+    act(() => fake.emitRunStart());
+    expect(result.current.runStatus).toBe("running");
+    await act(async () => {
+      fake.emitRunFinished();
+      fake.emitRunFinal();
+      resolveRun();
+      await sent;
+    });
+    expect(result.current.runStatus).toBe("completed");
+  });
+
+  it("never turns a failure into completion when RUN_FINISHED follows RUN_ERROR", () => {
+    const { result } = renderHook(() => useSkillAgent());
+    act(() => fake.emitRunStart());
+    act(() => fake.emitRunError({ message: "Worker failed" }));
+    act(() => fake.emitRunFinished());
+    act(() => fake.emitRunFinal());
+    expect(result.current.runStatus).toBe("failed");
+  });
+
   it("returns the documented public surface", () => {
     const { result } = renderHook(() => useSkillAgent());
     expect(Object.keys(result.current).sort()).toEqual([
@@ -164,7 +196,11 @@ describe("useSkillAgent — core", () => {
       "isLoading",
       "isThinking",
       "messages",
+      // Activity: model retries/fallbacks and the in-flight model wait.
+      "modelEvents",
+      "modelWait",
       "resolvedModel",
+      "runStatus",
       "sendMessage",
       "sessionId",
       "stageLabel",
@@ -174,6 +210,16 @@ describe("useSkillAgent — core", () => {
       "tidyingUp",
       "toolCalls",
     ]);
+  });
+
+  it("adds persisted workbench confirmations as assistant messages without a fake user turn", () => {
+    const { result } = renderHook(() => useSkillAgent());
+    const reply = { sessionId: result.current.sessionId, id: "receipt-1", content: "Project created and verified." };
+    act(() => { emitWorkbenchConfirmation(reply); emitWorkbenchConfirmation(reply); });
+    expect(result.current.messages).toEqual([{ id: "receipt-1", role: "assistant", content: reply.content }]);
+    expect(fake.runAgent).not.toHaveBeenCalled();
+    act(() => emitWorkbenchConfirmation({ ...reply, sessionId: "different", id: "not-this-chat" }));
+    expect(result.current.messages).toHaveLength(1);
   });
 
   it("syncs messages from the agent and sends new user messages", async () => {
@@ -220,6 +266,7 @@ describe("useSkillAgent — core", () => {
     expect(result.current.error?.rawMessage).toBe("stream_truncated_no_terminal");
     expect(result.current.error?.retryable).toBe(true);
     expect(result.current.isLoading).toBe(false);
+    expect(result.current.runStatus).toBe("unknown");
   });
 
   it("stays silent-free but error-free on a CLEAN finish (RUN_FINISHED seen)", () => {
@@ -521,6 +568,49 @@ describe("useSkillAgent — deterministic document attachment", () => {
     });
 
     expect(fake.runAgent).toHaveBeenCalledWith({ forwardedProps: { project_id: "p-iberia" } });
+  });
+
+  // multi-language.md §6: the interface language rides every run, but only
+  // where the deployment offers more than one — an English-only wire is unchanged.
+  it("sends ui_locale (the in-force locale) when 2+ languages are offered", async () => {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <UserLocaleProvider config={{ locales: ["en", "xx"], defaultLocale: "en" }}>
+        <LocaleProvider locale="xx">{children}</LocaleProvider>
+      </UserLocaleProvider>
+    );
+    const { result } = renderHook(() => useSkillAgent(), { wrapper });
+
+    await act(async () => {
+      await result.current.sendMessage("hej");
+    });
+
+    expect(fake.runAgent).toHaveBeenCalledWith({ forwardedProps: { ui_locale: "xx" } });
+  });
+
+  it("sends ui_locale on a single NON-English deployment (a Danish-only fork)", async () => {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <UserLocaleProvider config={{ locales: ["da"], defaultLocale: "da" }}>{children}</UserLocaleProvider>
+    );
+    const { result } = renderHook(() => useSkillAgent(), { wrapper });
+
+    await act(async () => {
+      await result.current.sendMessage("hej");
+    });
+
+    expect(fake.runAgent).toHaveBeenCalledWith({ forwardedProps: { ui_locale: "da" } });
+  });
+
+  it("sends no ui_locale on an English-only deployment", async () => {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <UserLocaleProvider config={{ locales: ["en"], defaultLocale: "en" }}>{children}</UserLocaleProvider>
+    );
+    const { result } = renderHook(() => useSkillAgent(), { wrapper });
+
+    await act(async () => {
+      await result.current.sendMessage("hello");
+    });
+
+    expect(fake.runAgent).toHaveBeenCalledWith(undefined);
   });
 
   it("a null projectId sends no project_id", async () => {
@@ -1497,6 +1587,75 @@ describe("useSkillAgent — model reliability events (M3)", () => {
       });
     });
     expect(result.current.fallbacks[0].reason).toBe("provider_cooldown");
+  });
+});
+
+// Activity progress: a 2026-10-30 Severa turn spent ~6 min across 15 model
+// calls (6 of them stalled) with nothing in Activity to say where the time went.
+describe("useSkillAgent — model progress for Activity", () => {
+  it("MODEL_CALL opens a wait that the model's first output closes", () => {
+    const { result } = renderHook(() => useSkillAgent());
+    act(() => {
+      fake.emitCustomEvent("MODEL_CALL", { model: "gemini-3.8-flash", attempt: 0, deadline_s: 12.5 });
+    });
+    expect(result.current.modelWait).toMatchObject({ model: "gemini-3.8-flash", deadlineS: 12.5 });
+    act(() => {
+      fake.emitReasoningStart();
+    });
+    expect(result.current.modelWait).toBeNull();
+  });
+
+  it.each([
+    ["a tool call", () => fake.emitToolCallStart("tc-1", "grep_project_documents")],
+    ["answer text", () => fake.emitTextMessageStart("m-1")],
+    ["the end of the run", () => fake.emitRunFinal()],
+  ])("the wait also ends at %s", (_label, emit) => {
+    const { result } = renderHook(() => useSkillAgent());
+    act(() => {
+      fake.emitCustomEvent("MODEL_CALL", { model: "gemini-3.8-flash", attempt: 0, deadline_s: 10 });
+    });
+    act(() => {
+      emit();
+    });
+    expect(result.current.modelWait).toBeNull();
+  });
+
+  it("records stalls, retries and fallbacks with how long they cost", () => {
+    const { result } = renderHook(() => useSkillAgent());
+    act(() => {
+      fake.emitCustomEvent("MODEL_CALL", { model: "gemini-3.8-flash", attempt: 0, deadline_s: 10 });
+      fake.emitCustomEvent("MODEL_FALLBACK", {
+        from_model: "gemini-3.8-flash",
+        to_model: "gemini-3.7-flash",
+        code: "MODEL_SILENT_STALL",
+        waited_s: 12.3,
+      });
+      fake.emitCustomEvent("MODEL_RETRY", {
+        model: "gemini-3.7-flash",
+        attempt: 1,
+        code: "MODEL_RATE_LIMITED",
+        waited_s: 0.4,
+        delay_s: 1.5,
+      });
+    });
+    expect(result.current.modelWait).toBeNull();
+    expect(result.current.modelEvents).toMatchObject([
+      { kind: "fallback", model: "gemini-3.8-flash", toModel: "gemini-3.7-flash", code: "MODEL_SILENT_STALL", waitedS: 12.3 },
+      { kind: "retry", model: "gemini-3.7-flash", code: "MODEL_RATE_LIMITED", waitedS: 0.4, delayS: 1.5 },
+    ]);
+  });
+
+  it("a tool's result stamps when it finished — END only means the call was written", () => {
+    const { result } = renderHook(() => useSkillAgent());
+    act(() => {
+      fake.emitToolCallStart("tc-1", "grep_project_documents");
+      fake.emitToolCallEnd("tc-1");
+    });
+    expect(result.current.toolCalls[0].endTs).toBeUndefined();
+    act(() => {
+      fake.emitToolCallResult("tc-1", "{}");
+    });
+    expect(result.current.toolCalls[0].endTs).toEqual(expect.any(Number));
   });
 });
 

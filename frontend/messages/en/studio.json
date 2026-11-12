@@ -1,0 +1,12 @@
+{
+  "SkillLanguages": {
+    "tablistLabel": "Skill text by language",
+    "original": "Original",
+    "intro": "What people using {language} see. Every field is optional: leave one blank and they see the original text, shown greyed below.",
+    "displayName": "Display name",
+    "description": "Description",
+    "greeting": "Greeting",
+    "greetingHint": "The first message in a new chat",
+    "instructionsNote": "Instructions are the same in every language. Edit them on the Original tab."
+  }
+}

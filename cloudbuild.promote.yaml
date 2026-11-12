@@ -44,11 +44,17 @@
 #     promotion promoted. Set the two substitutions to the same value here.
 #   * What actually moves an env forward in THIS topology is the deploy step
 #     pinning the tested digest onto the target service.
+# cloud-sdk is pinned by digest (2026-11-03): the image Google published that day
+# dropped python3, which the seed gate and the promotion's substitution step run.
+# To move it, check `python3 --version` inside the candidate image first.
 substitutions:
   _VERTEX_AI_SEARCH_DATASTORE_ID: ''
   _VERTEX_AI_SEARCH_PROJECT: ''
   _VERTEX_AI_SEARCH_LOCATION: 'eu'
   _A2A_AGENT_DOCUMENTS_BUCKET: ''
+  _KNOWLEDGE_GCS_BUCKETS: ''
+  _KNOWLEDGE_SCHEDULER_OIDC_SA: ''
+  _KNOWLEDGE_SCHEDULER_AUDIENCE: ''
   _SOURCE_PROJECT: terraform_managed          # e.g. your-project-id-test (promote FROM)
   _TARGET_PROJECT: terraform_managed          # e.g. your-project-id-prod (this build's project)
   _SOURCE_ARTIFACT_REGISTRY_REPO_URL: terraform_managed  # source env's AR repo prefix (== target's, here)
@@ -199,7 +205,7 @@ steps:
   # values legitimately contain commas (_AUTH_OPERATOR_DOMAINS,
   # _ADMIN_SEED_ALLOWED_SAS) and one wrong quote here silently deploys an env
   # with a truncated allowlist.
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk@sha256:aa2b2728a6f3eaf1d6d37409133fde8220b28460282f6983e3055b1b2c792228'
     id: 'resolve-spec-config'
     waitFor: ['guard-version']
     entrypoint: bash
@@ -221,6 +227,9 @@ steps:
           "_VERTEX_AI_SEARCH_PROJECT": "${_VERTEX_AI_SEARCH_PROJECT}",
           "_VERTEX_AI_SEARCH_LOCATION": "${_VERTEX_AI_SEARCH_LOCATION}",
           "_A2A_AGENT_DOCUMENTS_BUCKET": "${_A2A_AGENT_DOCUMENTS_BUCKET}",
+          "_KNOWLEDGE_GCS_BUCKETS": "${_KNOWLEDGE_GCS_BUCKETS}",
+          "_KNOWLEDGE_SCHEDULER_OIDC_SA": "${_KNOWLEDGE_SCHEDULER_OIDC_SA}",
+          "_KNOWLEDGE_SCHEDULER_AUDIENCE": "${_KNOWLEDGE_SCHEDULER_AUDIENCE}",
           "_MODEL_RESIDENCY_POLICY": "${_MODEL_RESIDENCY_POLICY}",
           "_SLOW_STREAM_PROBE_ENABLED": "${_SLOW_STREAM_PROBE_ENABLED}",
           "_COMPACTION_SECOND_PASS": "${_COMPACTION_SECOND_PASS}",
@@ -354,7 +363,7 @@ steps:
   # The UI is rebuilt from the tag, so its /help pages must be bundled here too
   # (the backend image is copied and already carries its bundle). See the
   # bundle-user-guide step in cloudbuild.yaml.
-  - name: 'node:20-slim'
+  - name: 'node:22-slim'
     id: 'bundle-user-guide'
     waitFor: ['-']
     entrypoint: 'node'
@@ -368,7 +377,9 @@ steps:
       - '-c'
       - |
         set -euo pipefail
-        while IFS='=' read -r key val; do
+        # `|| [[ -n ... ]]`: a secret saved without a trailing newline (the
+        # console's default) would otherwise lose its LAST line silently.
+        while IFS='=' read -r key val || [[ -n "$$key" ]]; do
           [[ -z "$$key" || "$${key:0:1}" == "#" ]] && continue
           export "$$key=$$val"
         done < .env.local
@@ -421,7 +432,7 @@ steps:
   # the running code reads. There is now ONE definition, in
   # scripts/deploy-run-service.sh, and both pipelines call it, so there is
   # nothing left to drift.
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk@sha256:aa2b2728a6f3eaf1d6d37409133fde8220b28460282f6983e3055b1b2c792228'
     id: 'deploy'
     waitFor: ['copy-backend', 'copy-toolbox', 'push-frontend', 'resolve-spec-config']
     entrypoint: bash
@@ -516,7 +527,7 @@ steps:
           echo "$${SVC} -> $$DIGEST"
         done
 
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk@sha256:aa2b2728a6f3eaf1d6d37409133fde8220b28460282f6983e3055b1b2c792228'
     id: 'deploy-sidecars'
     waitFor: ['copy-sidecars']
     entrypoint: bash
@@ -547,7 +558,7 @@ steps:
 
   # --- Smoke: fail the promotion if the target isn't healthy ---
   # Same probe set as cloudbuild.yaml's post-deploy smoke / scripts/smoke-deployed.sh.
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk@sha256:aa2b2728a6f3eaf1d6d37409133fde8220b28460282f6983e3055b1b2c792228'
     id: 'smoke'
     waitFor: ['deploy']
     entrypoint: bash
@@ -573,7 +584,7 @@ steps:
   # that seeds had never run against it. A promoted version must bring its
   # skills with it, or the marketplace describes a different release from the
   # one that is running.
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk@sha256:aa2b2728a6f3eaf1d6d37409133fde8220b28460282f6983e3055b1b2c792228'
     id: 'seed-platform-skills'
     waitFor: ['smoke']
     entrypoint: bash
@@ -584,9 +595,9 @@ steps:
         URL=$$(gcloud run services describe ${_SERVICE_NAME} \
           --project=${_TARGET_PROJECT} --region=${_REGION} \
           --format='value(status.url)')
-        TOKEN=$$(curl -sf \
-          "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$${URL}&format=full&include_email=true" \
-          -H "Metadata-Flavor: Google")
+        # scripts/build-id-token.sh: metadata /identity, else IAM Credentials
+        # generateIdToken (the default pool's metadata server 404s /identity).
+        TOKEN=$$(bash scripts/build-id-token.sh "$${URL}")
         code=$$(curl -sS -o /tmp/seed -w '%{http_code}' --max-time 60 \
           -X POST -H "Authorization: Bearer $${TOKEN}" \
           "$${URL}/api/proxy/api/admin/seed-platform-skills") || code=000

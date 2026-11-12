@@ -28,6 +28,27 @@ SYSTEM_TAG = "system"
 # Simple in-memory cache: skill_id → (timestamp, SkillConfig)
 _cache: dict[str, tuple[float, SkillConfig]] = {}
 
+# Lookups that are not "skill by id", same TTL: ("slug", owner, slug) → skill_id
+# or None, ("missing", skill_id) → None, ("jobs", owner) → [skill_id]. Building
+# one agent's delegate set resolved every slug delegate by a Firestore get (a
+# UUID-keyed miss) plus a slug query, twice per delegate, and re-read a missing
+# delegate on every call: 26 sequential round trips, 1.2-2.2 s, on every chat
+# open (2026-10-30). Any skill write clears them all — writes are rare.
+_lookups: dict[tuple, tuple[float, Any]] = {}
+_MISS = object()
+
+
+def _lookup_get(key: tuple) -> Any:
+    entry = _lookups.get(key)
+    if entry and (time.time() - entry[0]) < _CACHE_TTL:
+        return entry[1]
+    _lookups.pop(key, None)
+    return _MISS
+
+
+def _lookup_set(key: tuple, value: Any) -> None:
+    _lookups[key] = (time.time(), value)
+
 
 def _to_firestore(config: SkillConfig) -> dict[str, Any]:
     """Serialize a SkillConfig to a Firestore-compatible dict."""
@@ -75,6 +96,7 @@ def _cache_set(skill_id: str, config: SkillConfig) -> None:
 
 def _cache_invalidate(skill_id: str) -> None:
     _cache.pop(skill_id, None)
+    _lookups.clear()
     # Any create/update/delete can flip a skill's public visibility, so
     # drop the A2A card snapshot. (The MCP tool list is computed per request,
     # so it needs no sync.) Function-local import keeps the skills package
@@ -111,6 +133,7 @@ def create_skill(
     )
     fs.set_document(COLLECTION, skill_id, _to_firestore(config))
     _cache_set(skill_id, config)
+    _lookups.clear()  # a new slug or job must resolve at once
     # New public skills must appear in /.well-known/agent.json immediately —
     # not after the 60s TTL. (/mcp tools/list is computed per request.)
     from protocols.a2a import invalidate_cache as _invalidate_a2a_card
@@ -124,9 +147,12 @@ def get_skill(skill_id: str) -> SkillConfig | None:
     cached = _cache_get(skill_id)
     if cached:
         return cached
+    if _lookup_get(("missing", skill_id)) is None:
+        return None
 
     data = fs.get_document(COLLECTION, skill_id)
     if data is None:
+        _lookup_set(("missing", skill_id), None)
         return None
 
     config = _from_firestore(data)
@@ -141,15 +167,24 @@ def find_by_slug(owner_id: str, slug: str) -> SkillConfig | None:
     Caches the resolved config under its skill_id, so a follow-up `get_skill`
     after a slug-resolved fetch hits the cache.
     """
+    known = _lookup_get(("slug", owner_id, slug))
+    if known is None:
+        return None
+    if known is not _MISS:
+        hit = get_skill(known)
+        if hit is not None:
+            return hit
     docs = fs.query_documents(
         COLLECTION,
         filters=[("ownerId", "==", owner_id), ("slug", "==", slug)],
         limit=1,
     )
     if not docs:
+        _lookup_set(("slug", owner_id, slug), None)
         return None
     config = _from_firestore(docs[0])
     _cache_set(config.skill_id, config)
+    _lookup_set(("slug", owner_id, slug), config.skill_id)
     return config
 
 
@@ -193,6 +228,43 @@ def resolve_skill_ref(ref: str, caller_uid: str | None = None) -> SkillConfig | 
     return None
 
 
+def prime_refs(owner_id: str, refs: list[str]) -> None:
+    """Resolve many skill refs (ids or slugs in ``owner_id``'s namespace) with
+    ONE owner-wide read instead of a get + a slug query each. Records every
+    skill's id and slug, and the refs that match nothing as misses, so the
+    ``get_skill`` / ``find_by_slug`` calls that follow are cache hits."""
+    pending = [
+        r
+        for r in refs
+        if r
+        and _cache_get(r) is None
+        and _lookup_get(("missing", r)) is _MISS
+        and _lookup_get(("slug", owner_id, r)) is _MISS
+    ]
+    if not pending:
+        return
+    docs = fs.query_documents(COLLECTION, filters=[("ownerId", "==", owner_id)])
+    ids: set[str] = set()
+    slugs: set[str] = set()
+    for cfg in _configs_from_docs(docs):
+        _cache_set(cfg.skill_id, cfg)
+        ids.add(cfg.skill_id)
+        if cfg.slug:
+            _lookup_set(("slug", owner_id, cfg.slug), cfg.skill_id)
+            slugs.add(cfg.slug)
+    for ref in pending:
+        if ref in ids:
+            continue
+        if ref in slugs:
+            # A slug, not a doc id (ids are UUIDs): the get-by-id that
+            # resolution tries first would miss — settle it here too.
+            _lookup_set(("missing", ref), None)
+        else:
+            # Not in this namespace: a doc id from another owner is still
+            # possible, so only the slug lookup is settled here.
+            _lookup_set(("slug", owner_id, ref), None)
+
+
 def find_jobs(owner_id: str) -> list[SkillConfig]:
     """All skills in ``owner_id``'s namespace tagged as jobs (metadata.job=True).
 
@@ -203,12 +275,18 @@ def find_jobs(owner_id: str) -> list[SkillConfig]:
     small and this is called once per agent build, behind the same cache warmth
     as ``get_skill``. Malformed docs are skipped, not fatal (fail-open on read is
     safe: an unreadable skill just isn't offered)."""
+    known = _lookup_get(("jobs", owner_id))
+    if known is not _MISS:
+        cached_jobs = [get_skill(i) for i in known]
+        if all(cached_jobs):
+            return cached_jobs  # type: ignore[return-value]
     docs = fs.query_documents(COLLECTION, filters=[("ownerId", "==", owner_id)])
     jobs: list[SkillConfig] = []
     for cfg in _configs_from_docs(docs):  # skips malformed docs, logs loudly
         if cfg.skill_metadata.job:
             _cache_set(cfg.skill_id, cfg)
             jobs.append(cfg)
+    _lookup_set(("jobs", owner_id), [j.skill_id for j in jobs])
     return jobs
 
 

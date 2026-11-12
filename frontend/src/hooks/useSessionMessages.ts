@@ -42,6 +42,8 @@ interface UseSessionMessagesReturn {
    * a genuinely empty new chat — resuming it must explain itself rather than
    * render an unexplained blank thread. */
   transcriptUnavailable: boolean;
+  /** Fetch the transcript again after `historyError`. */
+  retryHistory: () => void;
 }
 
 // Stranded-session-prevention (1.23) Option 1: distinguishes
@@ -76,7 +78,9 @@ function toSkillMessage(m: SessionMessage): SkillMessage {
 export function useSessionMessages(sessionId: string | null): UseSessionMessagesReturn {
   const [initialMessages, setInitialMessages] = useState<SkillMessage[]>([]);
   const [a2uiSurfaces, setA2uiSurfaces] = useState<A2uiSurfaceReplay[]>([]);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  // True from the first render when resuming, so the transcript area never
+  // flashes the empty "start the conversation" prompt before the fetch starts.
+  const [isLoadingHistory, setIsLoadingHistory] = useState(sessionId !== null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [sessionGone, setSessionGone] = useState(false);
   const [transcriptUnavailable, setTranscriptUnavailable] = useState(false);
@@ -115,12 +119,13 @@ export function useSessionMessages(sessionId: string | null): UseSessionMessages
             setA2uiSurfaces([]);
             return;
           }
-          setHistoryError("Couldn't load previous messages — starting fresh.");
+          setHistoryError("Couldn't load the earlier messages.");
           setInitialMessages([]);
           setA2uiSurfaces([]);
         })
         .finally(() => {
-          setIsLoadingHistory(false);
+          // A superseded fetch must not clear the flag its successor just set.
+          if (abortRef.current === controller) setIsLoadingHistory(false);
         });
     },
     [],
@@ -128,6 +133,7 @@ export function useSessionMessages(sessionId: string | null): UseSessionMessages
 
   useEffect(() => {
     if (!sessionId) {
+      setIsLoadingHistory(false);
       setInitialMessages([]);
       setA2uiSurfaces([]);
       setHistoryError(null);
@@ -139,8 +145,17 @@ export function useSessionMessages(sessionId: string | null): UseSessionMessages
     lastSessionId.current = sessionId;
 
     fetch_(sessionId);
-    return () => abortRef.current?.abort();
+    return () => {
+      abortRef.current?.abort();
+      // The aborted fetch never finished, so a re-run for the same session
+      // (React's dev double-mount, or remounting) must fetch again.
+      lastSessionId.current = null;
+    };
   }, [sessionId, fetch_]);
+
+  const retryHistory = useCallback(() => {
+    if (lastSessionId.current) fetch_(lastSessionId.current);
+  }, [fetch_]);
 
   return {
     initialMessages,
@@ -149,5 +164,6 @@ export function useSessionMessages(sessionId: string | null): UseSessionMessages
     historyError,
     sessionGone,
     transcriptUnavailable,
+    retryHistory,
   };
 }

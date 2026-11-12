@@ -1,17 +1,5 @@
-/** "just now" / "5m ago" / "3h ago" / "2d ago" — compact, for list rows. */
-export function relativeTime(iso: string | null | undefined, now: number = Date.now()): string {
-  if (!iso) return "";
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return "";
-  const diffMin = Math.floor((now - t) / 60_000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `${diffH}h ago`;
-  const diffD = Math.floor(diffH / 24);
-  if (diffD < 30) return `${diffD}d ago`;
-  return new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
-}
+// Date grouping for list views. The compact "5m ago" label moved to the
+// locale-aware formatter: `useFormat().relative(iso)` (src/i18n/format.ts).
 
 export type DateGroup = "Today" | "Yesterday" | "Previous 7 days" | "Previous 30 days" | "Older";
 

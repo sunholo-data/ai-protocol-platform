@@ -4,6 +4,7 @@ import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLandingTarget } from "@/hooks/useLandingTarget";
+import { ChatSkeleton } from "@/components/ui/skeleton";
 
 /**
  * v6.5.0 AUTH-LANDING — makes the homepage the logged-out front door.
@@ -36,22 +37,11 @@ export function HomeGate({ children }: { children: ReactNode }) {
   // Logged-in but nothing to route to → the landing is the graceful fallback.
   if (target.kind === "landing") return <>{children}</>;
 
-  // Logged-in and resolving/redirecting → a minimal hold so the marketing
-  // page doesn't flash before the redirect lands.
+  // Logged-in and resolving/redirecting → the chat's own skeleton, so the
+  // marketing page doesn't flash and the hand-off to the chat is seamless.
   return (
-    <div
-      data-testid="home-gate-redirecting"
-      className="flex min-h-screen items-center justify-center text-sm text-muted-foreground"
-      role="status"
-      aria-live="polite"
-    >
-      <span className="inline-flex items-center gap-2">
-        <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
-          <path d="M12 2 a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" fill="none" />
-        </svg>
-        Taking you to your workspace…
-      </span>
+    <div data-testid="home-gate-redirecting" className="flex min-h-0 flex-1 flex-col" aria-live="polite">
+      <ChatSkeleton />
     </div>
   );
 }

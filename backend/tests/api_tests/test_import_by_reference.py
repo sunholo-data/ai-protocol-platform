@@ -218,6 +218,50 @@ class TestImportByReferenceCacheCascade:
         clone_doc_id, _ = stored[0]
         assert clone_doc_id == "stale-doc-id"
 
+    def test_l2_parsed_scan_text_layer_is_re_read_into_the_same_doc(self, client: TestClient):
+        """A record parsed before the vision fallback holds a scan's stamp-only
+        text layer under parseStatus 'parsed' (2026-11-02). L2 must not serve it:
+        the import re-parses into the SAME docId, and a re-read transcript is
+        never re-read again (it carries origin: vision)."""
+        stamp = "Registro 0-00-000 copia autentica hoja de firmas"
+        stale = {
+            "__id": "scan-doc-id",
+            "parseStatus": "parsed",
+            "originalFilename": "example-A-fixed-pap.pdf",
+            "blockCount": 20,
+            "blocks": [{"type": "text", "text": stamp + " " * 900} for _ in range(20)],
+            "storagePath": _GS_OBJECT,
+            "folderId": None,
+            "sourceUrl": _GS_URL,
+            "userId": _USER.uid,
+        }
+        transcript = [{"type": "text", "text": "Clause 1. Term.", "page": 1, "origin": "vision"}]
+        stored = []
+
+        def query_returns(_collection, *, filters=None, **kwargs):
+            for field, _op, value in filters or []:
+                if field == "userId" and value == _USER.uid:
+                    return [stale]
+            return []
+
+        with (
+            patch("tools.documents.import_by_reference.query_documents", side_effect=query_returns),
+            patch(
+                "tools.documents.import_by_reference._run_parse",
+                return_value=("parsed", transcript, 50_000, None),
+            ) as run_parse_mock,
+            patch(
+                "tools.documents.import_by_reference._store_document",
+                side_effect=lambda doc_id, **kw: stored.append(doc_id),
+            ),
+        ):
+            resp = client.post("/api/documents/import-by-reference", json=_body())
+
+        assert resp.status_code == 200
+        run_parse_mock.assert_called_once()
+        assert resp.json()["docId"] == "scan-doc-id"
+        assert stored == ["scan-doc-id"]
+
     def test_parse_failure_returns_422(self, client: TestClient):
         """AILANG Parse returns ("failed", [], 0, error) → 422 with parseError."""
         with (

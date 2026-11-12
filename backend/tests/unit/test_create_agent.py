@@ -233,15 +233,17 @@ def test_create_agent_wires_tools_from_skill_metadata():
     # ai_search/google_search are model-aware and handled by agent.py directly, so not here.
     agent = create_agent(_skill(tools=["list_documents", "get_document_content"]), _user())
     # Defaults from agent.py: load_artifacts_tool + retrieve_artifact +
-    # load_memory_tool + preload_memory_tool + remember + forget, the 5 project
+    # show_media + look_at_media + load_memory_tool + preload_memory_tool + remember + forget, the 5 project
     # tools. Plus 2 registry tools, SendA2uiToClientToolset, and
-    # request_confirmation (default-on) = 15 total, plus any private-tier
+    # request_confirmation (default-on) = 17 total, plus any private-tier
     # toolsets (project document search, projects.md D4) — none in the template.
     from extensions import private_toolsets
 
-    assert len(agent.tools) == 15 + len(private_toolsets())
+    assert len(agent.tools) == 17 + len(private_toolsets())
     tool_names = _tool_ids(agent)
     assert "load_artifacts" in tool_names
+    assert "show_media" in tool_names
+    assert "look_at_media" in tool_names
     assert "load_memory" in tool_names
     assert "preload_memory" in tool_names
     assert "request_confirmation" in tool_names

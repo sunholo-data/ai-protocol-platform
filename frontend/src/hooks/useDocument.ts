@@ -188,7 +188,14 @@ export function useDocument(docId: string | null): UseDocumentReturn {
           setIsLoading(false);
           return;
         }
-        setDoc(mapDoc(snap.id, snap.data()));
+        const data = snap.data();
+        // A large document keeps its blocks in chunks the browser can't read;
+        // the API route returns them whole. Same doc, other path.
+        if (Number(data.blockChunks) > 0 && !(Array.isArray(data.blocks) && data.blocks.length > 0)) {
+          setApiMode(true);
+          return;
+        }
+        setDoc(mapDoc(snap.id, data));
         setError(null);
         setIsLoading(false);
       },

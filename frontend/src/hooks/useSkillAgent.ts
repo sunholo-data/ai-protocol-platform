@@ -12,6 +12,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAGUIAgent } from "@/providers/AGUIProvider";
 import { useOptionalSurfaceRegistry } from "@/providers/SurfaceRegistry";
 import { logger } from "@/lib/logger";
+import { SOURCE_LOCALE, useLocale } from "@/i18n";
+import { useUserLocale } from "@/i18n/userLocale";
+import { subscribeWorkbenchConfirmation } from "@/lib/workbenchConfirmation";
 import { toolStageLabel } from "@/lib/toolLabels";
 import {
   recordFirstEvent,
@@ -83,6 +86,38 @@ export interface ToolCallState {
    * subsequent chunks; stable by TOOL_CALL_END. Consumers (e.g. the MCP
    * App router for AppRenderer.toolInput) JSON.parse it themselves. */
   argsJson?: string;
+  /** When the tool's RESULT arrived (ms). TOOL_CALL_END fires when the model
+   * finishes writing the call, BEFORE the tool runs, so only the result marks
+   * the tool as done — Activity shows `endTs - ts` as the tool's duration. */
+  endTs?: number;
+}
+
+/** A model retry or fallback, as an Activity row. Unlike `FallbackNoticeItem`
+ * (the transcript chip) this keeps retries too and how long the failed request
+ * was waited on — a silent stall costs its whole deadline before switching. */
+export interface ModelEventItem {
+  id: string;
+  ts: number;
+  kind: "retry" | "fallback";
+  model: string;
+  /** Fallbacks only: the model now answering. */
+  toModel?: string;
+  code: string;
+  /** "provider_cooldown" / "model_cooldown": skipped without being tried. */
+  reason?: string;
+  /** Seconds the failed request ran before it was abandoned. */
+  waitedS?: number;
+  /** Retries only: backoff before the next attempt. */
+  delayS?: number;
+}
+
+/** The model request the turn is waiting on (MODEL_CALL), until the model
+ * produces anything — reasoning, text or a tool call. */
+export interface ModelWaitState {
+  model: string;
+  since: number;
+  /** Seconds of silence before the backend gives up on it and moves on. */
+  deadlineS: number | null;
 }
 
 /**
@@ -135,6 +170,8 @@ export interface FallbackNoticeItem {
 }
 
 export interface UseSkillAgentReturn {
+  /** Status of this browser's platform run; independent workers need their own acknowledgement. */
+  runStatus?: PlatformRunStatus;
   /** The HttpAgent's threadId — equal to the backend ChatSessionIndex id. */
   sessionId: string;
   messages: SkillMessage[];
@@ -159,6 +196,10 @@ export interface UseSkillAgentReturn {
   delegations: DelegationMarkerItem[];
   /** Persistent model-fallback notices for this conversation (M3). */
   fallbacks: FallbackNoticeItem[];
+  /** Model retries + fallbacks this conversation, for the Activity feed. */
+  modelEvents: ModelEventItem[];
+  /** The model request in flight with no output yet, or null. */
+  modelWait: ModelWaitState | null;
   /** COMPACTION-WIRE M4 — history compactions this session. Compaction
    * silently rewrites what the model can remember, so it must be visible. */
   compactions: CompactionNoticeItem[];
@@ -174,13 +215,15 @@ export interface UseSkillAgentReturn {
   completedReplyId?: string | null;
   sendMessage: (
     text: string,
-    opts?: { documentIds?: string[]; resumedSession?: boolean; projectId?: string | null },
+    opts?: { documentIds?: string[]; resumedSession?: boolean; projectId?: string | null; modelChoice?: string },
   ) => Promise<void>;
   isLoading: boolean;
   error: StreamError | null;
   clearError: () => void;
   stop: () => void;
 }
+
+export type PlatformRunStatus = "idle" | "pending" | "running" | "completed" | "failed" | "stopped" | "unknown";
 
 function toSkillMessage(m: Message): SkillMessage | null {
   const role = (m as { role?: string }).role;
@@ -368,17 +411,30 @@ export function useSkillAgent(options?: {
   const midStreamTimeoutMs = options?._midStreamTimeoutMs ?? 90_000;
   const lastActivityRef = useRef(0);
   const agent = useAGUIAgent();
+  useEffect(() => subscribeWorkbenchConfirmation((reply) => {
+    if (reply.sessionId !== agent.threadId || agent.messages.some(message => message.id === reply.id)) return;
+    agent.addMessage({ id: reply.id, role: "assistant", content: reply.content } as Message);
+  }), [agent]);
   // Sprint 2.10: read every active A2UI surface's snapshot at sendMessage
   // time and ride it back on `forwardedProps.a2ui_surface_state`. Optional
   // because useSkillAgent is also used in surface-registry-less contexts
   // (some tests, isolated embeds).
   const surfaceRegistry = useOptionalSurfaceRegistry();
+  // multi-language.md §6: the language this person reads the interface in —
+  // the in-force locale, so a fork screen pinned to its content's language
+  // (a nested LocaleProvider) steers the agent too. Sent whenever the
+  // deployment isn't English-only — 2+ languages offered, or a single
+  // non-English one (a Danish-only fork) — so an English-only wire is unchanged.
+  const uiLocale = useLocale();
+  const { locales } = useUserLocale();
+  const sendLocale = locales.length > 1 || uiLocale !== SOURCE_LOCALE;
   const [messages, setMessages] = useState<SkillMessage[]>([]);
   const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
   const [thinkingContent, setThinkingContent] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [runStarted, setRunStarted] = useState(false);
+  const [runOutcome, setRunOutcome] = useState<PlatformRunStatus>("idle");
   const [error, setError] = useState<StreamError | null>(null);
   const [stageLabel, setStageLabel] = useState<string | null>(null);
   const [delegations, setDelegations] = useState<DelegationMarkerItem[]>([]);
@@ -387,6 +443,9 @@ export function useSkillAgent(options?: {
   const [compactions, setCompactions] = useState<CompactionNoticeItem[]>([]);
   const [tidyingUp, setTidyingUp] = useState(false);
   const fallbackSeqRef = useRef(0);
+  const [modelEvents, setModelEvents] = useState<ModelEventItem[]>([]);
+  const modelEventSeqRef = useRef(0);
+  const [modelWait, setModelWait] = useState<ModelWaitState | null>(null);
   // Resolved model for the most recent turn (MODEL_RESOLVED custom event). Lets
   // the Activity header show the model that ACTUALLY ran — a router thinking
   // tier, a fallback, or the front door's configured model — rather than the
@@ -513,6 +572,35 @@ export function useSkillAgent(options?: {
         // Reuses the stageLabel tier (auto-fades like stage progress).
         if (event.name === "MODEL_RETRY") {
           setStageLabel("Model busy — retrying…");
+          setModelWait(null);
+          if (event.value && typeof event.value === "object") {
+            const v = event.value as { model?: unknown; code?: unknown; waited_s?: unknown; delay_s?: unknown };
+            const seq = modelEventSeqRef.current++;
+            setModelEvents((prev) => [
+              ...prev,
+              {
+                id: `mr-${seq}`,
+                ts: Date.now(),
+                kind: "retry",
+                model: String(v.model ?? "model"),
+                code: String(v.code ?? "MODEL_UNAVAILABLE"),
+                waitedS: typeof v.waited_s === "number" ? v.waited_s : undefined,
+                delayS: typeof v.delay_s === "number" ? v.delay_s : undefined,
+              },
+            ]);
+          }
+          return;
+        }
+        // MODEL_CALL — a request was sent to this model. Activity shows it as a
+        // live "Waiting for <model>" row until the model produces anything, so a
+        // long gap between tool calls reads as model time, not a hang.
+        if (event.name === "MODEL_CALL" && event.value && typeof event.value === "object") {
+          const v = event.value as { model?: unknown; deadline_s?: unknown };
+          setModelWait({
+            model: String(v.model ?? "model"),
+            since: Date.now(),
+            deadlineS: typeof v.deadline_s === "number" ? v.deadline_s : null,
+          });
           return;
         }
         // MODEL_RESOLVED — the model that actually ran this turn. Drives the
@@ -532,6 +620,7 @@ export function useSkillAgent(options?: {
         // HISTORY_COMPACTED can't do this job — it fires when summarisation
         // RETURNS, i.e. ~35s later, at roughly the same moment as RUN_FINISHED.
         if (event.name === "COMPACTION_STARTED") {
+          setModelWait(null);
           setIsLoading(false);
           setStageLabel(null);
           setTidyingUp(true);
@@ -558,8 +647,29 @@ export function useSkillAgent(options?: {
         // MODEL_FALLBACK — persistent transcript notice: a backup model is
         // answering. Honest degradation per axiom #5; mirrors AGENT_DELEGATION.
         if (event.name === "MODEL_FALLBACK" && event.value && typeof event.value === "object") {
-          const v = event.value as { from_model?: unknown; to_model?: unknown; code?: unknown; reason?: unknown };
+          const v = event.value as {
+            from_model?: unknown;
+            to_model?: unknown;
+            code?: unknown;
+            reason?: unknown;
+            waited_s?: unknown;
+          };
           setStageLabel("Switching to backup model…");
+          setModelWait(null);
+          const mseq = modelEventSeqRef.current++;
+          setModelEvents((prev) => [
+            ...prev,
+            {
+              id: `mf-${mseq}`,
+              ts: Date.now(),
+              kind: "fallback",
+              model: String(v.from_model ?? "primary model"),
+              toModel: String(v.to_model ?? "backup model"),
+              code: String(v.code ?? "MODEL_UNAVAILABLE"),
+              reason: typeof v.reason === "string" ? v.reason : undefined,
+              waitedS: typeof v.waited_s === "number" ? v.waited_s : undefined,
+            },
+          ]);
           const msgs = agent.messages;
           const afterMessageId = msgs.length ? (msgs[msgs.length - 1]?.id ?? null) : null;
           const seq = fallbackSeqRef.current++;
@@ -647,16 +757,15 @@ export function useSkillAgent(options?: {
           ]);
         }
         // A2UI_SURFACE (tool-results-as-a2ui / 7.3, Model B) is handled by
-        // `WorkspaceA2uiEventRouter` in ChatShell, NOT here: this hook runs
-        // ABOVE the SurfaceRegistryProvider in the tree, so its
-        // `useOptionalSurfaceRegistry()` is null and can't reach the registry.
-        // The router subscribes to the same agent from inside the provider.
+        // `WorkspaceA2uiEventRouter` in ChatShell, NOT here. Keep emission in
+        // one subscriber; this hook reads the same registry when sending turns.
       },
       onTextMessageStartEvent: ({ event }: { event: { messageId?: string } }) => {
         markActivity();
         // First model token reached the wire — clear the stage label so
         // the UI handoff (TypingIndicator → StreamingBubble) is clean.
         setStageLabel(null);
+        setModelWait(null);
         recordFirstTextChunk(performance.now());
         // F2a fix (part 2): back-attribute any tool calls whose parentMessageId
         // was deferred (tools-before-text ADK pattern). TOOL_CALL_START fires
@@ -679,6 +788,7 @@ export function useSkillAgent(options?: {
       },
       onReasoningStartEvent: () => {
         markActivity();
+        setModelWait(null);
         setThinkingContent("");
         setIsThinking(true);
       },
@@ -694,12 +804,14 @@ export function useSkillAgent(options?: {
       onRunFinishedEvent: () => {
         sawTerminalRef.current = true;
         if (!abortedRef.current && !runFailedRef.current) {
+          setRunOutcome("completed");
           const reply = agent.messages.slice(runStartMessageCountRef.current).reverse()
             .map(toSkillMessage).find((message) => message?.role === "assistant" && message.content.trim());
           setCompletedReplyId(reply?.id ?? null);
         }
       },
       onRunFinalized: () => {
+        setModelWait(null);
         // NEVER SILENT: the run ended without any terminal event and without an
         // error already shown → the stream was cut (instance replaced, proxy pipe
         // failure/ECONNRESET, network drop). Surface it instead of just clearing
@@ -753,6 +865,7 @@ export function useSkillAgent(options?: {
           return; // do NOT setError / stop loading — the retry handles it
         }
         runFailedRef.current = true;
+        setModelWait(null);
         const streamErr = classifyRunError(event, { answerStarted: answerStartedRef.current });
         logger.warn("stream_run_error_event", errorAttrs(streamErr));
         setError(streamErr);
@@ -769,6 +882,7 @@ export function useSkillAgent(options?: {
       // wrapper. Genuine stream RUN_ERRORs come through onRunErrorEvent above.
       onRunFailed: ({ error }: { error: unknown }) => {
         runFailedRef.current = true;
+        setModelWait(null);
         const streamErr = classifyRunError(error, { answerStarted: answerStartedRef.current });
         logger.warn("stream_run_failed", errorAttrs(streamErr));
         setError(streamErr);
@@ -788,6 +902,7 @@ export function useSkillAgent(options?: {
         // via the existing setStageLabel(null) transitions.
         const searchLabel = toolStageLabel(event.toolCallName);
         if (searchLabel) setStageLabel(searchLabel);
+        setModelWait(null);
         // F2a (2026-05-01): ADK doesn't emit parentMessageId on AG-UI
         // TOOL_CALL_START events. Without snapshotting at start time, every
         // unparented tool call inherits "latest assistant at render time" via
@@ -845,19 +960,16 @@ export function useSkillAgent(options?: {
       onToolCallResultEvent: ({ event }: { event: ToolCallResultEvent }) => {
         setToolCalls((prev) =>
           prev.map((tc) =>
-            tc.id === event.toolCallId ? { ...tc, resultContent: contentToText(event.content) } : tc,
+            tc.id === event.toolCallId
+              ? { ...tc, resultContent: contentToText(event.content), endTs: tc.endTs ?? Date.now() }
+              : tc,
           ),
         );
       },
     });
     return () => sub.unsubscribe();
-    // surfaceRegistry is intentionally NOT a dependency: onCustomEvent reads it
-    // as a stable (provider-memoized) reference. This effect calls
-    // setMessages(newArray) on every run, so re-running it whenever a captured
-    // value changes identity is a render loop — adding surfaceRegistry here OOMed
-    // useSkillAgent.test under CI's singleFork pool. Keep the subscription keyed
-    // on `agent` only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Surface routing has its own subscriber; this subscription only tracks
+    // agent events and does not depend on the registry.
   }, [agent]);
 
   // Delegation markers are per-conversation; reset when the thread changes
@@ -868,6 +980,9 @@ export function useSkillAgent(options?: {
     delegSeqRef.current = 0;
     setFallbacks([]);
     fallbackSeqRef.current = 0;
+    setModelEvents([]);
+    modelEventSeqRef.current = 0;
+    setModelWait(null);
     // Compaction markers are per-conversation too — without this reset a new
     // chat would show 'History summarised' from the PREVIOUS thread, which is
     // worse than no marker: it implies context was lost when none was.
@@ -882,6 +997,10 @@ export function useSkillAgent(options?: {
     // reports its model (ChatShell uses `resolvedModel ?? skillModel`).
     setResolvedModel(null);
     setCompletedReplyId(null);
+  }, [agent.threadId]);
+
+  useEffect(() => {
+    setRunOutcome("idle");
   }, [agent.threadId]);
 
   // 30s watchdog: if loading starts but RUN_STARTED never fires, abort and surface error.
@@ -921,9 +1040,10 @@ export function useSkillAgent(options?: {
   const sendMessage = useCallback(
     async (
       text: string,
-      opts?: { documentIds?: string[]; resumedSession?: boolean; projectId?: string | null },
+      opts?: { documentIds?: string[]; resumedSession?: boolean; projectId?: string | null; modelChoice?: string },
     ) => {
       clearError();
+      setRunOutcome("idle");
       setRunStarted(false);
       setStageLabel(null);
       runFailedRef.current = false;
@@ -953,6 +1073,15 @@ export function useSkillAgent(options?: {
         // backend re-checks ownership each time and runs unscoped otherwise.
         if (opts?.projectId) {
           forwardedProps.project_id = opts.projectId;
+        }
+        // The composer's Model pick, on every turn once known ("auto" too, so
+        // going back to Auto clears the chat's saved pick). Omitted while a
+        // reopened chat's saved pick is still loading.
+        if (opts?.modelChoice) {
+          forwardedProps.model_choice = opts.modelChoice;
+        }
+        if (sendLocale) {
+          forwardedProps.ui_locale = uiLocale;
         }
         // Sprint 2.10: attach per-turn A2UI surface snapshot when any
         // surface is active. Omit the slot entirely when empty so the
@@ -989,18 +1118,20 @@ export function useSkillAgent(options?: {
         setRunStarted(false);
       }
     },
-    [agent, clearError, surfaceRegistry],
+    [agent, clearError, surfaceRegistry, sendLocale, uiLocale],
   );
 
   const stop = useCallback(() => {
     // A user-initiated stop ends the stream without a terminal event — that's
     // intentional, not a dropped connection, so suppress the truncation guard.
     abortedRef.current = true;
+    setRunOutcome("stopped");
     agent.abortRun();
   }, [agent]);
 
   return {
     sessionId: agent.threadId,
+    runStatus: error ? (error.kind === "network" ? "unknown" : "failed") : runOutcome === "stopped" ? "stopped" : isLoading ? (runStarted ? "running" : "pending") : runOutcome,
     messages,
     toolCalls,
     thinkingContent,
@@ -1008,6 +1139,8 @@ export function useSkillAgent(options?: {
     stageLabel,
     delegations,
     fallbacks,
+    modelEvents,
+    modelWait,
     compactions,
     tidyingUp,
     resolvedModel,

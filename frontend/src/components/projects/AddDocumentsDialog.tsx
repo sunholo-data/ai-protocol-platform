@@ -5,7 +5,7 @@ import * as Tabs from "@radix-ui/react-tabs";
 import { useEffect, useMemo, useState } from "react";
 import { GCSFileBrowser } from "@/components/doc-browser/GCSFileBrowser";
 import { useRecentDocuments } from "@/hooks/useRecentDocuments";
-import { addDocumentsToProject } from "@/hooks/useProjects";
+import { addDocumentsToProject, addFolderToProject } from "@/hooks/useProjects";
 import { fetchWithAuth } from "@/lib/apiClient";
 import { importByReference, isImportError } from "@/lib/importByReference";
 import { FLOATING_SURFACE } from "@/lib/surfaces";
@@ -131,6 +131,7 @@ function YourDocuments({
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
+  const [addingFolder, setAddingFolder] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -179,6 +180,42 @@ function YourDocuments({
   const names = new Map(source.map((d) => [d.id, d.originalFilename]));
   const loading = folderId ? folderStatus === "loading" : recent.status === "loading";
   const failed = folderId ? folderStatus === "error" : recent.status === "error";
+  const busy = adding || addingFolder;
+  // Folder names are paths ("client/sessions/02"); a subfolder extends one.
+  const folder = folders.find((f) => f.id === folderId) ?? null;
+  const subfolderCount = folder ? folders.filter((f) => f.name.startsWith(`${folder.name}/`)).length : 0;
+  const isIn = (d: PickableDoc) => existingDocIds.has(d.id) || Boolean(d.projectIds?.includes(projectId));
+  const pickable = rows.filter((d) => !isIn(d));
+  const allPicked = pickable.length > 0 && pickable.every((d) => selected.has(d.id));
+
+  function toggleAll() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const d of pickable) {
+        if (allPicked) next.delete(d.id);
+        else next.add(d.id);
+      }
+      return next;
+    });
+  }
+
+  async function addWholeFolder() {
+    if (!folder) return;
+    setAddingFolder(true);
+    setError(null);
+    const r = await addFolderToProject(projectId, folder.id);
+    setAddingFolder(false);
+    if (!r.ok) {
+      setError(r.message);
+      return;
+    }
+    if (r.failed.length > 0) {
+      const list = r.failed.map((f) => f.filename || names.get(f.id) || "a document").join(", ");
+      setError(`Added ${r.added.length}. Couldn't add: ${list}.`);
+      return;
+    }
+    onDone(r.added.length);
+  }
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -235,6 +272,34 @@ function YourDocuments({
         </select>
       </div>
 
+      {!loading && !failed && (pickable.length > 0 || folder) && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+          {pickable.length > 0 ? (
+            <label className="inline-flex cursor-pointer items-center gap-2 text-muted-foreground">
+              <input type="checkbox" checked={allPicked} disabled={busy} onChange={toggleAll} />
+              Select all {pickable.length}
+              {q ? " matching" : ""}
+            </label>
+          ) : (
+            <span />
+          )}
+          {folder && (
+            <button
+              type="button"
+              onClick={() => void addWholeFolder()}
+              disabled={busy}
+              className="rounded border px-2 py-0.5 hover:bg-accent disabled:opacity-50"
+            >
+              {addingFolder
+                ? `Adding ${folder.name}…`
+                : subfolderCount > 0
+                  ? `Add whole folder (with ${subfolderCount} subfolder${subfolderCount === 1 ? "" : "s"})`
+                  : "Add whole folder"}
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="min-h-[8rem] flex-1 overflow-y-auto rounded border">
         {loading && (
           <div role="status" aria-label="Loading your documents" className="space-y-1 p-2">
@@ -267,7 +332,7 @@ function YourDocuments({
           <ul aria-label="Documents to add" className="divide-y">
             {rows.map((d) => {
               // The home's list is paged; the row's own tags catch the rest.
-              const inProject = existingDocIds.has(d.id) || Boolean(d.projectIds?.includes(projectId));
+              const inProject = isIn(d);
               return (
                 <li key={d.id}>
                   <label
@@ -276,7 +341,7 @@ function YourDocuments({
                     <input
                       type="checkbox"
                       checked={inProject || selected.has(d.id)}
-                      disabled={inProject || adding}
+                      disabled={inProject || busy}
                       onChange={() => toggle(d.id)}
                     />
                     <span className="min-w-0 flex-1 truncate">{d.originalFilename}</span>
@@ -299,7 +364,7 @@ function YourDocuments({
         <button
           type="button"
           onClick={() => void add()}
-          disabled={selected.size === 0 || adding}
+          disabled={selected.size === 0 || busy}
           className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {adding

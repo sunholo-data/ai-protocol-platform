@@ -115,3 +115,27 @@ class TestUploadBucketResolution:
         with patch("tools.documents.ingest.resolve_documents_bucket", return_value="bucket"):
             resp = client.post("/api/documents/upload", files=_file("test.exe"))
         assert resp.status_code == 400
+
+
+class TestUploadIntoProject:
+    def test_unknown_project_is_404_before_anything_is_stored(self, client: TestClient):
+        with (
+            patch("tools.documents.upload.projects_db.get_project", return_value=None),
+            patch("tools.documents.upload.ingest_document") as ingest,
+        ):
+            resp = client.post("/api/documents/upload", files=_file(), data={"project_id": "p-gone"})
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "PROJECT_NOT_FOUND"
+        ingest.assert_not_called()
+
+    def test_project_id_is_a_form_field_passed_to_ingest(self, client: TestClient):
+        from tools.documents.ingest import ParsedDocumentResponse
+
+        done = ParsedDocumentResponse(docId="d1", status="parsed", originalFilename="test.docx", storagePath="x")
+        with (
+            patch("tools.documents.upload.projects_db.get_project", return_value={"id": "p1"}),
+            patch("tools.documents.upload.ingest_document", return_value=done) as ingest,
+        ):
+            resp = client.post("/api/documents/upload", files=_file(), data={"project_id": "p1"})
+        assert resp.status_code == 200
+        assert ingest.call_args.kwargs["project_id"] == "p1"

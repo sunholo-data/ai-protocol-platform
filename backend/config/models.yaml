@@ -184,6 +184,11 @@ models:
     residency: global
     fallbacks:
       - gemini-3-5-flash-lite-eu  # 2.5 retired 2026-10-16; live-probed EU 3.x rung (global -> EU narrows egress)
+      # Cross-provider last rung (2026-11-05): a Gemini-wide stall or outage on the
+      # front door still gets an answer. Global -> us is legal under `unrestricted`;
+      # eu-strict never reaches this entry (the tier resolves to the -eu variant),
+      # and resolve_model_chain skips it where ANTHROPIC_API_KEY is not mounted.
+      - claude-haiku-5-5
     context_window: 1_000_000
     max_output_tokens: 65_536
     description: "Gemini 3.5 Flash Lite — `lite` tier on dev/test; fastest measured, global-endpoint only"
@@ -292,7 +297,7 @@ models:
     provider: anthropic
     tier: default
     residency: us
-    fallbacks: [claude-haiku-4-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
+    fallbacks: [claude-haiku-5-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
     context_window: 200_000
     max_output_tokens: 64_000
     description: "Claude Sonnet 4.6 — best Claude speed/intelligence balance (Feb 2026)"
@@ -302,7 +307,7 @@ models:
     provider: anthropic
     tier: smart
     residency: us
-    fallbacks: [claude-sonnet-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
+    fallbacks: [claude-sonnet-5, claude-haiku-5-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
     context_window: 200_000
     max_output_tokens: 64_000
     description: "Claude Opus 4.7 — superseded by Opus 4.8 (kept for back-compat)"
@@ -317,7 +322,13 @@ models:
     provider: anthropic
     tier: smart
     residency: us
-    fallbacks: [claude-opus-5, claude-sonnet-5-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]
+    # gpt-6-1-sol (2026-11-05): a cross-provider rung of equal weight, so an
+    # Anthropic-wide outage on deep work lands on a peer model before anything
+    # downgrades to sonnet/haiku/flash-lite. After opus-5, so an opus-5-5-only
+    # fault still stays on Claude. Measured on the platform path (effort high,
+    # n=30): 30/30, p50 1.3 s to first output vs opus-5-5's 0.98 s, no errors.
+    # Skipped where OPENAI_API_KEY is not mounted; eu-strict never reaches it.
+    fallbacks: [claude-opus-5, gpt-6-1-sol, claude-sonnet-5-5, claude-haiku-5-5, gemini-3-5-flash-lite-eu]
     context_window: 200_000
     max_output_tokens: 64_000
     description: "Claude Opus 5.5 — Anthropic flagship reasoner (current smart tier)"
@@ -327,7 +338,7 @@ models:
     provider: anthropic
     tier: default
     residency: us
-    fallbacks: [claude-sonnet-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]
+    fallbacks: [claude-sonnet-5, claude-haiku-5-5, gemini-3-5-flash-lite-eu]
     context_window: 200_000
     max_output_tokens: 64_000
     description: "Claude Sonnet 5.5 — current Claude speed/intelligence balance"
@@ -337,7 +348,7 @@ models:
     provider: anthropic
     tier: smart
     residency: us
-    fallbacks: [claude-fable-5, claude-sonnet-5-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]
+    fallbacks: [claude-fable-5, claude-sonnet-5-5, claude-haiku-5-5, gemini-3-5-flash-lite-eu]
     context_window: 200_000
     max_output_tokens: 64_000
     description: "Claude Fable 5.1 — max first-shot correctness on long-horizon work (slower than Opus)"
@@ -350,7 +361,7 @@ models:
     # Same-tier rung FIRST (opus-4-8 was the previous default and is proven), then
     # the usual same-provider ladder, cross-provider gemini LAST (eu-strict drops
     # every us rung).
-    fallbacks: [claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]
+    fallbacks: [claude-opus-4-8, claude-sonnet-5, claude-haiku-5-5, gemini-3-5-flash-lite-eu]
     # Anthropic documents a 1M window / 128K max output for Opus 5. Held at the
     # same 200K/64K as its 5-family siblings ON PURPOSE: context_window drives OUR
     # compaction thresholds (adk/session.py context_window_for ->
@@ -367,7 +378,7 @@ models:
     provider: anthropic
     tier: smart
     residency: us
-    fallbacks: [claude-sonnet-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
+    fallbacks: [claude-sonnet-5, claude-haiku-5-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
     context_window: 200_000
     max_output_tokens: 64_000
     description: "Claude Opus 4.8 — superseded by Opus 5 (kept as its first fallback rung)"
@@ -377,7 +388,7 @@ models:
     provider: anthropic
     tier: default
     residency: us
-    fallbacks: [claude-haiku-4-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
+    fallbacks: [claude-haiku-5-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
     context_window: 200_000
     max_output_tokens: 64_000
     description: "Claude Sonnet 5 — superseded by Sonnet 5.5 (kept as its first fallback rung)"
@@ -387,10 +398,30 @@ models:
     provider: anthropic
     tier: smart
     residency: us
-    fallbacks: [claude-sonnet-5, claude-haiku-4-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
+    fallbacks: [claude-sonnet-5, claude-haiku-5-5, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder first, cross-provider gemini LAST (eu-strict drops the us rungs)
     context_window: 200_000
     max_output_tokens: 64_000
     description: "Claude Fable 5 — superseded by Fable 5.1 (kept as its first fallback rung)"
+
+  claude-haiku-5-5:
+    api_name: "claude-haiku-5-5"
+    provider: anthropic
+    tier: fast
+    # Current Haiku (Models API 2026-11-05: 1M input, 128K output; adaptive
+    # thinking on by default at effort `medium`, effort low..max supported,
+    # `enabled`+budget_tokens rejected; non-default temperature is a 400).
+    # resolve_model leaves every haiku bare, so this runs the API default.
+    # TTFT spike 2026-11-05 (front-door tasks, n=70, direct API, bare):
+    # p50 572 ms / p90 961 ms to first output, 70/70 correct — vs haiku-4-5
+    # 479 / 636 ms (n=30), but 885 vs 1119 ms to finish, and a tenth of the price.
+    # Adaptive + effort `low` was measured too and bought nothing: same p50
+    # (578 ms), worse p90 (1558 ms — it always thinks ~35 tokens on arithmetic),
+    # same 70/70. Keep it bare unless an eval says otherwise.
+    residency: us
+    fallbacks: [claude-haiku-4-5, gemini-3-5-flash-lite-eu]   # same-provider rung first, cross-provider gemini LAST
+    context_window: 1_000_000
+    max_output_tokens: 128_000
+    description: "Claude Haiku 5.5 — current fast Claude; last Claude rung of every Claude chain, cross-provider rung of global `lite`"
 
   claude-haiku-4-5:
     api_name: "claude-haiku-4-5-20251001"
@@ -400,7 +431,7 @@ models:
     fallbacks: [gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
     context_window: 200_000
     max_output_tokens: 64_000
-    description: "Claude Haiku 4.5 — cheapest Claude, high-volume sub-tasks"
+    description: "Claude Haiku 4.5 — previous Haiku; kept as haiku-5-5's first fallback rung"
 
   # ─── OpenAI ───────────────────────────────────────────────────────────────
   # ADK wiring: LiteLlm("openai/gpt-5.4") etc.
@@ -462,15 +493,8 @@ models:
     max_output_tokens: 128_000
     description: "GPT-5.6 Luna — fast + affordable (Jul 2026)"
 
-  gpt-5-1-instant:
-    api_name: "gpt-5.1-chat-latest"
-    provider: openai
-    tier: default
-    residency: us
-    fallbacks: [gpt-5-6-luna, gemini-3-5-flash-lite-eu]   # v6.13.0: same-provider ladder + gemini cross-provider last (sanitizer handles the tool-id crossing)
-    context_window: 400_000
-    max_output_tokens: 128_000
-    description: "GPT-5.1 Instant — fast, adaptive reasoning"
+  # gpt-5-1-instant (gpt-5.1-chat-latest) removed 2026-11-05: OpenAI returns 404
+  # for the model. Don't re-add it; gpt-5-6-luna is the fast OpenAI entry.
 
 # ─── Provider defaults ────────────────────────────────────────────────────
 # Model used when a skill specifies a provider but no explicit model ID.
@@ -577,6 +601,40 @@ residency:
 fallback_policy:
   max_retries_per_model: 2
   provider_cooldown_seconds: 120
+
+# ─── Model choice in the chat (docs/design/v6.42.0/model-choice.md) ──
+# What a person can pick from the composer's + → Model. Auto (the skill's own
+# model) is always there and is the default.
+#   fast / thorough — the tier each level uses. Thorough also asks for the
+#                     highest thinking level (config/thinking.py HIGH). On
+#                     Gemini 3.x that measured the same as `dynamic` (probe
+#                     2026-11-06, EU gemini-3.8-flash: ~330-480 vs ~360-390
+#                     thought tokens on a medium question, no gain on a hard
+#                     one), so it only deepens skills set to `low`/`off`. Where
+#                     a level would run exactly like Auto for a skill (eu-strict
+#                     smart == pro), the menu hides it.
+#   pickable        — the "Specific model" list, shown only to people who opt in
+#                     on the Settings page. Order is display order. At request
+#                     time the list is filtered by the residency policy and by
+#                     which provider keys are mounted, then de-duplicated by
+#                     label (first allowed wins), so list a global entry before
+#                     its EU sibling. Keep it to current models: a superseded id
+#                     stays in the registry for fallbacks but not here.
+# A deployment turns levels off with MODEL_CHOICE=off|tiers|all (default all);
+# a skill opts out with `modelChoice: false` in its SKILL.md.
+choice:
+  fast: lite
+  thorough: smart
+  pickable:
+    - { id: claude-opus-5-5, label: "Claude Opus 5.5", note: "deepest reasoning" }
+    - { id: claude-sonnet-5-5, label: "Claude Sonnet 5.5", note: "balanced" }
+    - { id: claude-haiku-5-5, label: "Claude Haiku 5.5", note: "fast" }
+    - { id: gemini-3-1-pro, label: "Gemini 3.1 Pro", note: "reasoning" }
+    - { id: gemini-3-8-flash, label: "Gemini 3.8 Flash", note: "balanced" }
+    - { id: gemini-3-8-flash-eu, label: "Gemini 3.8 Flash", note: "balanced" }
+    - { id: gemini-3-5-flash-lite, label: "Gemini 3.5 Flash-Lite", note: "fastest" }
+    - { id: gemini-3-5-flash-lite-eu, label: "Gemini 3.5 Flash-Lite", note: "fastest" }
+    - { id: gpt-6-1-sol, label: "GPT-6.1 Sol", note: "coding and hard work" }
 
 # ─── Compaction ───────────────────────────────────────────────────────────
 # Not configured here. The per-model numbers (turn interval/overlap, token

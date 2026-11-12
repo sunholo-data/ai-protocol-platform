@@ -24,9 +24,9 @@ const PHOENIX = [
   doc("d1", "f-phoenix", "Phoenix project brief.pdf", "pdf"),
   doc("d3", "f-phoenix", "Kick-off meeting notes.docx", "docx"),
   doc("d10", "f-phoenix", "Supplier shortlist.xlsx", "xlsx", { parseStatus: "pending", blockCount: 0 }),
-  doc("d11", "f-phoenix", "Scanned site survey.pdf", "pdf", {
+  doc("d11", "f-phoenix", "Site survey.pdf", "pdf", {
     parseStatus: "failed",
-    parseError: "No readable text — the file looks like a scan.",
+    parseError: "The file is damaged or password-protected.",
     blockCount: 0,
   }),
 ];
@@ -96,28 +96,34 @@ export default async function documents({ page, base, shot, tidy, around }) {
   await tidy();
   await page.waitForTimeout(1200);
 
-  // Upload: the drop area on a fresh chat, and the attach button in the message box
-  const startFrom = page.getByText("Or start from a document").locator("xpath=ancestor::div[contains(@class,'max-w-2xl')][1]");
-  await shot("01-start-from-a-document", startFrom);
-  const attach = page.getByRole("button", { name: "Attach a document" }).first();
-  const message = page.getByRole("textbox").first();
-  await attach.hover();
-  await page.waitForTimeout(600);
-  await shot("02-attach-a-document", "page", { clip: await union(page, [message, attach], 24) });
+  // Upload: the message box's + menu
+  const composer = page.locator("form").filter({ has: page.locator("textarea") }).last();
+  await page.getByRole("button", { name: "Add files and more" }).first().click();
+  const addMenu = page.getByRole("menu").first();
+  await addMenu.waitFor();
+  await shot("02-attach-a-document", "page", { clip: await union(page, [composer, addMenu], 24) });
+  await page.keyboard.press("Escape");
 
   // The sidebar: status dots, failed parse with Retry
   await page.setViewportSize({ width: 1280, height: 1500 });
-  const show = page.getByRole("button", { name: "Show sidebar" });
+  const show = page.getByRole("button", { name: /^(Show conversations and files|Show sidebar)$/ });
   if (await show.count()) await show.first().click();
-  const sidebar = () => page.locator("aside").filter({ hasText: "Your files" }).first();
+  // Files starts as your recent files; the folder tree is behind "Browse all folders".
+  const browse = page.getByRole("button", { name: "Browse all folders" });
+  if (await browse.count()) await browse.first().click();
+  const sidebar = () => page.locator("aside").filter({ has: page.getByPlaceholder("Search chats and files") }).first();
   const crop = around(sidebar);
   const folderRow = (name) => page.locator("div.group\\/folder").filter({ hasText: name }).first();
   const docRow = (name) =>
-    page.getByText(name, { exact: true }).first().locator('xpath=ancestor::div[contains(concat(" ", @class, " "), " group ")][1]');
+    page
+      // In the folder tree, not the Recent list above it.
+      .locator(`xpath=//*[normalize-space(text())="${name}"][not(ancestor::ul[@aria-label="Recent files"])]`)
+      .first()
+      .locator('xpath=ancestor::div[contains(concat(" ", @class, " "), " group ")][1]');
   await page.getByText("Project Phoenix").first().waitFor({ timeout: 30000 });
-  if (!(await page.getByText("Scanned site survey.pdf").count())) await folderRow("Project Phoenix").getByRole("button").first().click();
-  await page.getByText("Scanned site survey.pdf").first().waitFor();
-  await crop("03-parse-status", folderRow("Project Phoenix"), docRow("Scanned site survey.pdf"));
+  if (!(await page.getByText("Site survey.pdf").count())) await folderRow("Project Phoenix").getByRole("button").first().click();
+  await page.getByText("Site survey.pdf").first().waitFor();
+  await crop("03-parse-status", folderRow("Project Phoenix"), docRow("Site survey.pdf"));
 
   // (The hover preview is described in the page text: its popover is not a stable screenshot.)
 
@@ -185,9 +191,9 @@ export default async function documents({ page, base, shot, tidy, around }) {
   const row = docRow("Phoenix project brief.pdf");
   await row.hover();
   await row.locator('button[title="Delete document"]').first().click();
-  const confirm = page.getByRole("alertdialog", { name: "Delete document?" });
+  const confirm = page.getByRole("alertdialog", { name: /^Delete "/ });
   await confirm.waitFor();
-  await crop("09-delete-confirm", row, confirm);
+  await shot("09-delete-confirm", confirm);
   await confirm.getByRole("button", { name: "Cancel" }).click();
 
   // The Created folder

@@ -35,7 +35,7 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cached_property, partial
 
 from google.adk.agents import LlmAgent
 from google.adk.code_executors import BuiltInCodeExecutor
@@ -62,6 +62,9 @@ from adk import (
     a2ui_entsoe_render as _a2ui_entsoe_render,  # noqa: F401 — registers the ENTSO-E prices tab mapping + offload exemption (6.12)
 )
 from adk import (
+    a2ui_github_render as _a2ui_github_render,  # noqa: F401 — the GitHub workbench tab (mcp_servers `workbench: github`); renders before offload
+)
+from adk import (
     a2ui_inbox_render as _a2ui_inbox_render,  # noqa: F401 — registers the inbox mapping
 )
 from adk import (
@@ -83,6 +86,16 @@ from adk import (
 from adk import (
     a2ui_sources_render as _a2ui_sources_render,  # noqa: F401 — registers web-search Sources tab mapping (6.11)
 )
+from adk import (
+    generate_image as _generate_image,  # noqa: F401 — registers the Media tab mapping for generate_image
+)
+from adk import model_choice
+from adk import (
+    show_media as _show_media,
+)
+from adk import (
+    speak as _speak,  # noqa: F401 — registers the Media tab mapping for speak
+)
 from adk.a2ui import A2uiToolConfig, make_a2ui_toolset
 from adk.a2ui_surface_context import wrap_with_a2ui_surface_context
 from adk.artifact_tools import retrieve_artifact
@@ -103,6 +116,7 @@ from adk.caller_persona import wrap_with_caller_persona
 from adk.elicitation import ElicitationEnvelope, ElicitationField, make_elicitation_result, request_confirmation
 from adk.iframe_context import wrap_with_iframe_context
 from adk.instruction_provider_chain import compose_instruction_providers
+from adk.look_at_media import LookAtMediaTool
 from adk.mcp_observability import (
     chain_mutators,
     compose_after_tool_callbacks,
@@ -123,6 +137,7 @@ from adk.resilient_llm import ResilientLlm
 from adk.saved_forms_context import wrap_with_saved_forms
 from adk.today_context import wrap_with_today
 from adk.tools import resolve_mcp_tools, resolve_tools
+from adk.ui_locale import wrap_with_ui_locale
 from auth.access_context import AccessContext
 from auth.firebase_auth import User
 from config.models import (
@@ -135,7 +150,7 @@ from config.models import (
 from config.thinking import ThinkDepth, thinking_config_for
 from db.models import DelegateRule, FallbackConfig, SkillConfig
 from extensions import private_toolsets
-from skills.skill_config import find_by_slug, find_jobs, get_skill
+from skills.skill_config import find_by_slug, find_jobs, get_skill, prime_refs
 from tools.structured_extraction import structured_extraction_callback
 
 logger = logging.getLogger(__name__)
@@ -170,6 +185,25 @@ def _claude_uses_adaptive_thinking(resolved_model: str) -> bool:
     / `claude-sonnet-4-6` → True; `claude-sonnet-4-5` / `claude-opus-4-5` /
     `claude-3-opus` → False (old reasoning_effort path)."""
     return bool(_CLAUDE_ADAPTIVE_API.search(resolved_model))
+
+
+#: Prompt caching for Claude (direct API). Without it every call of a turn
+#: re-reads the whole prompt: on Sunholo 2026-11-09 a project chat sent 70K+
+#: tokens per call with cached_tokens=0, and first chunks took 6-8 s and more.
+#: Two breakpoints (LiteLLM's cache_control_injection_points): the system
+#: message, which also covers the tool declarations before it, and the latest
+#: message, so the next call in a tool loop reads the history so far from the
+#: cache (Anthropic finds the earlier breakpoint within its 20-block look-back).
+#: Probed 2026-11-09 with claude-haiku-5-5 via LiteLLM 1.85.7: the second call
+#: read 16,220 of 16,232 prompt tokens from the cache. Cache writes cost 1.25x
+#: and reads 0.1x of input. CLAUDE_PROMPT_CACHE=off turns it off.
+CLAUDE_CACHE_POINTS = [{"location": "message", "role": "system"}, {"location": "message", "index": -1}]
+
+
+def claude_prompt_cache_kwargs() -> dict:
+    if os.environ.get("CLAUDE_PROMPT_CACHE", "on").strip().lower() == "off":
+        return {}
+    return {"cache_control_injection_points": [dict(p) for p in CLAUDE_CACHE_POINTS]}
 
 
 def resolve_model(model_id: str) -> Gemini | LiteLlm:
@@ -254,6 +288,7 @@ def resolve_model(model_id: str) -> Gemini | LiteLlm:
                 # and destabilising it belongs in its own change. Haiku has no
                 # extended thinking, so it stays bare (excluded above).
                 kwargs["reasoning_effort"] = effort
+        kwargs.update(claude_prompt_cache_kwargs())
         return LiteLlm(model=f"anthropic/{resolved}", **kwargs)
     if resolved.startswith("gpt-") or resolved.startswith("o3"):
         # For REASONING models (gpt-5.x, o-series) pass reasoning_effort
@@ -271,7 +306,9 @@ def resolve_model(model_id: str) -> Gemini | LiteLlm:
         #   2. It sets the thinking depth per tier (the point of a reasoner skill).
         # A non-reasoning model (e.g. gpt-4o) would REJECT reasoning_effort, so
         # only pass it to reasoning-capable models.
-        if resolved.startswith("gpt-5") or resolved.startswith(("o1", "o3", "o4")):
+        if resolved.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4")):
+            from adk.openai_stream import OpenAIResponsesClient
+
             _EFFORT = {"smart": "high", "default": "medium", "fast": "low"}
             entry = entry_for(model_id)
             effort = _EFFORT.get(getattr(entry, "tier", None) or "", "medium")
@@ -285,7 +322,8 @@ def resolve_model(model_id: str) -> Gemini | LiteLlm:
                 model=f"openai/{resolved}",
                 reasoning_effort=effort,
                 reasoning={"summary": "auto"},
-                allowed_openai_params=["reasoning"],
+                allowed_openai_params=["reasoning", "reasoning_effort"],
+                llm_client=OpenAIResponsesClient(),
             )
         return LiteLlm(model=f"openai/{resolved}")
     raise ValueError(f"Unsupported model: {model_id!r} (resolved to {resolved!r})")
@@ -450,6 +488,14 @@ def resolve_model_chain(model_ref: str, fallback: FallbackConfig | None = None) 
 _VALID_IDENT = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
+def _project_aware(md: object) -> bool:
+    """False when the skill opted out of projects (``tool_configs.defaults.projects:
+    false``): it gets no project tools and no "only this project's documents" rule."""
+    cfg = md.tool_configs if isinstance(getattr(md, "tool_configs", None), dict) else {}
+    defaults = cfg.get("defaults") if isinstance(cfg.get("defaults"), dict) else {}
+    return defaults.get("projects", True) is not False
+
+
 def _safe_agent_name(skill_id: str) -> str:
     safe = skill_id.replace("-", "_")
     if not safe:
@@ -570,19 +616,41 @@ def _planner_at(depth: ThinkDepth, model_ref: str) -> BuiltInPlanner | None:
 # --- Skill delegation helpers (v6.7.0 SKILL-DELEGATION) ---
 
 
+def _delegate_namespaces(owner_id: str) -> list[str]:
+    """Owner namespaces a parent's delegate slugs and jobs resolve in, most specific first.
+
+    The parent's own namespace, then the platform's. A user's copy of a platform
+    door (Studio Fork, or an admin-made per-user variant) keeps the platform
+    door's `allow` slugs — `demo-ppa-expert`, `web-researcher` — which name
+    PLATFORM specialists. Resolving them only in the copy's owner namespace
+    silently wired zero delegates (2026-11-05: every fork of demo-assistant lost
+    all eight specialists with no error). Access is still checked per delegate,
+    so the platform fallback widens nothing: a user could already name a
+    platform skill by doc id."""
+    from skills.platform import PLATFORM_OWNER_UID
+
+    if not owner_id or owner_id == PLATFORM_OWNER_UID:
+        return [PLATFORM_OWNER_UID]
+    return [owner_id, PLATFORM_OWNER_UID]
+
+
 def _resolve_delegate_skill(ref: str, owner_id: str) -> SkillConfig | None:
     """Resolve a delegate reference (a skill DOC ID or a SLUG) to its config.
 
     `delegation.allow` entries are typically authored as SLUGS (e.g.
     `demo-ppa-expert`). Locally the seeded doc id equals the slug so `get_skill`
     resolves it directly; on a deployed env the doc id is a generated UUID, so
-    `get_skill(slug)` misses — fall back to a slug lookup within the PARENT's
-    owner namespace (platform skills delegate to platform specialists). Without
-    this fallback the deployed handoff silently finds zero delegates."""
+    `get_skill(slug)` misses — fall back to a slug lookup in the PARENT's owner
+    namespace, then the platform's (see `_delegate_namespaces`). Without this
+    fallback the deployed handoff silently finds zero delegates."""
     sub = get_skill(ref)
-    if sub is None:
-        sub = find_by_slug(owner_id, ref)
-    return sub
+    if sub is not None:
+        return sub
+    for namespace in _delegate_namespaces(owner_id):
+        sub = find_by_slug(namespace, ref)
+        if sub is not None:
+            return sub
+    return None
 
 
 def _resolve_accessible_delegates(
@@ -654,13 +722,16 @@ def accessible_delegate_rules(
     # 8.3 JOBS: discovered jobs become rules at their self-declared floor.
     if deleg.enabled and deleg.discover_jobs and access_context is not None:
         pinned = {r.skill for r in rules}
-        for job in find_jobs(parent_config.owner_id):
-            if job.skill_id == parent_config.skill_id or job.skill_id in pinned:
-                continue
-            rules.append(DelegateRule(skill=job.skill_id, floor=job.skill_metadata.job_floor))
-            pinned.add(job.skill_id)
+        for namespace in _delegate_namespaces(parent_config.owner_id):
+            for job in find_jobs(namespace):
+                if job.skill_id == parent_config.skill_id or job.skill_id in pinned:
+                    continue
+                rules.append(DelegateRule(skill=job.skill_id, floor=job.skill_metadata.job_floor))
+                pinned.add(job.skill_id)
     if not rules:
         return []
+    for namespace in _delegate_namespaces(parent_config.owner_id):
+        prime_refs(namespace, [r.skill for r in rules])  # one read per namespace, not two per delegate
     accessible = _resolve_accessible_delegates([r.skill for r in rules], parent_config, access_context)
     # Map each accessible delegate back to its rule (floor) by RESOLVED skill_id
     # — a rule's `skill` may be an id or a slug (get_skill is cached).
@@ -713,6 +784,86 @@ def _build_handoff_envelope(parent_id: str, skill: SkillConfig, rule: DelegateRu
     )
 
 
+# A text confirmation is valid only from a LATER turn (the person's reply) and
+# only for a while — a stale "yes" from yesterday must not transfer today.
+_TEXT_CONFIRM_KEY = "channel_handoff_asked"
+_TEXT_CONFIRM_TTL_SEC = 30 * 60
+
+
+def _text_confirmed_handoff(skill: SkillConfig, tool_context: object) -> dict | None:
+    """Confirm-floor handoff on a channel with no clickable UI (Discord, email…).
+
+    The web confirms with a button (an elicitation form); a channel can only show
+    text, so a form there re-asks forever. Instead:
+
+      1st call  -> remember we asked (session state) and tell the model to ask the
+                   person IN TEXT; no transfer.
+      2nd call  -> from a LATER turn (the person replied) within the TTL: the person
+                   agreed, so let the native transfer through.
+
+    A retry in the SAME turn never counts — the model can't confirm on the
+    person's behalf. The confirmation stays a human step, just without a button.
+    """
+    import time
+
+    state = getattr(tool_context, "state", None)
+    invocation = str(getattr(tool_context, "invocation_id", "") or "")
+    display = getattr(skill, "display_name", "") or skill.name
+    asked = state.get(_TEXT_CONFIRM_KEY) if state is not None else None
+    asked = dict(asked) if isinstance(asked, dict) else {}
+    prior = asked.get(skill.skill_id)
+    now = time.time()
+    if (
+        isinstance(prior, dict)
+        and prior.get("inv")
+        and prior.get("inv") != invocation
+        and now - float(prior.get("at") or 0) < _TEXT_CONFIRM_TTL_SEC
+    ):
+        asked.pop(skill.skill_id, None)
+        if state is not None:
+            state[_TEXT_CONFIRM_KEY] = asked
+        logger.info("handoff to %r confirmed in text on a channel", skill.skill_id)
+        return None  # the person agreed in their reply: native transfer proceeds
+    asked[skill.skill_id] = {"inv": invocation, "at": now}
+    if state is not None:
+        state[_TEXT_CONFIRM_KEY] = asked
+    from adk.elicitation import CHANNEL_QUESTIONS
+
+    question = f"Shall I hand this over to **{display}**? Reply **yes** to go ahead."
+    pending = CHANNEL_QUESTIONS.get()
+    if pending is not None:
+        pending.append(question)  # the channel path asks it if the model doesn't
+    return {
+        "question": question,
+        "status": "needs_confirmation",
+        "handoff_to": display,
+        "message": (
+            f"Before handing over to {display}, ask the person in plain text whether they want that "
+            f"({skill.description or display}). This channel has no buttons. If they agree in their "
+            f"next message, the agent that asked calls the same handoff again; otherwise carry on yourself."
+        ),
+    }
+
+
+def refuse_self_transfer(tool: BaseTool, args: dict, tool_context: object = None) -> dict | None:
+    """An agent handing off to ITSELF gets "carry on", not a crashed turn.
+
+    ADK raises on a self-transfer ("Agent 'x' cannot transfer to itself") and the
+    whole run fails. It happens after a confirmed handoff: the delegate reads the
+    same history — "if they agree, call the handoff again" then "yes" — and
+    calls it too (live on Discord, 2026-10-27). Short-circuit it instead.
+    """
+    if getattr(tool, "name", "") != "transfer_to_agent":
+        return None
+    target = str((args or {}).get("agent_name") or "")
+    if not target or target != getattr(tool_context, "agent_name", None):
+        return None
+    return {
+        "status": "already_active",
+        "message": "You are already this agent; no handoff is needed. Carry on with the person's request yourself now.",
+    }
+
+
 def make_handoff_policy_callback(
     parent_id: str, delegate_map: dict[str, tuple[SkillConfig, DelegateRule]]
 ) -> Callable[..., dict | None]:
@@ -747,6 +898,11 @@ def make_handoff_policy_callback(
         skill, rule = target
         if rule.floor == "auto":
             return None  # transparent native transfer
+        from adk.elicitation import NON_INTERACTIVE
+
+        if NON_INTERACTIVE.get():
+            # No buttons on this channel: confirm in TEXT (see _text_confirmed_handoff).
+            return _text_confirmed_handoff(skill, tool_context)
         # confirm / confirm_with_fields -> short-circuit; NO transfer happens.
         envelope = _build_handoff_envelope(parent_id, skill, rule)
         from observability.timing import get_current_tracker
@@ -937,10 +1093,20 @@ def create_agent(
 
     md = skill_config.skill_metadata
     effective_model = _model_override or md.model
+    skill_fallback = md.fallback
+    # The person's pick in the composer (adk.model_choice) replaces the skill's
+    # model — and the thinking router's override — for every agent in the tree
+    # whose skill allows it. The skill's own fallback list is for its own
+    # model, so a picked model uses the registry chain instead.
+    _picked = model_choice.resolve_for(md)
+    if _picked is not None:
+        effective_model = _picked.model
+        skill_fallback = None
+        _planner_override = _planner_at(_picked.depth or ThinkDepth(md.thinking), _picked.model)
     # MODEL-RELIABILITY M3: resolve the full fallback chain (residency-gated).
     # Single-member chains come back as the bare model — zero change for
     # skills with no fallbacks configured.
-    model = resolve_model_chain(effective_model, md.fallback)
+    model = resolve_model_chain(effective_model, skill_fallback)
     # Resolved api name for provider-prefix checks below (effective_model may be
     # a tier name like `lite`/`smart` since v6.6.0 M1).
     effective_model_api = api_name_for(effective_model)
@@ -991,7 +1157,15 @@ def create_agent(
     # shape as memory (`tool_configs.defaults.projects: false`).
     _projects_default = False if _uses_builtin_code_executor else True
     tools = [
-        *([load_artifacts_tool, retrieve_artifact] if _defaults_cfg.get("artifacts", _artifacts_default) else []),
+        # show_media and look_at_media ride the artifacts default: the first shows
+        # the user the pictures, video and audio the agent can reach; the second
+        # lets the MODEL see a picture (attached to the next request only) or
+        # hear a clip (a Gemini transcript + description).
+        *(
+            [load_artifacts_tool, retrieve_artifact, FunctionTool(_show_media.show_media), LookAtMediaTool()]
+            if _defaults_cfg.get("artifacts", _artifacts_default)
+            else []
+        ),
         # remember/forget ride with the memory default: a skill without recall
         # has no business writing or deleting memories either.
         *(
@@ -1009,7 +1183,7 @@ def create_agent(
     # Pass the authenticated identity, not ADK's user_id: that is the Firebase
     # UID, and MCP servers behind a per-user gate key on email/domain like
     # every other policy here (same identity make_permission_enforcer gets).
-    tools.extend(resolve_mcp_tools(md.tool_configs, user.email, user.domain))
+    tools.extend(resolve_mcp_tools(md.tool_configs, user.email, user.domain, frozenset(user.group_tags or ())))
     from adk.callbacks import _RAG_DOCUMENTS_ENABLED
 
     if _RAG_DOCUMENTS_ENABLED:
@@ -1051,7 +1225,11 @@ def create_agent(
     # and keep their tools.)
     if code_executor is not None:
         tools = []
-    planner = _planner_override if _planner_override is not None else _planner_for(skill_config)
+    # A picked model's planner was set above; None there means "no planner"
+    # (Claude/OpenAI), never "fall back to the skill's own Gemini planner".
+    planner = (
+        _planner_override if (_planner_override is not None or _picked is not None) else _planner_for(skill_config)
+    )
 
     # --- Access-aware skill delegation (v6.7.0 SKILL-DELEGATION; per-delegate
     # floors v6.8.0 8.2 first-impression-elicited-handoff) ---
@@ -1090,6 +1268,9 @@ def create_agent(
     # The full access-filtered delegate set (explicit allow + legacy sub_skills +
     # discovered jobs) — see accessible_delegate_rules, the shared resolver.
     # The recursion depth bound stays here.
+    from adk.elicitation import NON_INTERACTIVE
+
+    _non_interactive = NON_INTERACTIVE.get()
     accessible_rules: list[tuple[SkillConfig, DelegateRule]] = (
         accessible_delegate_rules(skill_config, access_context) if depth < deleg.max_depth else []
     )
@@ -1111,14 +1292,31 @@ def create_agent(
                     "floor='auto' with invoke='tool', or invoke='transfer' to keep "
                     "the confirmation."
                 )
-            if rule.floor == "auto":
+            # A channel (Discord, email…) has no specialist page to switch to,
+            # so a text-confirmed handoff transfers IN-SESSION — into whatever
+            # sub_agent is here. Build the REAL delegate for it: a stub (no
+            # instruction, no tools, the door's model) answered live on
+            # 2026-10-27 by inventing a "saved" document. The handoff policy
+            # still gates the transfer, so the confirmation stays.
+            if rule.floor == "auto" or (_non_interactive and rule.invoke != "tool"):
                 try:
+                    # A delegate runs as ONE agent on its `model` — the fast
+                    # agent of create_agent_with_thinking — so it gets that
+                    # agent's planner. `_planner_for` returns None for a skill
+                    # with `thinkingModel`, and without this the delegate
+                    # thought silently: after a large tool result it sent
+                    # nothing past the first-token deadline on every chain
+                    # member and the turn died as MODEL_SILENT_STALL
+                    # (2026-10-30, a PPA comparison via the front door).
                     child = create_agent(
                         sub,
                         user,
                         access_context=access_context,
                         _seen=seen,
                         _delegation_parent_id=skill_config.skill_id,
+                        _planner_override=_planner_at(
+                            ThinkDepth(sub.skill_metadata.thinking), sub.skill_metadata.model
+                        ),
                     )
                 except ValueError:
                     # Cycle detection is a hard error — never degrade past it.
@@ -1146,10 +1344,11 @@ def create_agent(
                 else:
                     sub_agents.append(child)
             else:
-                # confirm/cwf -> stub: name + description only (no tools, no
-                # instruction). Cheap (the door's factory cost stays flat — the
-                # REAL agent is built on the specialist's page after the switch).
-                # It is never executed: the policy callback short-circuits first.
+                # confirm/cwf on the WEB -> stub: name + description only (no
+                # tools, no instruction). Cheap (the door's factory cost stays
+                # flat — the REAL agent is built on the specialist's page after
+                # the switch). It is never executed: the policy callback
+                # short-circuits first. Channels build the real one (above).
                 sub_agents.append(
                     LlmAgent(
                         name=name,
@@ -1290,6 +1489,7 @@ def create_agent(
     from adk.project_floor import make_project_floor_callback
 
     _perm_enforcer = compose_before_tool_callbacks(_perm_enforcer, make_project_floor_callback())
+    _perm_enforcer = compose_before_tool_callbacks(_perm_enforcer, refuse_self_transfer)
     if delegate_map:
         _perm_enforcer = compose_before_tool_callbacks(
             _perm_enforcer,
@@ -1321,8 +1521,15 @@ def create_agent(
     # against the effective response. The A2UI emitter (tool-results-as-a2ui /
     # 7.3) renders any tool with a registered mapping onto the workspace
     # surface, out of the model's context.
+    # The pre-offload emitter sits between them: mappings registered with
+    # `offload=True` (GitHub listings) draw from the full response, then the
+    # offload still trims what the model gets. It never rewrites anything.
     _after_tool = compose_after_tool_callbacks(
-        chain_mutators(_convert_media_results, _handle_large_output),
+        chain_mutators(
+            _convert_media_results,
+            make_a2ui_result_emitter(before_offload=True),
+            _handle_large_output,
+        ),
         make_mcp_after_tool_callback(),
         make_a2ui_result_emitter(),
     )
@@ -1358,12 +1565,15 @@ def create_agent(
             wrap_with_platform_preamble,
             # "Your instructions" (projects.md §6.5) directly after the skill's
             # own instruction, before the context blocks.
-            wrap_with_project_context,
+            partial(wrap_with_project_context, project_block=_project_aware(md)),
             wrap_with_iframe_context,
             wrap_with_a2ui_surface_context,
             wrap_with_saved_forms,
             wrap_with_caller_persona,
             wrap_with_today,
+            # The person's interface language (multi-language.md §6). Inert —
+            # byte-identical — unless UI_LOCALES offers 2+ and the run sent one.
+            wrap_with_ui_locale,
             wrap_with_output_format,
         ),
         description=skill_config.description,
@@ -1398,7 +1608,8 @@ def create_agent_with_thinking(
     See module docstring for the three tiers in full.
     """
     md = skill_config.skill_metadata
-    if md.thinking_model is None:
+    # A model the person picked replaces the fast/thinking split: one agent.
+    if md.thinking_model is None or model_choice.resolve_for(md) is not None:
         return create_agent(skill_config, user, access_context=access_context)
 
     # Tier 3: two agents + picker. Build both via the same recursive factory

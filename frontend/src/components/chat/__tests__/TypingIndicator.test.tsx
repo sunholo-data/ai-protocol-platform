@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { TypingIndicator } from "../TypingIndicator";
 import { BRANDING } from "@/lib/branding";
 
@@ -59,5 +59,25 @@ describe("TypingIndicator", () => {
       const { container } = render(<TypingIndicator stageLabel={null} />);
       expect(container.querySelectorAll("[class*=animate-bounce]")).toHaveLength(3);
     });
+  });
+});
+
+describe("TypingIndicator — a long wait is put into words", () => {
+  it("says it is working after 5s and still working after 20s", () => {
+    vi.useFakeTimers();
+    try {
+      render(<TypingIndicator />);
+      expect(screen.queryByText("Working on it…")).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(screen.getByText("Working on it…")).toBeTruthy();
+      act(() => {
+        vi.advanceTimersByTime(15000);
+      });
+      expect(screen.getByText("Still working…")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -84,3 +84,48 @@ describe("fetchWithAuth domain-rejection signal", () => {
     expect(fired).toBe(0);
   });
 });
+
+describe("fetchWithAuth response timeout", () => {
+  function hangingFetch() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_input: unknown, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            if (init?.signal?.aborted) return reject(new DOMException("aborted", "AbortError"));
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+          }),
+      ),
+    );
+  }
+
+  it("rejects with a TimeoutError when the server never starts responding", async () => {
+    hangingFetch();
+    await expect(fetchWithAuth("/api/proxy/api/slow", {}, { timeoutMs: 20 })).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+  });
+
+  it("still reports the caller's own abort as an abort, not a timeout", async () => {
+    hangingFetch();
+    const ac = new AbortController();
+    const p = fetchWithAuth("/api/proxy/api/slow", { signal: ac.signal }, { timeoutMs: 5000 });
+    ac.abort();
+    await expect(p).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("does not time out a response that has already started", async () => {
+    mockFetch(200, { ok: true });
+    const res = await fetchWithAuth("/api/proxy/api/fast", {}, { timeoutMs: 20 });
+    await new Promise((r) => setTimeout(r, 40));
+    expect((await res.json()).ok).toBe(true);
+  });
+
+  it("sets no default timeout on uploads", async () => {
+    mockFetch(200, {});
+    const fd = new FormData();
+    await fetchWithAuth("/api/proxy/api/upload", { method: "POST", body: fd });
+    const init = (fetch as unknown as { mock: { calls: [unknown, RequestInit][] } }).mock.calls[0][1];
+    expect(init.signal).toBeUndefined();
+  });
+});

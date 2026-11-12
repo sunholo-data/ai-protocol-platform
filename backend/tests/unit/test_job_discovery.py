@@ -204,3 +204,22 @@ def test_discovery_off_by_default_offers_nothing():
         agent = create_agent(door, _user(), access_context=_ctx())
     assert agent.sub_agents == []
     find_mock.assert_not_called()
+
+
+def test_user_owned_door_discovers_platform_jobs():
+    """A user's copy of a platform door must still discover the PLATFORM's jobs
+    (its own namespace is searched first, then the platform's). Before
+    2026-11-05 it searched only the copy owner's namespace and found none."""
+    from skills.platform import PLATFORM_OWNER_UID
+
+    door = _skill(skill_id="my-door", owner_id="u1", delegation=DelegationConfig(enabled=True, discover_jobs=True))
+    job = _skill(skill_id="job-a", job=True, job_floor="auto", access=AccessControl(type="public"))
+    jobs_by_ns = {PLATFORM_OWNER_UID: [job]}
+    with (
+        patch("adk.agent.find_jobs", side_effect=lambda ns: jobs_by_ns.get(ns, [])) as fj,
+        patch("adk.agent.get_skill", side_effect=lambda sid: {"job-a": job}.get(sid)),
+        patch("adk.agent.prime_refs"),
+    ):
+        agent = create_agent(door, _user(), access_context=_ctx())
+    assert [a.name for a in agent.sub_agents] == [_safe_agent_name("job-a")]
+    assert [c.args[0] for c in fj.call_args_list] == ["u1", PLATFORM_OWNER_UID]

@@ -61,6 +61,7 @@ OUTSIDE_DOCUMENT_TOOLS: frozenset[str] = frozenset(
 _DOC_ID_ARGS = ("doc_id", "document_id", "left_doc_id", "right_doc_id", "ref")
 _DOC_LIST_ARGS = ("doc_ids", "document_ids")
 _GS_URL_ARGS = ("gs_url", "left_gs_url", "right_gs_url")
+_GS_URL_LIST_ARGS = ("gs_urls",)
 _ARTIFACT_ARGS = ("artifact_id", "artifact_names")
 
 
@@ -90,6 +91,10 @@ def _named_doc_ids(tool_name: str, args: dict[str, Any]) -> tuple[list[str], lis
         value = args.get(key)
         if isinstance(value, str) and value.strip():
             urls.append(value.strip())
+    for key in _GS_URL_LIST_ARGS:
+        value = args.get(key)
+        values = value if isinstance(value, list) else [value] if isinstance(value, str) else []
+        urls += [v.strip() for v in values if isinstance(v, str) and v.strip()]
     for key in _ARTIFACT_ARGS:
         value = args.get(key)
         names = value if isinstance(value, list) else [value] if isinstance(value, str) else []

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { authImagePath, useAuthImage } from "@/lib/authImage";
 
 interface InlineImageProps {
   src: string;
@@ -33,18 +34,65 @@ function BrokenImageFallback({ alt }: { alt?: string }) {
   );
 }
 
+/**
+ * An image, video or audio clip in a chat reply. A backend `/api/...` source
+ * (a document, bucket object or artefact the agent showed with `show_media`) is
+ * fetched with the user's credentials first, since a media element cannot send
+ * them, and plays by its type; anything else loads directly as an image.
+ */
 export function InlineImage({ src, alt }: InlineImageProps) {
   const [errored, setErrored] = useState(false);
   const [open, setOpen] = useState(false);
+  const authPath = authImagePath(src);
+  const auth = useAuthImage(authPath);
 
-  if (errored) return <BrokenImageFallback alt={alt} />;
+  if (errored || (authPath && auth.failed)) return <BrokenImageFallback alt={alt} />;
+  if (authPath && !auth.url) {
+    return (
+      <span
+        role="img"
+        aria-label={alt ? `Loading ${alt}` : "Loading media"}
+        aria-busy="true"
+        className="my-2 block h-48 w-full max-w-sm animate-pulse rounded border border-border bg-muted"
+      />
+    );
+  }
+  if (authPath && auth.type.startsWith("video/")) {
+    return (
+      <video
+        src={auth.url as string}
+        controls
+        preload="metadata"
+        aria-label={alt ?? "Video"}
+        className="my-2 block max-w-full rounded border border-border"
+        style={{ maxHeight: "400px" }}
+        onError={() => setErrored(true)}
+      />
+    );
+  }
+  if (authPath && auth.type.startsWith("audio/")) {
+    return (
+      <span className="my-2 block">
+        {alt ? <span className="mb-1 block text-xs text-muted-foreground">{alt}</span> : null}
+        <audio
+          src={auth.url as string}
+          controls
+          preload="metadata"
+          aria-label={alt ?? "Audio"}
+          className="w-full max-w-md"
+          onError={() => setErrored(true)}
+        />
+      </span>
+    );
+  }
+  const shown = authPath ? (auth.url as string) : src;
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={src}
+          src={shown}
           alt={alt ?? ""}
           loading="lazy"
           decoding="async"
@@ -62,7 +110,7 @@ export function InlineImage({ src, alt }: InlineImageProps) {
           <Dialog.Title className="sr-only">{alt ?? "Image preview"}</Dialog.Title>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={src}
+            src={shown}
             alt={alt ?? ""}
             className="max-h-[90vh] max-w-[90vw] rounded object-contain shadow-2xl"
           />

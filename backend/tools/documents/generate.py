@@ -23,6 +23,7 @@ See docs/design/v6.32.0/document-creation.md.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import os
 import re
@@ -30,12 +31,11 @@ import shutil
 import tempfile
 from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import urlparse
 
 from fastapi import HTTPException
 
 import db.folders as folders_db
-from tools.documents.ailang_parse import ConvertOutcome, convert_document_file, convert_markdown
+from tools.documents.ailang_parse import ConvertOutcome, convert_document_file, convert_markdown, split_gs_url
 from tools.documents.ingest import ingest_document
 
 log = logging.getLogger(__name__)
@@ -297,10 +297,10 @@ def _download_to_tempfile(gs_url: str, suffix: str = ".docx") -> str | None:
     from google.cloud import storage as gcs
 
     try:
-        parts = urlparse(gs_url)
+        bucket, blob_path = split_gs_url(gs_url)
         tmp_dir = tempfile.mkdtemp(prefix="tmpl-")
         path = os.path.join(tmp_dir, f"template{suffix}")
-        gcs.Client().bucket(parts.netloc).blob(parts.path.lstrip("/")).download_to_filename(path)
+        gcs.Client().bucket(bucket).blob(blob_path).download_to_filename(path)
         return path
     except Exception as exc:
         log.error("template download failed for %s: %s", gs_url, exc)
@@ -330,6 +330,7 @@ async def generate_document(
     filename: str = "document.docx",
     target: str = "docx",
     template: str = "",
+    customer: str = "",
     tool_context: Any = None,
 ) -> dict[str, Any]:
     """Create a document from markdown and save it to the user's workspace.
@@ -357,10 +358,16 @@ async def generate_document(
             back to the user rather than guessing.
 
             Pass "plain" only if the user explicitly asks for no styling.
+        customer: The customer or recipient the document is for (e.g.
+            "Northwind Oy"), shown in the letterhead. Leave empty for an
+            internal document. The letterhead's title comes from the
+            document's first `#` heading and the date is today's.
 
     Returns:
         A dict describing the created document: docId, filename, folder, target,
-        templateUsed, blockCount and status. On failure, status is "failed" with
+        templateUsed, blockCount, status, and ``link`` — the page where the person
+        opens/downloads it (signed-in, owner-only). ALWAYS give the person the
+        link with the file name; never show the docId. On failure, status is "failed" with
         a human-readable error and the markdown source, so nothing is lost.
     """
     from auth.firebase_auth import resolve_user_by_uid
@@ -445,6 +452,7 @@ async def generate_document(
             filename=out_name,
             reference_doc_path=template_path,
         )
+        outcome = _with_header_tokens(outcome, content_markdown, out_name, customer)
         if not outcome.ok:
             # Never an empty success: hand back the source plus the reason.
             return {
@@ -527,6 +535,10 @@ async def generate_document(
             "blockCount": saved.blocks_count,
             "parseStatus": saved.status,
             "sizeBytes": len(outcome.content or b""),
+            # Where the person OPENS it — a signed-in app page (the owner check
+            # runs there), so the link is safe to post anywhere, e.g. a Discord
+            # reply. Give it to the person; never a gs:// path or the raw id.
+            "link": _document_link(saved.doc_id),
         }
     finally:
         if template_path:
@@ -535,7 +547,12 @@ async def generate_document(
 
 def _skill_id(tool_context: Any) -> str:
     try:
-        return str(tool_context.state.get("skill_id") or "") if tool_context else ""
+        if not tool_context:
+            return ""
+        from adk.callbacks import ACTIVE_SKILL_KEY
+
+        state = tool_context.state
+        return str(state.get(ACTIVE_SKILL_KEY) or state.get("skill_id") or "")
     except Exception:
         return ""
 
@@ -581,7 +598,36 @@ class GenerateDocumentRequest(BaseModel):
     reference_section: int | None = Field(default=None, alias="referenceSection")
     table_style: str = Field(default="", alias="tableStyle")
 
+    # Fills a template letterhead's {{customer}} token (empty = internal doc).
+    customer: str = ""
+
     model_config = {"populate_by_name": True}
+
+
+def _document_link(doc_id: str) -> str:
+    """The app page for one document (``/documents/{id}``), absolute when the
+    deployment's base URL is known (APP_BASE_URL) — a channel reply needs a
+    full URL; the web app can use the path."""
+    base = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
+    return f"{base}/documents/{doc_id}" if doc_id else ""
+
+
+def _with_header_tokens(outcome: ConvertOutcome, markdown: str, filename: str, customer: str = "") -> ConvertOutcome:
+    """Fill a template letterhead's {{title}} / {{customer}} / {{date}} tokens.
+
+    A reference template's header is copied into the result verbatim, so its
+    placeholders would otherwise appear in every generated document. Only for
+    a styled .docx; bytes without tokens are returned unchanged.
+    """
+    if not outcome.ok or outcome.target != "docx" or not outcome.content:
+        return outcome
+    from tools.documents.header_tokens import fill_header_tokens, title_from, today
+
+    filled = fill_header_tokens(
+        outcome.content,
+        {"title": title_from(markdown, filename), "customer": customer.strip(), "date": today()},
+    )
+    return outcome if filled is outcome.content else dataclasses.replace(outcome, content=filled)
 
 
 def _template_provenance(
@@ -665,6 +711,7 @@ async def _generate_into_workspace(
     table_style: str = "",
     via: str = "api",
     exclude_doc_id: str = "",
+    customer: str = "",
 ) -> ParsedDocumentResponse:
     """Convert markdown and put the result in the workspace.
 
@@ -739,6 +786,7 @@ async def _generate_into_workspace(
             reference_section=reference_section if template_path else None,
             table_style=table_style if template_path else "",
         )
+        outcome = _with_header_tokens(outcome, content_markdown, out_name, customer)
         if not outcome.ok:
             raise HTTPException(
                 status_code=422,
@@ -777,6 +825,7 @@ async def generate_document_route(user: _CurrentUser, body: GenerateDocumentRequ
         reference_section=body.reference_section,
         table_style=body.table_style,
         via="api",
+        customer=body.customer,
     )
 
 
@@ -917,6 +966,7 @@ async def _restyle_from_original(
             reference_section=reference_section if template_path else None,
             table_style=table_style if template_path else "",
         )
+        outcome = _with_header_tokens(outcome, "", filename)
         if not outcome.ok:
             raise HTTPException(
                 status_code=422,

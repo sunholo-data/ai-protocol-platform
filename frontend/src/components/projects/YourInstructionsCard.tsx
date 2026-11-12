@@ -11,7 +11,7 @@ export const YOUR_INSTRUCTIONS_PLACEHOLDER =
  * §6.5): one text the agent gets in every chat, whichever assistant you use.
  * Shown on the new-chat landing, where every chat starts, and in settings.
  */
-export function YourInstructionsCard({ className = "" }: { className?: string }) {
+export function YourInstructionsCard({ className = "", plain = false }: { className?: string; plain?: boolean }) {
   const { instructions, status, retry } = useMyInstructions();
 
   if (status === "loading") {
@@ -28,8 +28,12 @@ export function YourInstructionsCard({ className = "" }: { className?: string })
     );
   }
   return (
-    <div className={`rounded-lg border border-border bg-background/80 p-4 shadow-sm backdrop-blur ${className}`} data-testid="your-instructions">
+    <div
+      className={plain ? className : `rounded-lg border border-border bg-background/80 p-4 shadow-sm backdrop-blur ${className}`}
+      data-testid="your-instructions"
+    >
       <InstructionsEditor
+        hideLabel={plain}
         label="Your instructions"
         description="Tell the assistant about you and how you like answers. Used in every chat."
         placeholder={YOUR_INSTRUCTIONS_PLACEHOLDER}

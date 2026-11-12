@@ -2,14 +2,23 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { ArrowLeft, NotebookPen } from "lucide-react";
 import { ChatMessageListWithSurfaces } from "@/components/chat/ChatMessageList";
 import type { DocTabData } from "@/components/doc-browser/DocTab";
-import { DocListView } from "@/components/doc-browser/DocListView";
 import { DocTabsBar } from "@/components/doc-browser/DocTabsBar";
 import { useVoiceConfig } from "@/hooks/useVoiceConfig";
 import { cancelVoicePlayback } from "@/hooks/useAutoReadAloud";
 import { VoiceComposerControls } from "@/components/chat/VoiceComposerControls";
-import { AutoReadToggle } from "@/components/chat/AutoReadToggle";
+import { ComposerAddMenu } from "@/components/chat/ComposerAddMenu";
+import { ModelChip } from "@/components/chat/ModelChip";
+import {
+  AUTO as MODEL_AUTO,
+  buildModelOptions,
+  choiceLabel,
+  useModelMenu,
+  useSpecificModelsOptIn,
+} from "@/lib/modelChoice";
+import { AllResultsMenu } from "@/components/chat/AllResultsMenu";
 import { UploadDropZone } from "@/components/doc-browser/UploadDropZone";
 import { AccountPanel } from "@/components/navigation/AccountPanel";
 import { SkillWelcome } from "@/components/chat/SkillWelcome";
@@ -24,6 +33,8 @@ import {
   type ToolCallState,
   type DelegationMarkerItem,
   type CompactionNoticeItem,
+  type ModelEventItem,
+  type ModelWaitState,
 } from "@/hooks/useSkillAgent";
 import {
   subscribeSkillSwitchIntent,
@@ -46,22 +57,29 @@ import {
   writeStoredCollapsed,
 } from "@/hooks/useResizableWorkspaceRatio";
 import { WorkbenchResizeHandle } from "@/components/chat/WorkbenchResizeHandle";
+import { SidebarResizeHandle } from "@/components/chat/SidebarResizeHandle";
+import { useSidebarWidth } from "@/hooks/useSidebarWidth";
 import { useBackendReady } from "@/hooks/useBackendReady";
 import { computeIncludedDocIds } from "@/lib/docContext";
 import { notifySessionsChanged, subscribeSessionsChangedDetailed } from "@/lib/sessionEvents";
 import { useSkillSessions } from "@/hooks/useSkillSessions";
-import { RecentConversations } from "@/components/chat/RecentConversations";
 import { useRecentDocuments, type RecentDocument } from "@/hooks/useRecentDocuments";
 import { SkillSessionPanel } from "@/components/chat/SkillSessionPanel";
 import { SharedSessionsSection } from "@/components/chat/SharedSessionsSection";
 import DocumentHistoryPanel from "@/components/chat/DocumentHistoryPanel";
 import { SidebarSection } from "@/components/chat/SidebarSection";
+import { SidebarFiles } from "@/components/chat/SidebarFiles";
+import { SidebarSearch } from "@/components/chat/SidebarSearch";
+import { useUserSkills } from "@/hooks/useUserSkills";
 import { InContextBadge } from "@/components/chat/InContextBadge";
 import { Workbench, type WorkbenchTab } from "@/components/chat/Workbench";
-import { WorkbenchHome } from "@/components/chat/WorkbenchHome";
+import { PlatformWorkStatus } from "@/components/chat/PlatformWorkStatus";
+import type { PlatformRunStatus } from "@/hooks/useSkillAgent";
 import { SkillExamplesPicker } from "@/components/chat/SkillExamplesPicker";
 import { GCSFileBrowser } from "@/components/doc-browser/GCSFileBrowser";
 import type { ExampleDocument, ExamplePrompt } from "@/types/skill";
+import { useLocale } from "@/i18n";
+import { skillText } from "@/hooks/useSkillText";
 import {
   type A2uiArtifact,
   type A2uiArtifactEntry,
@@ -75,6 +93,7 @@ import {
 import { WorkspaceAgentTools } from "./WorkspaceAgentTools";
 import { useAGUIAgent } from "@/providers/AGUIProvider";
 import { A2UISurfaceMount } from "@/components/protocols/A2UISurfaceMount";
+import { DirectLaunchers, type DirectLauncherConfig } from "@/components/workspace/DirectLaunchers";
 import { CompareLauncher, type CompareDocIdentity } from "@/components/workspace/CompareLauncher";
 import type { ActionRunActivitySink } from "@/hooks/useActionDrivenAgent";
 import { ObligationArtefactTab } from "@/components/workspace/ObligationArtefactTab";
@@ -89,7 +108,7 @@ import {
   newlyCreatedDocuments,
   type CreatedDocumentRef,
 } from "@/lib/createdDocument";
-import { forgetFocusedResult, nextFocusedResult } from "@/lib/workbenchFocus";
+import { forgetFocusedResult, nextFocusedResult, subscribeWorkbenchFocus, subscribeWorkbenchReveal } from "@/lib/workbenchFocus";
 import { DocumentPanel } from "@/components/document/DocumentPanel";
 import { LatencyHUD } from "@/components/dev/LatencyHUD";
 import { ProjectsSection } from "@/components/projects/ProjectsSection";
@@ -99,12 +118,15 @@ import {
   SessionProjectNotice,
   type SessionProjectFeedback,
 } from "@/components/projects/SessionProjectMenu";
-import { YourInstructionsCard } from "@/components/projects/YourInstructionsCard";
 import { useMyInstructions } from "@/hooks/useMyInstructions";
 import { useProject, useProjectDocuments, useProjectSessions, type ProjectDocument, type ProjectSummary } from "@/hooks/useProjects";
 import { projectChatHref, useProjectChatHref } from "@/hooks/useProjectChatHref";
 import { setActiveProject } from "@/lib/activeProject";
 import { ContextBanner, type ActiveProjectContext } from "@/components/chat/ContextBanner";
+import { useConfirm } from "@/components/ui/confirm";
+import { Spinner } from "@/components/ui/spinner";
+import * as Dialog from "@radix-ui/react-dialog";
+import { notify } from "@/components/ui/toast";
 
 /**
  * v6.23.0 WORKSPACE-HOME-PERSISTENCE — workbench tab ids for the two jobs the
@@ -185,13 +207,27 @@ function SidebarSurfaceRegion({ sessionId }: { sessionId: string | null }) {
 
 function ModalSurfaceRegion({ sessionId }: { sessionId: string | null }) {
   const state = useSurfaceState("modal");
+  const registry = useSurfaceRegistry();
   if (!state?.surface) return null;
+  // A real dialog: focus is trapped inside, Esc / the close button / a click
+  // outside dismiss it, and screen readers announce it as modal.
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
-      <div className="max-w-xl rounded-lg border bg-background p-4 shadow-xl">
-        <A2UISurfaceMount surfaceId="modal" sessionId={sessionId} />
-      </div>
-    </div>
+    <Dialog.Root open onOpenChange={(open) => !open && registry.clearSurface("modal")}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40 motion-safe:animate-in motion-safe:fade-in-0" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-3rem)] w-[calc(100vw-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-md border bg-background p-4 shadow-lg motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95">
+          <Dialog.Title className="sr-only">Assistant</Dialog.Title>
+          <Dialog.Description className="sr-only">A form or result from the assistant.</Dialog.Description>
+          <Dialog.Close
+            aria-label="Close"
+            className="absolute right-2 top-2 rounded-md px-2 py-0.5 text-lg leading-none text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            ×
+          </Dialog.Close>
+          <A2UISurfaceMount surfaceId="modal" sessionId={sessionId} />
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -209,9 +245,9 @@ function SurfaceSessionLifecycle({ sessionId }: { sessionId: string | null }) {
 /**
  * Routes backend-pushed A2UI surface events into the SurfaceRegistry
  * (tool-results-as-a2ui / 7.3, Model B). MUST live INSIDE
- * `SurfaceRegistryProvider` — `useSkillAgent` runs in ChatShell's body, which
- * is ABOVE this provider in the tree, so its `useOptionalSurfaceRegistry()`
- * returns null and can't reach the registry. This component subscribes to the
+ * `SurfaceRegistryProvider`. (useSkillAgent can reach the registry too since
+ * ChatShell hoisted the provider, but it does not route surfaces — keep one
+ * router, not two, or every surface message is applied twice.) This component subscribes to the
  * same AG-UI agent from inside the provider and appends the `A2UI_SURFACE`
  * messages so `A2UISurfaceMount("workspace")` draws them. Renders nothing.
  */
@@ -370,6 +406,7 @@ function WorkbenchPane({
   onOpenSource,
   onSurfaceChatMessage,
   compareOptedIn,
+  directLaunchers = [],
   allowCompareLauncher,
   allowObligationsLauncher,
   docTabs,
@@ -378,6 +415,9 @@ function WorkbenchPane({
   toolCalls,
   delegations,
   compactions,
+  modelEvents,
+  modelWait,
+  turnStartedAt,
   isThinking,
   activityContext,
   activityDocuments,
@@ -386,7 +426,13 @@ function WorkbenchPane({
   actionRunning,
   actionStageLabel,
   actionError,
+  platformRunStatus = "idle",
+  platformStageLabel,
+  platformRunError,
 }: {
+  platformRunStatus?: PlatformRunStatus;
+  platformStageLabel?: string | null;
+  platformRunError?: string | null;
   /** DOC-WORKBENCH P1 — mount a newly generated document in the Document tab
    * instead of leaving the user to find it in the sidebar. See
    * lib/createdDocument.ts for the two rules (one tab; failures keep a card). */
@@ -402,6 +448,11 @@ function WorkbenchPane({
   delegations: DelegationMarkerItem[];
   /** COMPACTION-WIRE M4 — history compactions, rendered in the Activity feed. */
   compactions?: CompactionNoticeItem[];
+  /** Model retries/fallbacks and the in-flight model wait, for the Activity feed. */
+  modelEvents?: ModelEventItem[];
+  modelWait?: ModelWaitState | null;
+  /** When the streaming chat turn began, or null (see ActivityPanel). */
+  turnStartedAt?: number | null;
   isThinking: boolean;
   /** Model + voice config for the Activity context row. */
   activityContext?: ActivityContext;
@@ -457,6 +508,7 @@ function WorkbenchPane({
    * action-triggered runs (toolConfigs.a2ui.allow_action_triggered_runs).
    * Gates whether the workbench Compare launcher renders in the empty state. */
   compareOptedIn: boolean;
+  directLaunchers?: readonly DirectLauncherConfig[];
   /** PPA-OBLIGATION 7.6 M3 — the active skill supports contract comparison
    * (has `compare_ppa_contracts`). Gates the launcher's "Compare contracts"
    * button. */
@@ -480,7 +532,7 @@ function WorkbenchPane({
    * and let chat take the full row when there's nothing in the
    * workbench worth showing. Lives here because the
    * useSurfaceState("workspace") check has to run inside the
-   * SurfaceRegistryProvider, which only wraps the JSX subtree. */
+   * SurfaceRegistryProvider. */
   onContentChange?: (hasContent: boolean) => void;
 }) {
   const workspaceSurface = useSurfaceState("workspace");
@@ -536,8 +588,11 @@ function WorkbenchPane({
   const recentEnabled = Boolean(onOpenRecentDocument);
   // In a project the picker is the project's documents, on any skill — not
   // only skills that ship example documents.
+  // Example prompts live in one place at a time: chips under the landing
+  // composer on a fresh chat, the Start tab once the conversation is going.
+  const pickerPrompts = isFreshChat ? [] : welcomePrompts;
   const hasPickerContent =
-    welcomeExamples.length > 0 || welcomePrompts.length > 0 || (Boolean(projectId) && recentEnabled);
+    welcomeExamples.length > 0 || pickerPrompts.length > 0 || (Boolean(projectId) && recentEnabled);
   const showPicker = hasPickerContent && (canDelegate || isFreshChat);
   // PPA-COMPARE-LAUNCHER M2: the Compare launcher renders on Workspace Home for
   // opted-in skills that own a launcher-capable tool (`optedIn` alone covers
@@ -609,6 +664,17 @@ function WorkbenchPane({
     if (focusId) onWorkbenchTabChange(focusId);
   }, [workbenchArtifacts, onWorkbenchTabChange]);
 
+  // A surface's `focus:<surfaceId>` button (e.g. a private review's "Back to
+  // Waiting for you"). Switch only to a tab this workbench has.
+  useEffect(
+    () =>
+      subscribeWorkbenchFocus((id) => {
+        // "Full activity log" under a reply's steps asks for the Activity tab.
+        if (id === "activity" || workbenchArtifacts.some((a) => a.surfaceId === id)) onWorkbenchTabChange(id);
+      }),
+    [workbenchArtifacts, onWorkbenchTabChange],
+  );
+
   // DOC-WORKBENCH P1 — a newly created document MOUNTS ITSELF. `handleDocClick`
   // (via onOpenCreatedDocument) adds the Document tab and pulls the workbench to
   // it, which is the same path an upload takes — so "create a document" ends
@@ -678,15 +744,15 @@ function WorkbenchPane({
   // tab id differs from its surface id — closes through the SAME path as every
   // other result instead of getting a second special case.
   const registry = useSurfaceRegistry();
+  const confirm = useConfirm();
   const handleCloseResult = useCallback(
-    (surfaceId: string, tabId: string, name: string) => {
-      if (
-        !window.confirm(
-          `Close "${name}"?\n\n` +
-            `This removes the result from your workbench and can't be undone. ` +
-            `Getting it back means re-running the query or analysis.`,
-        )
-      ) {
+    async (surfaceId: string, tabId: string, name: string) => {
+      const ok = await confirm({
+        title: `Close "${name}"?`,
+        description: "This can't be undone. To get it back, run it again.",
+        confirmLabel: "Close",
+      });
+      if (!ok) {
         return;
       }
       registry.clearSurface(surfaceId);
@@ -700,7 +766,7 @@ function WorkbenchPane({
       // resolves. Home always exists, so this is now always a real destination.
       if (workbenchTabId === tabId) onWorkbenchTabChange(HOME_TAB_ID);
     },
-    [registry, workbenchTabId, onWorkbenchTabChange],
+    [confirm, registry, workbenchTabId, onWorkbenchTabChange],
   );
   const handleCloseArtifact = useCallback(
     (artifact: A2uiArtifactEntry) =>
@@ -726,12 +792,13 @@ function WorkbenchPane({
   // the pane is there — and the user keeps an explicit escape hatch: the
   // collapse chevron, which reveals the re-open rail (workbenchCollapsed).
   const hasNotableActivity =
-    delegations.length > 0 || Boolean(activitySurface?.surface) || Boolean(actionRunning);
+    delegations.length > 0 || Boolean(activitySurface?.surface) || Boolean(actionRunning) || platformRunStatus !== "idle";
   const hasContent =
     workspaceHasContent ||
     hasArtifacts ||
     activeTabId !== null ||
     showLauncher ||
+    directLaunchers.length > 0 ||
     showPicker ||
     hasNotableActivity;
   useEffect(() => {
@@ -839,10 +906,13 @@ function WorkbenchPane({
   // Critically: the dominant workspace surface is NOT in here any more. That
   // single condition (`showHome = !workspaceHasContent && hasArtifacts`) was the
   // whole bug — a tester, 2026-08-06 UAT, raised 4×.
-  const showIndex = hasArtifacts || Boolean(activeTabId);
+  // The index of results moved to the All results menu in the tab strip; this
+  // tab is now only a skill's launchers and examples ("Start"), and exists
+  // only for skills that have them.
   const homeContent =
-    showLauncher || showPicker || showIndex ? (
+    showLauncher || directLaunchers.length > 0 || showPicker ? (
       <div className="flex h-full min-h-0 flex-col gap-1 overflow-auto">
+        {directLaunchers.length > 0 && <DirectLaunchers skillId={skillId} sessionId={sessionId} launchers={directLaunchers} />}
         {showLauncher && (
           <CompareLauncher
             sessionId={sessionId}
@@ -872,7 +942,7 @@ function WorkbenchPane({
           <SkillExamplesPicker
             examples={welcomeExamples}
             onPickExample={onPickExample}
-            prompts={welcomePrompts}
+            prompts={pickerPrompts}
             onPickPrompt={onPickPrompt}
             recent={recentEnabled ? recentDocs.documents : undefined}
             recentStatus={recentDocs.status}
@@ -901,14 +971,6 @@ function WorkbenchPane({
             }
           />
         )}
-        {showIndex && (
-          <WorkbenchHome
-            artifacts={workspaceResultTab ? [...workbenchArtifacts, WORKSPACE_RESULT_INDEX_ENTRY] : workbenchArtifacts}
-            onOpen={onWorkbenchTabChange}
-            openDocId={activeTabId}
-            onOpenDocument={() => onWorkbenchTabChange("document")}
-          />
-        )}
       </div>
     ) : null;
   const workspaceEmptyBody =
@@ -918,20 +980,24 @@ function WorkbenchPane({
   // target, never replaced by a result. Tab stays labelled "Workspace" (v6.11.0
   // OQ4) so ONE doesn't have to re-learn a name they already know; the eyebrow
   // carries the distinction from the Result tabs beside it.
-  const homeTab: WorkbenchTab = {
-    id: HOME_TAB_ID,
-    eyebrow: "Home",
-    label: "Workspace",
-    badged: workspaceBadged,
-    content: homeContent,
-    emptyBody: workspaceEmptyBody,
-  };
+  const homeTab: WorkbenchTab | null = homeContent
+    ? {
+        id: HOME_TAB_ID,
+        label: "Start",
+        tooltip: "This skill's examples and tools",
+        badged: workspaceBadged,
+        content: homeContent,
+        emptyBody: workspaceEmptyBody,
+      }
+    : null;
 
+  // The tabs are the results: open results, the open document, and Activity.
+  // Everything from the chat (closed results too) is under All results.
   const tabs: WorkbenchTab[] = [
-    homeTab,
+    ...(homeTab ? [homeTab] : []),
     ...artifactTabs,
     ...(workspaceResultTab ? [workspaceResultTab] : []),
-    {
+    ...(activeTabId ? [{
       id: "document",
       label: "Document",
       content: activeTabId ? (
@@ -951,7 +1017,7 @@ function WorkbenchPane({
       ) : null,
       emptyBody:
         "Click a document in the sidebar to read it here alongside the conversation.",
-    },
+    }] : []),
     {
       id: "activity",
       eyebrow: "Live",
@@ -966,33 +1032,65 @@ function WorkbenchPane({
           context={activityContext}
           documents={activityDocuments}
           sessionStartTs={sessionStartTs}
-          isRunning={actionRunning}
-          runStageLabel={actionStageLabel}
-          runError={actionError}
+          isRunning={platformRunStatus === "pending" || platformRunStatus === "running"}
+          runStageLabel={platformRunStatus === "pending" ? "Pending — waiting for the platform" : platformStageLabel || "Started — platform skill is working"}
+          runError={platformRunError}
           compactions={compactions}
+          modelEvents={modelEvents}
+          modelWait={modelWait}
+          turnStartedAt={turnStartedAt}
         />
       ),
     },
   ];
+  // A tab that isn't there (no Start tab for this skill, a closed document)
+  // falls back to the first one rather than an empty pane.
+  const shownTabId = tabs.some((t) => t.id === workbenchTabId) ? workbenchTabId : (tabs[0]?.id ?? "activity");
+  const resultEntries = workspaceResultTab ? [...workbenchArtifacts, WORKSPACE_RESULT_INDEX_ENTRY] : workbenchArtifacts;
   return (
     <Workbench
       tabs={tabs}
-      activeTabId={workbenchTabId}
+      activeTabId={shownTabId}
       onActiveTabChange={onWorkbenchTabChange}
+      actions={
+        resultEntries.length > 0 || activeTabId ? (
+          <AllResultsMenu
+            results={resultEntries}
+            documentName={activeTabId ? (docTabs.find((t) => t.id === activeTabId)?.filename ?? "Document") : null}
+            onOpen={onWorkbenchTabChange}
+          />
+        ) : null
+      }
       className={workbenchClassName}
+      status={<PlatformWorkStatus status={platformRunStatus} stageLabel={platformStageLabel} error={platformRunError} />}
     />
   );
 }
 
-export function ChatShell({
-  skillId,
-  pathPrefix,
-  user,
-}: {
+type ChatShellProps = {
   skillId: string;
   pathPrefix: string;
   user: User;
-}) {
+};
+
+/**
+ * The provider wraps the WHOLE shell, so `useSkillAgent` (called in
+ * ChatShellInner's body) can reach the registry. It used to sit inside the
+ * shell's JSX — below the hook — so `useOptionalSurfaceRegistry()` returned
+ * null and every chat turn went out WITHOUT the per-turn surface snapshot
+ * (`forwardedProps.a2ui_surface_state`): the AI never saw what the user had
+ * ticked or filtered on the workbench (two-way workbench, gap 6). Same shape
+ * as WorkbenchShell / DocCompareShell.
+ */
+export function ChatShell(props: ChatShellProps) {
+  return (
+    <SurfaceRegistryProvider>
+      <ChatShellInner {...props} />
+    </SurfaceRegistryProvider>
+  );
+}
+
+function ChatShellInner({ skillId, pathPrefix, user }: ChatShellProps) {
   const {
     sessionId: agentSessionId,
     messages,
@@ -1000,8 +1098,11 @@ export function ChatShell({
     thinkingContent,
     isThinking,
     stageLabel,
+    runStatus = "idle",
     delegations,
     compactions,
+    modelEvents,
+    modelWait,
     tidyingUp,
     resolvedModel,
     completedReplyId,
@@ -1019,9 +1120,26 @@ export function ChatShell({
   useEffect(() => {
     projectScopeRef.current = projectScopeId;
   }, [projectScopeId]);
+  // The composer's Model pick for this chat (lib/modelChoice), carried on every
+  // turn by the same wrapper. Undefined while a reopened chat's saved pick
+  // loads, so a turn sent then can't overwrite it with Auto.
+  const modelChoiceRef = useRef<string | undefined>(undefined);
+  // What the chat's row holds, as far as this page knows. "auto" only goes on
+  // the wire to clear a saved pick; otherwise Auto sends nothing.
+  const rowChoiceRef = useRef<string>(MODEL_AUTO);
+  const sentInChatRef = useRef(false);
   const sendMessage = useCallback(
-    (text: string, opts?: { documentIds?: string[]; resumedSession?: boolean; projectId?: string | null }) =>
-      sendMessageRaw(text, { ...opts, projectId: opts?.projectId ?? projectScopeRef.current }),
+    (text: string, opts?: { documentIds?: string[]; resumedSession?: boolean; projectId?: string | null }) => {
+      sentInChatRef.current = true;
+      const pick = modelChoiceRef.current;
+      const modelChoice = pick === undefined || (pick === MODEL_AUTO && rowChoiceRef.current === MODEL_AUTO) ? undefined : pick;
+      if (pick !== undefined) rowChoiceRef.current = pick;
+      return sendMessageRaw(text, {
+        ...opts,
+        projectId: opts?.projectId ?? projectScopeRef.current,
+        modelChoice,
+      });
+    },
     [sendMessageRaw],
   );
   const {
@@ -1029,12 +1147,14 @@ export function ChatShell({
     avatar: skillAvatar,
     mcpServerIds,
     welcome: skillWelcome,
-    initialMessage: skillInitialMessage,
+    greeting: skillIntroMessage,
     model: skillModel,
     voice: skillVoice,
     a2ui: skillA2ui,
     tools: skillTools,
     canDelegate: skillCanDelegate,
+    thinking: skillThinking,
+    modelChoice: skillModelChoice,
     loading: skillMetaLoading,
     slug: skillSlug,
   } = useSkillMeta(skillId);
@@ -1073,12 +1193,10 @@ export function ChatShell({
   // with backoff until 200).
   const { ready: backendReady } = useBackendReady();
   const chatReady = !skillMetaLoading && backendReady;
-  // v6.4.0 4.5 SKILL-ONBOARDING M3: source the intro from welcome.introMessage
-  // first, fallback to legacy initialMessage. Empty/null → no intro bubble.
-  const skillIntroMessage =
-    (skillWelcome?.introMessage && skillWelcome.introMessage.trim()) ||
-    (skillInitialMessage && skillInitialMessage.trim()) ||
-    null;
+  // v6.4.0 4.5 SKILL-ONBOARDING M3: the intro is `greeting` from useSkillMeta —
+  // welcome.introMessage first, fallback to legacy initialMessage, in the
+  // person's language when the skill translates it (MULTI-LANG M3).
+  // Empty/null → no intro bubble.
   const searchParams = useSearchParams();
   const router = useRouter();
   // "Your instructions" (projects §6.5): the banner says when they're on.
@@ -1094,14 +1212,20 @@ export function ChatShell({
   // height is set, so without the reset the box could never shrink back after
   // a send. `max-h-48` on the element caps the growth; overflow scrolls past it.
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
+  // The composer's + menu opens the upload picker through this; files dropped
+  // anywhere on the chat column upload too.
+  const uploadOpenRef = useRef<(() => void) | null>(null);
+  const chatColumnRef = useRef<HTMLDivElement | null>(null);
+  const composerRecentDocs = useRecentDocuments(5);
+  const landingPrompts = (skillWelcome?.examplePrompts ?? []).slice(0, 4);
   useEffect(() => {
     const el = draftRef.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [draft]);
-  // 2026-06-11 polish: sidebar default-collapsed so a first visit gives chat
-  // the full row. The user's choice is a workspace-wide preference (not
+  // Sidebar: open by default on desktop (≥1024px), closed on smaller screens.
+  // The user's choice is a workspace-wide preference (not
   // per-skill), remembered in localStorage — it used to live in
   // sessionStorage, so a user who opened the sidebar to find their past
   // conversations had to find the toggle again on every visit (customer
@@ -1110,7 +1234,11 @@ export function ChatShell({
   const [showDocBrowser, setShowDocBrowser] = useState(false);
   useEffect(() => {
     try {
-      if (window.localStorage.getItem(SIDEBAR_OPEN_KEY) === "1") setShowDocBrowser(true);
+      // No stored choice yet: open on wide screens, where past conversations
+      // should be one glance away; phones keep it as a sheet behind the menu.
+      const stored = window.localStorage.getItem(SIDEBAR_OPEN_KEY);
+      const wide = window.matchMedia?.("(min-width: 1024px)").matches ?? false;
+      if (stored === "1" || (stored === null && wide)) setShowDocBrowser(true);
     } catch {
       /* storage unavailable — keep the default */
     }
@@ -1166,6 +1294,8 @@ export function ChatShell({
   // workbench at 30% of the row.
   const { ratio: workspaceRatio, setRatio: setWorkspaceRatio } =
     useResizableWorkspaceRatio(skillId);
+  // Left sidebar width (desktop), dragged by SidebarResizeHandle.
+  const { width: sidebarWidth, setWidth: setSidebarWidth } = useSidebarWidth();
 
   // 2026-06-11 auto-fold: WorkbenchPane reports whether it has content
   // (workspace surface ⊕ open doc tab ⊕ fresh-chat examples). When
@@ -1214,6 +1344,25 @@ export function ChatShell({
     setWorkbenchTabId(id);
     setMobilePane("workbench");
   }, []);
+  // The workbench pane also focuses tabs on its own: when a run adds a result,
+  // and when a resumed chat's saved results load back in. Only the first is
+  // news worth leaving the chat for on a phone — re-opening an old chat should
+  // land on the conversation, not on whatever result it last produced.
+  const runningRef = useRef(isLoading);
+  runningRef.current = isLoading;
+  // Phones never switch on their own: a result shows as a card in the reply,
+  // and tapping it opens the result (subscribeWorkbenchReveal below).
+  const focusWorkbenchTabFromPane = useCallback((id: string) => {
+    setWorkbenchTabId(id);
+  }, []);
+  useEffect(
+    () =>
+      subscribeWorkbenchReveal(() => {
+        setWorkbenchCollapsed(false);
+        setMobilePane("workbench");
+      }),
+    [],
+  );
   // A help link clicked in chat: show the Help tab even if the workbench is folded.
   const openHelpTab = useCallback(
     (id: string) => {
@@ -1235,9 +1384,58 @@ export function ChatShell({
   // (sessionId ?? agentSessionId). The confirm→switch below keys off it.
   const effectiveSessionId = sessionId ?? agentSessionId;
 
-  const { initialMessages, a2uiSurfaces, historyError, sessionGone, transcriptUnavailable } =
+  const { initialMessages, a2uiSurfaces, isLoadingHistory, historyError, sessionGone, transcriptUnavailable, retryHistory } =
     useSessionMessages(sessionId);
-  const { tabs: sessionDocTabs, projectId: sessionProjectId } = useSessionDocuments(sessionId);
+  const {
+    tabs: sessionDocTabs,
+    projectId: sessionProjectId,
+    modelChoice: sessionModelChoice,
+  } = useSessionDocuments(sessionId);
+
+  // Model pick (docs/design/v6.42.0/model-choice.md): a new chat starts on Auto; a
+  // reopened chat takes the pick saved on its row; a fresh chat that just got
+  // its own id keeps the pick it was sent with.
+  const [modelChoice, setModelChoice] = useState<string | undefined>(() => (sessionId ? undefined : MODEL_AUTO));
+  useEffect(() => {
+    modelChoiceRef.current = modelChoice;
+  }, [modelChoice]);
+  const prevModelSidRef = useRef(sessionId);
+  useEffect(() => {
+    const prev = prevModelSidRef.current;
+    prevModelSidRef.current = sessionId;
+    if (prev === sessionId) return;
+    if (prev === null && sessionId && sentInChatRef.current) return;
+    sentInChatRef.current = false;
+    rowChoiceRef.current = MODEL_AUTO;
+    setModelChoice(sessionId ? undefined : MODEL_AUTO);
+  }, [sessionId]);
+  useEffect(() => {
+    if (modelChoice === undefined && sessionModelChoice !== undefined) {
+      rowChoiceRef.current = sessionModelChoice;
+      setModelChoice(sessionModelChoice);
+    }
+  }, [modelChoice, sessionModelChoice]);
+  const modelMenu = useModelMenu();
+  const specificModelsOptIn = useSpecificModelsOptIn();
+  const modelOptions = useMemo(
+    () =>
+      buildModelOptions(
+        modelMenu,
+        skillModel
+          ? {
+              name: displayName,
+              model: skillModel,
+              thinking: skillThinking ?? "dynamic",
+              modelChoice: skillModelChoice !== false,
+              canDelegate: Boolean(skillCanDelegate),
+            }
+          : null,
+        specificModelsOptIn,
+      ),
+    [modelMenu, skillModel, displayName, skillThinking, skillModelChoice, skillCanDelegate, specificModelsOptIn],
+  );
+  // No chip where the pick can't apply (a skill that keeps its model).
+  const modelChipLabel = modelOptions.show && !modelOptions.locked ? choiceLabel(modelMenu, modelChoice) : null;
   // Session documents → "document added" entries in the Activity feed.
   const activityDocuments: ActivityDoc[] = (sessionDocTabs ?? []).map((t) => ({
     id: t.id,
@@ -1253,6 +1451,7 @@ export function ChatShell({
   const [actionToolCalls, setActionToolCalls] = useState<ToolCallState[]>([]);
   const [actionDelegations, setActionDelegations] = useState<DelegationMarkerItem[]>([]);
   const [actionRunning, setActionRunning] = useState(false);
+  const [actionRunStatus, setActionRunStatus] = useState<PlatformRunStatus>("idle");
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionStageLabel, setActionStageLabel] = useState<string | null>(null);
   const [activityNonce, setActivityNonce] = useState(0);
@@ -1277,8 +1476,16 @@ export function ChatShell({
         setActionRunning(true);
         setActionError(null);
       },
-      onRunSettled: ({ error }) => {
+      onRunRequested: () => {
+        setActionRunning(true);
+        setActionRunStatus("pending");
+        setActionError(null);
+        setActionStageLabel(null);
+      },
+      onRunAcknowledged: () => setActionRunStatus("running"),
+      onRunSettled: ({ error, status }) => {
         setActionRunning(false);
+        setActionRunStatus(status === "unknown" ? "unknown" : error ? "failed" : "completed");
         setActionStageLabel(null);
         if (error) setActionError(error);
         // Re-sync persisted /activity — the run's tool calls are now in the
@@ -1299,10 +1506,18 @@ export function ChatShell({
     setActionToolCalls([]);
     setActionDelegations([]);
     setActionRunning(false);
+    setActionRunStatus("idle");
     setActionError(null);
     setActionStageLabel(null);
     setRuntimeModel(null);
   }, [activitySessionKey]);
+
+  useEffect(() => {
+    if (runStatus === "pending") {
+      setActionRunStatus("idle");
+      setActionError(null);
+    }
+  }, [runStatus]);
 
   // Tool-call history from the backend (persists across reload), merged with the
   // live stream by id (live wins) so the Activity feed survives a refresh.
@@ -1317,6 +1532,11 @@ export function ChatShell({
   const liveToolCallIds = new Set(toolCalls.map((t) => t.id));
   const actionToolCallsOnly = actionToolCalls.filter((a) => !liveToolCallIds.has(a.id));
   const actionToolCallIds = new Set(actionToolCallsOnly.map((a) => a.id));
+  // Activity: tools that started after this are the streaming turn's own.
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
+  useEffect(() => {
+    setTurnStartedAt(isLoading ? Date.now() : null);
+  }, [isLoading]);
   const mergedToolCalls = [
     ...toolCalls,
     ...actionToolCallsOnly,
@@ -1345,6 +1565,25 @@ export function ChatShell({
   // whichever agent the user happened to be standing on — a sitting spread
   // across two agents read as "it didn't record my session" (2026-08-05).
   const [sessionSkillFilter, setSessionSkillFilter] = useState<string | null>(null);
+  // The sidebar's one search, over chats and files.
+  const [sidebarQuery, setSidebarQuery] = useState("");
+  const { skills: userSkills } = useUserSkills(user.uid);
+  const locale = useLocale();
+  const skillIconFor = useCallback(
+    (id: string) => {
+      const avatar = userSkills.find((k) => k.skillId === id)?.avatar?.trim();
+      return avatar && /^(https?:|data:|\/)/.test(avatar) ? avatar : null;
+    },
+    [userSkills],
+  );
+  const skillFilterOptions = useMemo(
+    () =>
+      userSkills
+        .filter((k) => !(k.tags ?? []).includes("system"))
+        .map((k) => ({ id: k.skillId, label: skillText(k, locale).displayName || k.name || "Skill" }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [userSkills, locale],
+  );
   const {
     sessions,
     isLoading: sessionsLoading,
@@ -1438,11 +1677,13 @@ export function ChatShell({
     setActiveTabId(sessionDocTabs[0]?.id ?? null);
   }, [sessionId, sessionDocTabs]);
 
+  // `push` when the user picks a chat, so Back returns to the one they were
+  // in; `replace` when the app records a new chat's id after its first send.
   const navigateToSession = useCallback(
-    (sid: string) => {
+    (sid: string, mode: "push" | "replace" = "replace") => {
       const params = new URLSearchParams(searchParams.toString());
       params.set("session", sid);
-      router.replace(`${pathPrefix}?${params.toString()}`);
+      router[mode](`${pathPrefix}?${params.toString()}`);
     },
     [router, pathPrefix, searchParams],
   );
@@ -1632,7 +1873,7 @@ export function ChatShell({
   const handleSelectSession = useCallback(
     (sid: string) => {
       setEnteredViaResume(true);
-      navigateToSession(sid);
+      navigateToSession(sid, "push");
     },
     [navigateToSession],
   );
@@ -1662,7 +1903,7 @@ export function ChatShell({
     if (keep) params.set("project", keep);
     else setProjectScopeId(null);
     const qs = params.toString();
-    router.replace(qs ? `${pathPrefix}?${qs}` : pathPrefix);
+    router.push(qs ? `${pathPrefix}?${qs}` : pathPrefix);
   }, [router, pathPrefix, searchParams]);
 
   // Leave the project: a plain, unscoped new chat.
@@ -1703,17 +1944,29 @@ export function ChatShell({
     }
   }, [sessionGone, sessionId, handleNewSession]);
 
+  const confirmDelete = useConfirm();
+  const handleRenameSession = useCallback(async (sid: string, title: string) => {
+    const res = await fetchWithAuth(`/api/proxy/api/sessions/${encodeURIComponent(sid)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    notifySessionsChanged();
+  }, []);
+
   const handleDeleteSkillSession = useCallback(
     async (sid: string) => {
       // Mirrors DocumentHistoryPanel.handleDelete: confirm + DELETE +
       // dispatch sessions-changed (which both useSkillSessions and any
       // mounted useDocumentSessions listen for, so both panels reconcile)
       // + clear URL if the deleted session is active.
-      if (
-        !window.confirm(
-          "Delete this conversation? This can't be undone from the UI.",
-        )
-      ) {
+      const ok = await confirmDelete({
+        title: "Delete this conversation?",
+        confirmLabel: "Delete",
+        destructive: true,
+      });
+      if (!ok) {
         return;
       }
       try {
@@ -1721,17 +1974,24 @@ export function ChatShell({
           `/api/proxy/api/sessions/${encodeURIComponent(sid)}`,
           { method: "DELETE" },
         );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { detail?: unknown } | null;
+          const detail = typeof body?.detail === "string" ? body.detail : "";
+          throw new Error(detail || `the server answered ${res.status}`);
+        }
         notifySessionsChanged({ deletedSessionId: sid });
         if (sid === sessionId) {
           handleNewSession();
         }
-      } catch {
-        // Backend rejected. Reconcile via the same bus.
+        notify.success("Conversation deleted");
+      } catch (err) {
+        // NEVER SILENT (#8): say it failed, under the list, then reconcile.
+        const why = err instanceof Error && err.message ? `: ${err.message}` : "";
+        setSessionProjectFeedback({ kind: "error", text: `Couldn't delete the conversation${why}. Try again.` });
         notifySessionsChanged();
       }
     },
-    [sessionId, handleNewSession],
+    [confirmDelete, sessionId, handleNewSession],
   );
 
   const handleDocClick = useCallback((doc: ParsedDocument) => {
@@ -2045,14 +2305,11 @@ export function ChatShell({
           backend cold-start in flight. Disables the input at the same time. */}
       {!chatReady && (
         <div
-          className="mb-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+          className="mb-2 flex items-center gap-2 rounded-md border bg-muted px-3 py-2 text-xs text-muted-foreground"
           role="status"
           aria-live="polite"
         >
-          <svg className="h-3 w-3 animate-spin shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
-            <path d="M12 2 a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" fill="none" />
-          </svg>
+          <Spinner size="xs" />
           <span>
             {skillMetaLoading
               ? "Loading skill…"
@@ -2102,6 +2359,7 @@ export function ChatShell({
             handler a textarea would swallow Enter and never submit. */}
         <textarea
           ref={draftRef}
+          aria-label="Message"
           value={draft}
           onChange={(e) => {
             cancelVoicePlayback();
@@ -2128,7 +2386,42 @@ export function ChatShell({
         />
         <div className="flex items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1">
-            <UploadDropZone variant="button" skillId={skillId} onUploadComplete={handleUploadedDocOpen} />
+            <div className="relative">
+              <UploadDropZone
+                variant="composer"
+                skillId={skillId}
+                onUploadComplete={handleUploadedDocOpen}
+                openRef={uploadOpenRef}
+                dropTarget={chatColumnRef}
+              />
+              <ComposerAddMenu
+                onUpload={() => uploadOpenRef.current?.()}
+                recentDocuments={composerRecentDocs.documents}
+                onOpenDocument={handleOpenRecentDocument}
+                onBrowseFiles={openDocBrowser}
+                onUseProject={projectContext ? undefined : (id) => router.push(projectChatHref(pathPrefix, id))}
+                readAloud={process.env.NEXT_PUBLIC_ENABLE_READ_ALOUD === "true" && composerVoice.tts.enabled}
+                model={{
+                  options: modelOptions,
+                  value: modelChoice ?? MODEL_AUTO,
+                  valueLabel: modelChipLabel ?? "Auto",
+                  onChange: setModelChoice,
+                }}
+              />
+            </div>
+            <ModelChip label={modelChipLabel} onClear={() => setModelChoice(MODEL_AUTO)} />
+            {/* Said where every chat starts; the conversation's banner says it after. */}
+            {isFreshChat && instructionsOn ? (
+              <Link
+                href="/settings#instructions"
+                className="ml-1 inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <NotebookPen className="h-3.5 w-3.5" aria-hidden />
+                Your instructions on
+              </Link>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-1">
             <VoiceComposerControls key={`${skillId}:${sessionId ?? "new"}`}
               skillId={skillId} lang={composerVoice.tts.language ?? "auto"}
               voiceInputEnabled={composerVoice.stt.enabled}
@@ -2136,8 +2429,6 @@ export function ChatShell({
               disabled={!chatReady || isLoading || error !== null}
               onTranscript={(text) => setDraft((current) => current.trim() ? `${current} ${text}` : text)}
               onBusyChange={setVoiceBusy} onNotice={setVoiceNotice} />
-            {process.env.NEXT_PUBLIC_ENABLE_READ_ALOUD === "true" && composerVoice.tts.enabled && <AutoReadToggle />}
-          </div>
           {isLoading ? (
             <button
               type="button"
@@ -2164,6 +2455,7 @@ export function ChatShell({
               </svg>
             </button>
           )}
+          </div>
         </div>
       </form>
       {voiceNotice && <p role="status" aria-live="polite" className="mt-1 px-2 text-xs text-muted-foreground">{voiceNotice}</p>}
@@ -2194,7 +2486,7 @@ export function ChatShell({
   }, [isLoading, stop]);
 
   return (
-    <SurfaceRegistryProvider>
+    <>
     <WorkspaceAgentTools sessionId={effectiveSessionId} skillId={skillId} running={isLoading || actionRunning} onFocus={(id) => setWorkbenchTabId(id === "workspace" ? WORKSPACE_RESULT_TAB_ID : id)} />
     <SurfaceSessionLifecycle sessionId={sessionId} />
     <WorkspaceA2uiEventRouter />
@@ -2227,33 +2519,6 @@ export function ChatShell({
         onToggleBrowser={toggleDocBrowser}
       />
 
-      {/* MOBILE: the Chat | Workbench switch that replaces the side-by-side
-          split below `md`. Only when the workbench has something to show —
-          otherwise chat is the whole screen and a tab bar is noise. */}
-      {workbenchHasContent && (
-        <div className="flex shrink-0 justify-center pb-2 md:hidden">
-          <div className="inline-flex rounded-full bg-muted p-1" role="tablist" aria-label="Chat or workbench">
-            {(["chat", "workbench"] as const).map((pane) => (
-              <button
-                key={pane}
-                type="button"
-                role="tab"
-                aria-selected={mobilePane === pane}
-                onClick={() => setMobilePane(pane)}
-                className={
-                  "min-h-[36px] rounded-full px-5 text-sm font-medium capitalize transition-colors " +
-                  (mobilePane === pane
-                    ? "bg-background text-foreground ring-1 ring-border"
-                    : "text-muted-foreground")
-                }
-              >
-                {pane}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       <div className="relative flex min-h-0 flex-1" data-workspace-row>
         {showDocBrowser && (
           // MOBILE: a 256px column would leave ~130px for everything else on a
@@ -2268,10 +2533,12 @@ export function ChatShell({
           />
         )}
         {showDocBrowser && (
-          <aside className="flex w-64 shrink-0 flex-col overflow-y-auto border-r bg-muted/30 max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-30 max-md:w-[85vw] max-md:max-w-sm max-md:bg-background">
+          <aside
+            style={{ "--sidebar-w": `${sidebarWidth}px` } as React.CSSProperties}
+            className="flex w-64 shrink-0 flex-col overflow-y-auto border-r bg-muted/30 md:w-[var(--sidebar-w)] max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-30 max-md:w-[85vw] max-md:max-w-sm max-md:bg-background">
             {/* Phone sheet header: a visible way out besides the backdrop. */}
             <div className="flex min-h-[52px] shrink-0 items-center justify-between border-b px-4 md:hidden">
-              <span className="text-base font-semibold text-foreground">Files and conversations</span>
+              <span className="text-base font-semibold text-foreground">Chats and files</span>
               <button
                 type="button"
                 onClick={toggleDocBrowser}
@@ -2282,6 +2549,15 @@ export function ChatShell({
                   <path d="M4 4l8 8M12 4l-8 8" />
                 </svg>
               </button>
+            </div>
+            <div className="px-3 pt-3">
+              <SidebarSearch
+                value={sidebarQuery}
+                onChange={setSidebarQuery}
+                skillOptions={skillFilterOptions}
+                skillFilter={sessionSkillFilter}
+                onSkillFilterChange={setSessionSkillFilter}
+              />
             </div>
             {/* v6.6.0: order the sidebar skill-first. The skill's own
                 affordances (its curated Library + anything the agent streams
@@ -2331,13 +2607,15 @@ export function ChatShell({
             {/* Projects (projects design §4): a named tag on documents, with a
                 home for its chats. Above history — it is the way to group it.
                 Always shown, so a first-time user finds "+ New project". */}
-            <SidebarSection title="Projects" persistId="projects" defaultOpen={true}>
-              <div className="max-h-[30vh] overflow-y-auto">
+            {/* Projects: the first three, then "All projects". Hidden while
+                searching — the search is over chats and files. */}
+            {sidebarQuery.trim() ? null : (
+              <SidebarSection title="Projects" persistId="projects" defaultOpen={true}>
                 <ProjectsSection chatHrefFor={chatHrefFor} activeProjectId={projectContext?.id ?? null} />
-              </div>
-            </SidebarSection>
+              </SidebarSection>
+            )}
 
-            <SidebarSection title="Past conversations" persistId="conversations" defaultOpen={true}>
+            <SidebarSection title="Chats" persistId="conversations" defaultOpen={true}>
               {projectScopeId ? (
                 <ProjectChatsList
                   projectName={projectContext?.name ?? null}
@@ -2349,37 +2627,46 @@ export function ChatShell({
                   rowActions={(s) => <SessionProjectMenu session={s} onFeedback={setSessionProjectFeedback} />}
                 />
               ) : (
-              <div className="max-h-[40vh] overflow-y-auto">
                 <SkillSessionPanel
                   sessions={sessions}
                   activeSessionId={sessionId}
                   isLoading={sessionsLoading}
                   onSelectSession={handleSelectSession}
-                  onDelete={(sid) => void handleDeleteSkillSession(sid)}
                   skillFilter={sessionSkillFilter}
-                  onFilterChange={setSessionSkillFilter}
                   groupByDate
+                  compact
+                  initialCount={8}
+                  query={sidebarQuery}
+                  skillIconFor={skillIconFor}
+                  hrefFor={(s) => `${pathPrefix}?session=${encodeURIComponent(s.session_id)}`}
+                  onRename={handleRenameSession}
                   error={sessionsError}
                   onRetry={refetchSessions}
                   hasMore={sessionsHasMore}
                   isLoadingMore={sessionsLoadingMore}
                   loadMoreFailed={sessionsLoadMoreFailed}
                   onLoadMore={loadMoreSessions}
-                  rowActions={(s) => <SessionProjectMenu session={s} onFeedback={setSessionProjectFeedback} />}
+                  rowActions={(s, { startRename }) => (
+                    <SessionProjectMenu
+                      session={s}
+                      onFeedback={setSessionProjectFeedback}
+                      onRename={startRename}
+                      onDelete={() => void handleDeleteSkillSession(s.session_id)}
+                    />
+                  )}
                 />
-              </div>
               )}
               <SessionProjectNotice feedback={sessionProjectFeedback} onDismiss={dismissSessionProjectFeedback} />
             </SidebarSection>
 
-            {/* Generic workspace utility — the user's own uploaded files. */}
-            <SidebarSection title="Your files" persistId="files" defaultOpen={true} bodyClassName="">
-              <div className="max-h-[30vh] overflow-y-auto">
-                <DocListView uid={user.uid} skillId={skillId} onDocClick={handleDocClick} />
-              </div>
-              <div className="border-t">
-                <UploadDropZone skillId={skillId} />
-              </div>
+            <SidebarSection title="Files" persistId="files" defaultOpen={true}>
+              <SidebarFiles
+                uid={user.uid}
+                skillId={skillId}
+                query={sidebarQuery}
+                onOpenRecent={handleOpenRecentDocument}
+                onDocClick={handleDocClick}
+              />
             </SidebarSection>
 
             {/* Conversations owned by someone else (e.g. an agent's threads)
@@ -2388,6 +2675,7 @@ export function ChatShell({
             <SharedSessionsSection
               activeSessionId={sessionId}
               onSelectSession={handleSelectSharedSession}
+              query={sidebarQuery}
             />
 
             {/* Phones: who you are and the account actions live here, so the
@@ -2397,6 +2685,7 @@ export function ChatShell({
             </div>
           </aside>
         )}
+        {showDocBrowser && <SidebarResizeHandle width={sidebarWidth} onChange={setSidebarWidth} />}
 
         {/* v6.4.0 ITERATION 2026-06-09: Chat is the middle column,
             Workbench is the right pane. Replaces the prior conditional
@@ -2409,6 +2698,7 @@ export function ChatShell({
             the WorkbenchResizeHandle below can drag chat ↔ workbench
             live, with per-skill sessionStorage persistence. */}
         <div
+          ref={chatColumnRef}
           className={
             (workbenchVisible ? "relative flex min-w-0 flex-col" : "relative flex min-w-0 flex-1 flex-col") +
             // MOBILE: full width when showing, gone when the workbench is.
@@ -2474,6 +2764,8 @@ export function ChatShell({
             // distinguishes the two cases.
             initialMessages={enteredViaResume ? initialMessages : undefined}
             historyError={historyError}
+            onRetryHistory={retryHistory}
+            isLoadingHistory={enteredViaResume && isLoadingHistory}
             transcriptUnavailable={enteredViaResume && transcriptUnavailable}
             toolCalls={toolCalls}
             thinkingContent={thinkingContent}
@@ -2534,39 +2826,29 @@ export function ChatShell({
             )}
             <div className={"mx-auto w-full " + (isFreshChat ? "max-w-2xl" : "max-w-3xl")}>{composer}</div>
           </footer>
-          {/* Desktop quick-start: drop a document straight onto the landing.
-              Phones attach with the composer's + (no drag-and-drop on a
-              phone). The upload mounts the doc as included context
-              (handleUploadedDocOpen) and the InContextBadge confirms it. */}
+          {/* Under the landing composer: the skill's own example prompts (at
+              most four), nothing else. Earlier chats are in the sidebar, your
+              instructions in Settings, and a file dropped anywhere on the chat
+              uploads (UploadDropZone variant="composer"). */}
           {isFreshChat ? (
-            <div key="dropzone" className="relative z-10 mx-auto mb-auto mt-8 hidden w-full max-w-2xl space-y-6 px-8 md:block">
-              {/* The way back to earlier work, where the user is when they want
-                  it. Absent until there is history; the sidebar holds the rest. */}
-              {projectContext ? (
-                <RecentConversations
-                  title={`Recent chats in ${projectContext.name}`}
-                  sessions={projectSessions.sessions}
-                  onSelectSession={handleSelectProjectSession}
-                  onShowAll={openDocBrowser}
-                />
-              ) : (
-                !sessionSkillFilter && (
-                  <RecentConversations
-                    sessions={sessions}
-                    onSelectSession={handleSelectSession}
-                    onShowAll={openDocBrowser}
-                  />
-                )
-              )}
-              {/* The default project's instructions (projects §6.5): where every
-                  chat starts, so it's noticed. Also in Settings. */}
-              <YourInstructionsCard />
-              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                <div className="h-px flex-1 bg-border" />
-                <span>Or start from a document</span>
-                <div className="h-px flex-1 bg-border" />
-              </div>
-              <UploadDropZone skillId={skillId} onUploadComplete={handleUploadedDocOpen} className="" />
+            <div key="starters" className="relative z-10 mx-auto mb-auto w-full max-w-2xl px-5 pt-2 md:px-8">
+              {landingPrompts.length > 0 ? (
+                <ul className="flex flex-wrap justify-center gap-2" aria-label="Example prompts">
+                  {landingPrompts.map((p) => (
+                    <li key={p.label}>
+                      <button
+                        type="button"
+                        onClick={() => handleSurfaceChatMessage(p.prompt)}
+                        title={p.summary ?? p.prompt}
+                        disabled={!chatReady}
+                        className="rounded-full border border-border bg-background px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                      >
+                        {p.label}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -2608,7 +2890,7 @@ export function ChatShell({
             >
               <polyline points="8 2 4 6 8 10" />
             </svg>
-            <span className="mt-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground [writing-mode:vertical-rl] [transform:rotate(180deg)]">
+            <span className="mt-2 font-mono text-[11px] uppercase tracking-wider text-muted-foreground [writing-mode:vertical-rl] [transform:rotate(180deg)]">
               Workbench
             </span>
           </button>
@@ -2645,6 +2927,17 @@ export function ChatShell({
               : { flexBasis: 0, flexGrow: 0, flexShrink: 0 }
           }
         >
+        {/* Phones: the workbench is full screen; this is the way back. */}
+        <div className="flex min-h-[48px] shrink-0 items-center border-b border-border px-2 md:hidden">
+          <button
+            type="button"
+            onClick={() => setMobilePane("chat")}
+            className="flex min-h-[44px] items-center gap-1.5 rounded-[var(--radius)] px-2 text-sm font-medium text-foreground hover:bg-muted"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden />
+            Back to chat
+          </button>
+        </div>
         {/* 2026-06-11 explicit collapse: small chevron in the top-right
             corner of the workbench. Sits absolute so it overlays the
             Workbench's own tab strip without disturbing the layout. */}
@@ -2684,10 +2977,13 @@ export function ChatShell({
           userUid={user.uid}
           onSurfaceChatMessage={handleSurfaceChatMessage}
           workbenchTabId={workbenchTabId}
-          onWorkbenchTabChange={focusWorkbenchTab}
+          onWorkbenchTabChange={focusWorkbenchTabFromPane}
           toolCalls={mergedToolCalls}
           delegations={mergedDelegations}
           compactions={compactions}
+          modelEvents={modelEvents}
+          modelWait={modelWait}
+          turnStartedAt={turnStartedAt}
           isThinking={isThinking}
           activityContext={activityContext}
           activityDocuments={activityDocuments}
@@ -2696,6 +2992,9 @@ export function ChatShell({
           actionRunning={actionRunning}
           actionStageLabel={actionStageLabel}
           actionError={actionError}
+          platformRunStatus={actionRunStatus !== "idle" ? actionRunStatus : runStatus}
+          platformStageLabel={actionRunning ? actionStageLabel : stageLabel}
+          platformRunError={actionError ?? error?.message}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           welcomeExamples={skillWelcome?.exampleDocuments ?? []}
@@ -2703,6 +3002,7 @@ export function ChatShell({
           isFreshChat={isFreshChat}
           canDelegate={skillCanDelegate}
           compareOptedIn={skillA2ui?.allowActionTriggeredRuns ?? false}
+          directLaunchers={skillA2ui?.directLaunchers}
           allowCompareLauncher={allowCompareLauncher}
           allowObligationsLauncher={allowObligationsLauncher}
           docTabs={openTabs}
@@ -2728,6 +3028,6 @@ export function ChatShell({
           the user-gesture guard so the agent can't pop one unprompted. */}
       <ModalSurfaceRegion sessionId={sessionId ?? agentSessionId} />
     </main>
-    </SurfaceRegistryProvider>
+    </>
   );
 }

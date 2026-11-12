@@ -20,6 +20,8 @@ function makeReturn(overrides: Partial<UseSkillAgentReturn> = {}): UseSkillAgent
     stageLabel: null,
     delegations: [],
     fallbacks: [],
+    modelEvents: [],
+    modelWait: null,
     compactions: [],
     tidyingUp: false,
     resolvedModel: null,
@@ -271,6 +273,22 @@ describe("ChatShell — the chat screen is the project", () => {
     query = new URLSearchParams();
     fireEvent.click(within(list).getByRole("button", { name: "Show all chats" }));
     await waitFor(() => expect(screen.queryByTestId("project-chats")).toBeNull());
+  });
+
+  it("a delete the server refuses says so under the list (NEVER SILENT)", async () => {
+    window.localStorage.setItem("aitana.sidebar.open", "1");
+    vi.stubGlobal("confirm", () => true);
+    routes["GET /api/proxy/api/projects/p1"] = () => res(200, iberia);
+    routes["GET /api/proxy/api/projects/p1/sessions?page_size=30"] = () =>
+      res(200, { ...projectChats, sessions: [{ ...projectChats.sessions[0], is_owner: true }] });
+    routes["DELETE /api/proxy/api/sessions/sess-d"] = () => res(500, { detail: "Session store unavailable" });
+    query = new URLSearchParams({ project: "p1" });
+    await renderChat();
+    const list = await screen.findByTestId("project-chats");
+    fireEvent.click(await within(list).findByRole("button", { name: "Delete EDP curtailment" }));
+    expect(await screen.findByTestId("session-project-notice")).toHaveTextContent(
+      "Couldn't delete the conversation: Session store unavailable. Try again.",
+    );
   });
 
   it("a project's chats that fail to load say so, with Retry", async () => {

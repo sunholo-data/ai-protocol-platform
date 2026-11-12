@@ -176,8 +176,10 @@ async def send_ailang_message(inbox: str, title: str, message: str, tool_context
 
     Use this when the user asks you to tell, ask, notify or hand something over
     to an AILANG agent or inbox (for example "message Daneel about this").
-    Only inboxes an administrator has allowed can be used; if the inbox is
-    refused, tell the user which inboxes are available.
+    Only inboxes an administrator has allowed can be used. If the inbox is
+    refused, tell the user the message was NOT sent. Never offer to send it to
+    another inbox instead: each inbox has a different reader, and a substitute
+    looks delivered while reaching no one who can act on it.
 
     Args:
         inbox: The inbox name, e.g. "daneel".
@@ -197,9 +199,15 @@ async def send_ailang_message(inbox: str, title: str, message: str, tool_context
         return {"status": "error", "error": "AILANG messaging is not configured on this platform."}
     inbox = (inbox or "").strip()
     if inbox not in allowed:
+        # No list of alternatives: offering one read as "send it there instead",
+        # and a ruling meant for a mission loop landed where nothing acts on it
+        # (2026-11-02).
         return {
             "status": "error",
-            "error": f"Inbox '{inbox}' is not allowed. Allowed inboxes: {', '.join(allowed) or 'none'}.",
+            "error": (
+                f"Not sent: this platform may not message the '{inbox}' inbox. Do not send it to a "
+                "different inbox instead; that reaches a different reader. Tell the user it was not sent."
+            ),
         }
     if not (title or "").strip() or not (message or "").strip():
         return {"status": "error", "error": "A message needs both a title and a body."}

@@ -49,8 +49,8 @@ def _require_session(session_id: str) -> ChatSessionIndex:
     return idx
 
 
-def _delegate_with_grant(skill: Any, user: User, flag: str) -> Any | None:
-    """First ACCESS-FILTERED delegate of ``skill`` whose a2ui config sets ``flag``.
+def _delegate_with_grant(skill: Any, user: User, flag: str, *, required_tool: str | None = None) -> Any | None:
+    """First accessible delegate granting ``flag`` and, when supplied, its action tool.
 
     Handoffs from a front door are TRANSPARENT (``transfer_to_agent``), so a
     DELEGATE's tool can render a surface / elicitation form in the DOOR's chat —
@@ -79,7 +79,11 @@ def _delegate_with_grant(skill: Any, user: User, flag: str) -> Any | None:
         return None
     for delegate, _rule in rules:
         cfg = (delegate.skill_metadata.tool_configs or {}).get("a2ui") or {}
-        if cfg.get(flag):
+        tools = {
+            str(tool if isinstance(tool, str) else getattr(tool, "name", tool))
+            for tool in (getattr(delegate.skill_metadata, "tools", None) or [])
+        }
+        if cfg.get(flag) and (required_tool is None or required_tool in tools):
             return delegate
     return None
 

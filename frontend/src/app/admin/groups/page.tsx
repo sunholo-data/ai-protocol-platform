@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/apiClient";
 import { SignInRequired } from "@/components/chat/SignInRequired";
+import { PageLoading } from "@/components/ui/skeleton";
 
 type GroupTag = {
   id: string;
@@ -115,7 +116,7 @@ export default function GroupsPage() {
     }
   };
 
-  if (loading) return <Centered>Loading…</Centered>;
+  if (loading) return <PageLoading />;
   if (!user) return <SignInRequired />;
   if (probe === "forbidden") {
     return (

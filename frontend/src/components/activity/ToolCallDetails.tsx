@@ -32,7 +32,7 @@ export function ToolCallDetails({ argsJson, resultContent }: { argsJson?: string
                 const dv = displayValue(v);
                 return (
                   <Fragment key={k}>
-                    <dt className="truncate font-mono text-[10px] text-muted-foreground/80" title={k}>
+                    <dt className="truncate font-mono text-[11px] text-muted-foreground/80" title={k}>
                       {k}
                     </dt>
                     <dd

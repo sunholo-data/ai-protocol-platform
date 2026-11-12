@@ -308,7 +308,10 @@ class TestEveryPipelineIsTagSafe:
             str(p.relative_to(REPO_ROOT))
             for p in all_pipelines()
             if IMMUTABLE_TAG not in p.read_text(encoding="utf-8")
-            # promote copies by digest and builds nothing, so it needs no tag.
+            # Checks-only pipelines produce no images to tag. Follow scripts
+            # so extracting a docker build cannot bypass this guard.
+            and re.search(r"docker\s+(?:build|buildx\s+build)|\nbuild\n", _pipeline_text(_load(p)))
+            # Promotion guards its copied images separately.
             and "promote" not in p.name
         ]
         assert missing == [], f"pipelines with no {IMMUTABLE_TAG} image tag: {missing}"

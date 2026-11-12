@@ -61,13 +61,24 @@ export const BRANDING = {
   /** Long form description used in <meta name="description">. */
   description:
     process.env.NEXT_PUBLIC_BRAND_DESCRIPTION ||
-    "Open-source AI protocol platform — Skills + AG-UI + A2UI + MCP Apps + A2A on Google ADK",
+    "Your documents and AI skills in one workspace.",
 
   /** Optional fork theme stylesheet (a path under /public), linked after the
    * bundled CSS. Lets a fork restyle the design tokens in globals.css (colours,
    * radius, font) by ADDING a file rather than editing this template — empty
    * means the template's own tokens. See public/brand/README.md. */
   themeStylesheet: process.env.NEXT_PUBLIC_BRAND_THEME_CSS || "",
+
+  /** Interface languages this deployment offers, comma-separated BCP 47 tags
+   * (`da,en`). One locale — the default — means no language switch is shown and
+   * nothing changes. Each listed locale needs a catalog (template
+   * `frontend/messages/<locale>/` or a fork's `docs/customers/<c>/messages/<locale>/`).
+   * Parsed in src/i18n/locale.ts. See docs/design/v6.43.0/multi-language.md. */
+  locales: process.env.NEXT_PUBLIC_LOCALES || "en",
+
+  /** What a person who has never chosen sees; must be one of `locales`.
+   * Empty → the first of `locales`. */
+  defaultLocale: process.env.NEXT_PUBLIC_DEFAULT_LOCALE || "",
 
   /** Browser/OS chrome colour — the status bar and task switcher of the
    * installed (home-screen) app, and the manifest's splash background. Should

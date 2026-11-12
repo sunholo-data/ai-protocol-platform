@@ -14,8 +14,9 @@ two of its own:
   6. ``action.context`` ≤ 4 KB.
   7. The surface is in the session's stash (404) and a handler is registered
      for its artifact kind + the action name (404).
-  8. The skill declares the handler's ``requires_tool`` (403) — a click never
-     grants more than the skill already has.
+  8. The skill or one accessible, opted-in delegate declares the handler's
+     ``requires_tool`` (403) — a click never grants more than the caller's
+     existing skill/delegation graph allows.
 Then the handler runs against the STASHED surface (never the client's copy).
 
 Response (200, always JSON so the click shows something — NEVER SILENT):
@@ -28,10 +29,12 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from google.adk.events import Event, EventActions
+from google.genai import types
 
 from adk.a2ui_direct_actions import DirectActionContext, lookup
 from adk.agui import APP_NAME
@@ -41,6 +44,7 @@ from auth import User, get_current_user
 from auth.permissions import can_use_tool
 from protocols._a2ui_surface_shared import (
     _STATE_KEY_NAMESPACE,
+    _delegate_with_grant,
     _enforce_size_cap,
     _enforce_skill_opt_in,
     _require_session,
@@ -58,19 +62,46 @@ _MAX_STASHED_MESSAGES = 400
 _RECENT_ACTIONS = 5
 
 
-def _skill_tools(skill_id: str, user: User) -> set[str]:
+class DirectSurfaceActionRequest(SurfaceActionRequest):
+    automatic: bool = False
+
+
+def _validate_targets(surface_id: str, messages: list[dict[str, Any]]) -> None:
+    """Do not let a private payload overwrite the exportable control envelope."""
+    for message in messages:
+        operations = [
+            k for k in ("createSurface", "updateComponents", "updateDataModel", "deleteSurface") if k in message
+        ]
+        if len(operations) != 1 or message[operations[0]].get("surfaceId") != surface_id:
+            raise ValueError("Surface patch target mismatch")
+
+
+def _validate_private_surfaces(control_id: str, surfaces: list[dict[str, Any]]) -> None:
+    for surface in surfaces:
+        surface_id = surface.get("surface_id")
+        if not isinstance(surface_id, str) or not surface_id.startswith(f"private:{control_id}:"):
+            raise ValueError("Private surface must use its control surface namespace")
+        _validate_targets(surface_id, surface.get("messages") or [])
+
+
+def _skill_has_action_tool(skill_id: str, user: User, required_tool: str) -> bool:
+    """Match the root or one accessible, opted-in delegate; never combine grants."""
     skill = skill_config.get_skill(skill_id) or skill_config.resolve_skill_ref(skill_id, getattr(user, "uid", None))
     tools = getattr(getattr(skill, "skill_metadata", None), "tools", None) or []
-    return {str(t if isinstance(t, str) else getattr(t, "name", t)) for t in tools}
+    if required_tool in {str(t if isinstance(t, str) else getattr(t, "name", t)) for t in tools}:
+        return True
+    return _delegate_with_grant(skill, user, "allow_surface_context_writes", required_tool=required_tool) is not None
 
 
 @router.post("/{session_id}/surface-action-direct")
 async def post_surface_action_direct(
     session_id: str,
-    body: SurfaceActionRequest,
+    body: DirectSurfaceActionRequest,
     request: Request,
+    response: Response,
     user: User = Depends(get_current_user),  # noqa: B008
 ) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store"
     idx = _require_session(session_id)
     if not request.state.access.can_access(idx) or idx.owner_uid != user.uid:
         log.info("surface_direct: access denied uid=%s session=%s", user.uid, session_id)
@@ -95,7 +126,13 @@ async def post_surface_action_direct(
     action = lookup(kind, body.action.name)
     if action is None:
         raise HTTPException(status_code=404, detail=f"No action {body.action.name!r} for this surface")
-    if action.requires_tool and action.requires_tool not in _skill_tools(idx.skill_id, user):
+    if body.automatic and not action.automatic:
+        raise HTTPException(status_code=403, detail="This action requires a human click")
+    if body.automatic:
+        refresh = (stash.get("artifact") or {}).get("autoRefresh") or {}
+        if refresh.get("action") != body.action.name or body.action.context:
+            raise HTTPException(status_code=403, detail="This is not the surface's registered status refresh")
+    if action.requires_tool and not _skill_has_action_tool(idx.skill_id, user, action.requires_tool):
         log.info(
             "surface_direct: skill lacks tool uid=%s skill=%s tool=%s", user.uid, idx.skill_id, action.requires_tool
         )
@@ -115,8 +152,11 @@ async def post_surface_action_direct(
     started = time.monotonic()
     try:
         result = await action.handler(ctx)
+        _validate_private_surfaces(body.surface_id, result.private_surfaces)
+        # Normal patches may ONLY update the safe, stashed control surface.
+        _validate_targets(body.surface_id, result.messages)
     except Exception as exc:  # a handler bug must still answer the click
-        log.warning("surface_direct: handler %s/%s raised: %s", kind, action.name, exc)
+        log.warning("surface_direct: handler %s/%s failed (%s)", kind, action.name, type(exc).__name__)
         return {"status": "error", "message": "That didn't work — the action failed on the server.", "messages": []}
 
     delta: dict[str, Any] = {}
@@ -141,7 +181,7 @@ async def post_surface_action_direct(
                 {"version": "v0.9", "updateDataModel": {"surfaceId": body.surface_id, "value": model}},
             ]
         delta[stash_key] = json.dumps(stash)
-    if action.tell_ai:
+    if action.tell_ai and not result.private_surfaces:
         entry = {
             "name": body.action.name,
             "direct": True,
@@ -165,6 +205,23 @@ async def post_surface_action_direct(
                 timestamp=time.time(),
             ),
         )
+    confirmation = None
+    if action.confirm_in_chat and result.record and not body.automatic and not result.private_surfaces:
+        from adk.a2ui_action_confirmation import confirmation_text
+
+        skill = skill_config.get_skill(idx.skill_id) or skill_config.resolve_skill_ref(idx.skill_id, user.uid)
+        md = skill.skill_metadata
+        text = await confirmation_text(md.model or "pro", result.status, result.record, md.fallback)
+        message_id = "action-confirmation-" + uuid.uuid4().hex
+        event = Event(
+            id=message_id,
+            invocation_id=message_id,
+            author=skill.name,
+            content=types.Content(role="model", parts=[types.Part(text=text)]),
+            timestamp=time.time(),
+        )
+        await session_service.append_event(session, event)
+        confirmation = {"id": message_id, "content": text}
     log.info(
         "surface_direct: uid=%s session=%s skill=%s surface=%s action=%s status=%s ms=%d",
         user.uid,
@@ -175,7 +232,13 @@ async def post_surface_action_direct(
         result.status,
         int((time.monotonic() - started) * 1000),
     )
-    return {"status": result.status, "message": result.message, "messages": result.messages}
+    return {
+        "status": result.status,
+        "message": result.message,
+        "messages": result.messages,
+        "private_surfaces": result.private_surfaces,
+        "confirmation": confirmation,
+    }
 
 
 __all__ = ["router"]

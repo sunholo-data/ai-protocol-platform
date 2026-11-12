@@ -161,6 +161,17 @@ class TestClaudeAdaptiveThinking:
         assert "reasoning_effort" not in model._additional_args
         assert "thinking" not in model._additional_args
 
+    def test_haiku_5_5_stays_bare(self, monkeypatch):
+        """Measured 2026-11-05: adaptive+low on haiku-5-5 matched bare at p50 and
+        was worse at p90, so it keeps the API default like haiku-4-5."""
+        monkeypatch.delenv("CLAUDE_ADAPTIVE_THINKING", raising=False)
+        from adk.agent import resolve_model
+
+        model = resolve_model("claude-haiku-5-5")
+        assert model.model == "anthropic/claude-haiku-5-5"
+        assert "thinking" not in model._additional_args
+        assert "reasoning_effort" not in model._additional_args
+
     def test_kill_switch(self, monkeypatch):
         monkeypatch.setenv("CLAUDE_ADAPTIVE_THINKING", "off")
         from adk.agent import resolve_model

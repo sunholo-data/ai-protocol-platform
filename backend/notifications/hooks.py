@@ -112,3 +112,26 @@ def notify_thread_collaborators(poster: str, skill_id: str, session_id: str) -> 
         await _deliver(targets, message)
 
     _schedule(_run())
+
+
+def notify_token_approval(uid: str, decision: str, token_name: str) -> None:
+    """A personal token just decided a human approval: tell its owner, so a
+    misused token shows up on their phone at once. Names only — never what was
+    approved — plus a link to revoke tokens. Scheduled; never raises."""
+    if not push_config()[0] or not uid:
+        return
+
+    async def _run():
+        targets = [(uid, s) for s in await asyncio.to_thread(store.for_uid, uid)]
+        if not targets:
+            return
+        verb = "approved" if decision == "approve" else "declined"
+        message = payload(
+            f"An action was {verb} with a token",
+            f"Token: {token_name}. Not you? Revoke it in Settings.",
+            "/settings/mcp",
+            f"approval-token-{token_name}",
+        )
+        await _deliver(targets, message)
+
+    _schedule(_run())

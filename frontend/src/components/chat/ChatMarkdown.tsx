@@ -15,6 +15,7 @@ import { isAppPath, openHelpInWorkbench, parseHelpHref } from "@/lib/helpViewer"
 import { CodeBlock, hastLanguage, hastText } from "@/components/chat/CodeBlock";
 import { SVGBlock } from "@/components/chat/media/SVGBlock";
 import { InlineImage } from "@/components/chat/media/InlineImage";
+import { isChatMediaPath } from "@/lib/authImage";
 import { PDFCard } from "@/components/chat/media/PDFCard";
 import type { Components } from "react-markdown";
 
@@ -229,8 +230,11 @@ export function ChatMarkdown({ content, navigateToBlock }: ChatMarkdownProps) {
       components={components}
       urlTransform={(url, key) => {
         // Links may also point into this app (`/help/...`, `/chat/...`); the
-        // `a` renderer above decides how each opens. Images stay remote-only.
+        // `a` renderer above decides how each opens.
         if (key === "href" && isAppPath(url)) return url;
+        // Media: remote, or one of the backend media routes `show_media`
+        // hands the agent (fetched with the user's credentials by InlineImage).
+        if (key === "src" && isChatMediaPath(url)) return url;
         // Allow citation-scheme, https://, http://, mailto: — block everything else
         if (
           url.startsWith(`${CITATION_SCHEME}://`) ||

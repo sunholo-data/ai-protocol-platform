@@ -78,3 +78,11 @@ describe("SourcesArtefactTab (6.11)", () => {
     expect(await screen.findByText(/couldn't open this document/i)).toBeInTheDocument();
   });
 });
+
+it("shows source status, version, date and origin supplied by the knowledge search", () => {
+  setSources([{ title: "Workbench plan", uri: "https://example.com/plan", status: "implemented", version: "6.44", date: "2026-10-10", source: "design notes" }]);
+  render(<SourcesArtefactTab surfaceId="knowledge_sources:turn" />);
+  for (const text of ["implemented", "6.44", "2026-10-10", "design notes"]) {
+    expect(screen.getByText(text)).toBeInTheDocument();
+  }
+});

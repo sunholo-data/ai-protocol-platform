@@ -208,3 +208,28 @@ describe("useSessionDocuments — the session's project (projects §6.3)", () =>
     await waitFor(() => expect(result.current.projectId).toBeNull());
   });
 });
+
+describe("useSessionDocuments — React's dev double-mount", () => {
+  it("still loads the row (and its saved Model pick) when the first mount is aborted", async () => {
+    // StrictMode mounts, unmounts (aborting the first fetch) and mounts again.
+    // The second mount used to skip as "same session", so a reopened chat
+    // never got its project or Model pick back on a dev stack.
+    // Like a real fetch, an aborted request rejects instead of answering.
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) =>
+      init?.signal?.aborted ? Promise.reject(new DOMException("aborted", "AbortError")) : Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ session: { document_ids: [], model_choice: "fast", project_id: "p1" } }),
+      } as Response),
+    );
+    const { result } = renderHook(() => useSessionDocuments("s-1"), { reactStrictMode: true });
+    await waitFor(() => expect(result.current.modelChoice).toBe("fast"));
+    expect(result.current.projectId).toBe("p1");
+  });
+
+  it("reports Auto for a row with no saved pick", async () => {
+    mockSession([]);
+    const { result } = renderHook(() => useSessionDocuments("s-2"));
+    await waitFor(() => expect(result.current.modelChoice).toBe("auto"));
+  });
+});

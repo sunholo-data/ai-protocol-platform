@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useMemo, type ReactNode } from "react";
+import Link from "next/link";
 import type { ChatSessionSummary } from "@/hooks/useSkillSessions";
-import { groupByDate, relativeTime } from "@/lib/relativeTime";
+import { groupByDate } from "@/lib/relativeTime";
+import { useFormat } from "@/i18n";
 
 interface SkillSessionPanelProps {
   sessions: ChatSessionSummary[];
@@ -43,9 +45,24 @@ interface SkillSessionPanelProps {
   rowNote?: (session: ChatSessionSummary) => string | null;
   /** Extra controls for one of the user's OWN rows, before Delete — e.g. the
    * projects ⋯ menu ("Make this a project", "Move to project…"). */
-  rowActions?: (session: ChatSessionSummary) => ReactNode;
+  rowActions?: (session: ChatSessionSummary, helpers: { startRename: () => void }) => ReactNode;
   /** Replaces the default empty-list text (the filter has its own). */
   emptyMessage?: string;
+  /** Search text from outside (the sidebar's one search). When set, the
+   * list's own search box is not drawn. */
+  query?: string;
+  /** One-line rows: a small skill icon and the full-width title; no time or
+   * skill line. Actions live in `rowActions` (one ⋯ menu), not a trash icon. */
+  compact?: boolean;
+  /** The skill's icon for a compact row. */
+  skillIconFor?: (skillId: string) => string | null;
+  /** A real link per row, so a chat can open in a new tab. A plain click
+   * still goes through `onSelectSession`. */
+  hrefFor?: (session: ChatSessionSummary) => string;
+  /** Rename a conversation (compact rows edit the title in place). */
+  onRename?: (sessionId: string, title: string) => Promise<void>;
+  /** Compact rows: render this many, then "Show more". */
+  initialCount?: number;
 }
 
 /** Below this many rows a search box is clutter, not help. */
@@ -95,9 +112,19 @@ export function SkillSessionPanel({
   rowNote,
   rowActions,
   emptyMessage,
+  query: externalQuery,
+  compact = false,
+  skillIconFor,
+  hrefFor,
+  onRename,
+  initialCount,
 }: SkillSessionPanelProps) {
-  const [query, setQuery] = useState("");
+  const fmt = useFormat();
+  const [ownQuery, setQuery] = useState("");
+  const query = externalQuery ?? ownQuery;
   const q = query.trim().toLowerCase();
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const visible = useMemo(
     () =>
       q
@@ -138,7 +165,7 @@ export function SkillSessionPanel({
   ) : null;
 
   const searchRow =
-    sessions.length >= SEARCH_THRESHOLD || q ? (
+    externalQuery === undefined && (sessions.length >= SEARCH_THRESHOLD || q) ? (
       <div className="px-2 pb-1 pt-0.5">
         <input
           type="search"
@@ -195,7 +222,10 @@ export function SkillSessionPanel({
     );
   }
 
-  const sections = grouped ? groupByDate(visible, (s) => s.last_message_at) : [{ group: null, items: visible }];
+  // Compact rows show the first few; searching shows every match.
+  const capped = compact && initialCount && !q && !showAll ? visible.slice(0, initialCount) : visible;
+  const hiddenCount = visible.length - capped.length;
+  const sections = grouped ? groupByDate(capped, (s) => s.last_message_at) : [{ group: null, items: capped }];
 
   return (
     <>
@@ -211,7 +241,7 @@ export function SkillSessionPanel({
         {sections.map(({ group, items }) => (
           <div key={group ?? "all"} role={group ? "group" : undefined} aria-label={group ?? undefined}>
             {group && (
-              <div className="px-2 pb-0.5 pt-2 text-[10px] font-medium text-muted-foreground first:pt-0.5">{group}</div>
+              <div className="px-2 pb-0.5 pt-2 text-[11px] font-medium text-muted-foreground first:pt-0.5">{group}</div>
             )}
             {items.map((s) => {
               const isActive = s.session_id === activeSessionId;
@@ -219,6 +249,30 @@ export function SkillSessionPanel({
               // nothing. The agent label and time underneath identify the row.
               const title = s.title || "Untitled chat";
               const note = rowNote?.(s) ?? null;
+              if (compact) {
+                return (
+                  <CompactRow
+                    key={s.session_id}
+                    session={s}
+                    title={title}
+                    isActive={isActive}
+                    icon={skillIconFor?.(s.skill_id) ?? null}
+                    href={hrefFor?.(s)}
+                    onSelect={() => onSelectSession(s.session_id)}
+                    renaming={renamingId === s.session_id}
+                    onRename={
+                      onRename
+                        ? async (t) => {
+                            await onRename(s.session_id, t);
+                            setRenamingId(null);
+                          }
+                        : undefined
+                    }
+                    onCancelRename={() => setRenamingId(null)}
+                    actions={s.is_owner ? rowActions?.(s, { startRename: () => setRenamingId(s.session_id) }) : null}
+                  />
+                );
+              }
               return (
                 <div
                   key={s.session_id}
@@ -245,7 +299,7 @@ export function SkillSessionPanel({
                       {s.transcript_lost ? (
                         <span
                           data-testid="session-transcript-lost"
-                          className="line-clamp-1 text-[10px] text-amber-600 dark:text-amber-500"
+                          className="line-clamp-1 text-[11px] text-amber-600 dark:text-amber-500"
                           title="This conversation's messages are no longer available and can't be recovered."
                         >
                           Messages unavailable
@@ -255,7 +309,7 @@ export function SkillSessionPanel({
                           {showOwner && s.owner_name && (
                             <span
                               data-testid="session-owner-name"
-                              className="line-clamp-1 text-[10px] opacity-80"
+                              className="line-clamp-1 text-[11px] opacity-80"
                             >
                               {s.owner_name}
                             </span>
@@ -263,24 +317,24 @@ export function SkillSessionPanel({
                           {s.skill_label && (
                             <span
                               data-testid="session-agent-label"
-                              className="line-clamp-1 text-[10px] opacity-60"
+                              className="line-clamp-1 text-[11px] opacity-60"
                             >
                               {s.skill_label}
                             </span>
                           )}
                           {note && (
-                            <span data-testid="session-row-note" className="line-clamp-1 text-[10px] opacity-70">
+                            <span data-testid="session-row-note" className="line-clamp-1 text-[11px] opacity-70">
                               {note}
                             </span>
                           )}
                         </>
                       )}
                     </span>
-                    <span className="shrink-0 text-[10px] opacity-60">
-                      {relativeTime(s.last_message_at)}
+                    <span className="shrink-0 text-[11px] opacity-60">
+                      {fmt.relative(s.last_message_at)}
                     </span>
                   </button>
-                  {rowActions && s.is_owner && rowActions(s)}
+                  {rowActions && s.is_owner && rowActions(s, { startRename: () => setRenamingId(s.session_id) })}
                   {onDelete && s.is_owner && (
                     <button
                       type="button"
@@ -302,7 +356,16 @@ export function SkillSessionPanel({
             })}
           </div>
         ))}
-        {hasMore && onLoadMore && (
+        {hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="mt-0.5 min-h-[44px] rounded px-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground md:min-h-[28px]"
+          >
+            Show more
+          </button>
+        )}
+        {(!compact || !initialCount || showAll || q) && hasMore && onLoadMore && (
           <button
             type="button"
             onClick={onLoadMore}
@@ -331,5 +394,136 @@ export function SkillSessionPanel({
         )}
       </nav>
     </>
+  );
+}
+
+/**
+ * One line per chat: the skill's small icon, then the title across the full
+ * width. A real link (opens in a new tab); a plain click goes through
+ * `onSelect`. Rename edits the title in place.
+ */
+function CompactRow({
+  session,
+  title,
+  isActive,
+  icon,
+  href,
+  onSelect,
+  renaming,
+  onRename,
+  onCancelRename,
+  actions,
+}: {
+  session: ChatSessionSummary;
+  title: string;
+  isActive: boolean;
+  icon: string | null;
+  href?: string;
+  onSelect: () => void;
+  renaming: boolean;
+  onRename?: (title: string) => Promise<void>;
+  onCancelRename: () => void;
+  actions: ReactNode;
+}) {
+  const [draft, setDraft] = useState(title);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!renaming) return;
+    setDraft(title);
+    setError(null);
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [renaming, title]);
+
+  const rowClass = [
+    "group relative flex min-h-[44px] w-full items-center gap-2 rounded px-2 text-sm transition-colors md:min-h-[32px]",
+    isActive
+      ? "bg-background font-medium text-foreground shadow-[inset_2px_0_0_hsl(var(--primary))]"
+      : "text-foreground/90 hover:bg-background/70",
+  ].join(" ");
+
+  const iconEl = icon ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={icon} alt="" className="h-3.5 w-3.5 shrink-0 rounded-sm object-contain opacity-80" />
+  ) : (
+    <span aria-hidden className="h-3.5 w-3.5 shrink-0 rounded-full bg-muted-foreground/20" />
+  );
+
+  if (renaming && onRename) {
+    const save = async () => {
+      const t = draft.trim();
+      if (!t || t === title) return onCancelRename();
+      setSaving(true);
+      try {
+        await onRename(t);
+      } catch {
+        setError("Couldn't rename it. Try again.");
+      } finally {
+        setSaving(false);
+      }
+    };
+    return (
+      <div className={rowClass}>
+        {iconEl}
+        <input
+          ref={inputRef}
+          value={draft}
+          disabled={saving}
+          aria-label="Conversation name"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void save();
+            if (e.key === "Escape") onCancelRename();
+          }}
+          onBlur={() => void save()}
+          className="min-w-0 flex-1 rounded-sm bg-background px-1 py-0.5 text-sm outline-none ring-1 ring-ring"
+        />
+        {error ? (
+          <span role="alert" className="absolute left-7 top-full z-10 text-[11px] text-destructive">
+            {error}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+
+  const label = (
+    <>
+      {iconEl}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{title}</span>
+        {session.transcript_lost ? (
+          <span data-testid="session-transcript-lost" className="block truncate text-[11px] text-warning">
+            Messages unavailable
+          </span>
+        ) : null}
+      </span>
+    </>
+  );
+  const linkClass = "flex min-w-0 flex-1 items-center gap-2 self-stretch rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  return (
+    <div className={rowClass} title={session.skill_label ? `${title} · ${session.skill_label}` : title}>
+      {href ? (
+        <Link
+          href={href}
+          aria-current={isActive ? "page" : undefined}
+          className={linkClass}
+          onClick={(e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+            e.preventDefault();
+            onSelect();
+          }}
+        >
+          {label}
+        </Link>
+      ) : (
+        <button type="button" onClick={onSelect} aria-current={isActive ? "true" : undefined} className={`${linkClass} text-left`}>
+          {label}
+        </button>
+      )}
+      {actions}
+    </div>
   );
 }

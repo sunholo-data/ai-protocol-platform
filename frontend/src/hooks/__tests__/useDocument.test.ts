@@ -114,6 +114,17 @@ describe("useDocument — Firestore available", () => {
     expect(listeners[0].unsub).toHaveBeenCalled();
     expect(apiCalls()).toBe(1);
   });
+
+  it("a large document (blocks in chunks) is read whole from the API", async () => {
+    getFirestoreDb.mockReturnValue({});
+    fetchWithAuth.mockImplementation(async () => json(record()));
+    const { result } = renderHook(() => useDocument("d1"));
+    act(() => {
+      listeners[0].next({ id: "d1", exists: () => true, data: () => ({ ...record(), blocks: [], blockChunks: 3 }) });
+    });
+    await waitFor(() => expect(result.current.doc?.blocks).toHaveLength(1));
+    expect(apiCalls()).toBe(1);
+  });
 });
 
 describe("useDocument — no Firestore client (API fallback)", () => {

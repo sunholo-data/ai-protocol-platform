@@ -63,12 +63,38 @@ export interface AuthFetchOptions {
    * one role. See `AuthAudience` for why this seam exists.
    */
   audience?: AuthAudience;
+  /**
+   * How long to wait for the response to START (headers), in ms. Once the
+   * response begins the timer is cleared, so a long streamed body is never cut
+   * off. `0` disables it. Defaults to {@link DEFAULT_RESPONSE_TIMEOUT_MS},
+   * except for uploads (FormData/Blob bodies), which have no default: their
+   * time-to-first-byte includes the upload itself.
+   */
+  timeoutMs?: number;
+}
+
+/** A backend that never answers must not leave "Loading…" up forever. */
+export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
+
+/** Thrown when the server does not start responding within `timeoutMs`. */
+export class FetchTimeoutError extends Error {
+  constructor() {
+    super("The server took too long to respond. Try again.");
+    this.name = "TimeoutError";
+  }
+}
+
+function isUploadBody(body: RequestInit["body"]): boolean {
+  return (
+    (typeof FormData !== "undefined" && body instanceof FormData) ||
+    (typeof Blob !== "undefined" && body instanceof Blob)
+  );
 }
 
 export async function fetchWithAuth(
   input: RequestInfo | URL,
   init: RequestInit = {},
-  { audience = "active" }: AuthFetchOptions = {},
+  { audience = "active", timeoutMs }: AuthFetchOptions = {},
 ): Promise<Response> {
   // Default path stays on `getIdToken` rather than routing through
   // `getIdTokenFor("active")`. Semantically identical, but it keeps the
@@ -80,10 +106,44 @@ export async function fetchWithAuth(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  const res = await fetch(input, { ...init, headers, cache: "no-store" });
+  const limit = timeoutMs ?? (isUploadBody(init.body) ? 0 : DEFAULT_RESPONSE_TIMEOUT_MS);
+  const res = await fetchWithResponseTimeout(input, { ...init, headers, cache: "no-store" }, limit);
   if (res.status === 403) {
     // Fire-and-forget: never block or alter the caller's response.
     void maybeSignalDomainRejection(res.clone());
   }
   return res;
+}
+
+/**
+ * `fetch` that rejects with {@link FetchTimeoutError} if the response has not
+ * started within `limitMs`. The caller's own `signal` still aborts as before.
+ */
+async function fetchWithResponseTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  limitMs: number,
+): Promise<Response> {
+  if (!limitMs || limitMs <= 0) return fetch(input, init);
+  const controller = new AbortController();
+  const callerSignal = init.signal;
+  const forwardAbort = () => controller.abort(callerSignal?.reason);
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort(callerSignal.reason);
+    else callerSignal.addEventListener("abort", forwardAbort, { once: true });
+  }
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, limitMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (timedOut) throw new FetchTimeoutError();
+    throw err;
+  } finally {
+    // The caller's abort listener stays: it still has to cancel a streaming body.
+    clearTimeout(timer);
+  }
 }

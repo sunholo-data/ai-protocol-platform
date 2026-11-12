@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useSyncExternalStore } from "react";
+import { SOURCE_LOCALE, formatterFor, regionalLocale } from "@/i18n";
 import { fetchWithAuth } from "@/lib/apiClient";
 import { subscribeToAuthState } from "@/lib/firebase";
 
@@ -111,13 +112,15 @@ export async function saveMyInstructions(instructions: string): Promise<SaveResu
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { detail?: unknown } | null;
     const d = body?.detail;
+    // An English sentence (no catalog yet), so the number is English too.
+    const max = formatterFor(regionalLocale(SOURCE_LOCALE)).number(MAX_INSTRUCTIONS_CHARS);
     const message =
       typeof d === "string" && d
         ? d
         : d && typeof d === "object" && !Array.isArray(d) && typeof (d as { message?: unknown }).message === "string"
           ? String((d as { message: string }).message)
           : res.status === 422
-            ? `Your instructions can be at most ${MAX_INSTRUCTIONS_CHARS.toLocaleString()} characters.`
+            ? `Your instructions can be at most ${max} characters.`
             : `${fallback} (HTTP ${res.status}).`;
     return { ok: false, message };
   }

@@ -77,6 +77,7 @@ def query_documents(
     order_by: str | None = None,
     order_direction: str = "DESCENDING",
     limit: int | None = None,
+    select: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Query documents with optional filters, ordering, and limit.
 
@@ -87,6 +88,8 @@ def query_documents(
         order_by: Field to order results by.
         order_direction: "ASCENDING" or "DESCENDING".
         limit: Max documents to return.
+        select: Only these fields (a projection) — a parsed document can carry
+                close to 1 MiB of blocks that a listing never needs.
 
     Returns:
         List of document dicts (each includes the document ID as "__id").
@@ -105,6 +108,9 @@ def query_documents(
     if limit:
         query = query.limit(limit)
 
+    if select is not None:
+        query = query.select(select)
+
     results = []
     for doc in query.stream():
         data = doc.to_dict()
@@ -112,6 +118,28 @@ def query_documents(
             data["__id"] = doc.id
             results.append(data)
     return results
+
+
+def get_documents(collection: str, doc_ids: list[str], fields: list[str] | None = None) -> dict[str, dict[str, Any]]:
+    """Read many documents in batched round trips (``get_all``), optionally only
+    ``fields``. Returns ``{id: data}`` for the ones that exist.
+
+    One ``get_document`` per id in a loop costs a round trip each — 100 of them
+    behind "recent documents" — and a whole parsed_documents record carries its
+    parsed blocks (up to ~700 KB) when the caller wanted a filename.
+    """
+    ids = list(dict.fromkeys(i for i in doc_ids if i))
+    if not ids:
+        return {}
+    client = get_client()
+    col = client.collection(collection)
+    out: dict[str, dict[str, Any]] = {}
+    for start in range(0, len(ids), 100):
+        refs = [col.document(i) for i in ids[start : start + 100]]
+        for snap in client.get_all(refs, field_paths=fields):
+            if snap.exists:
+                out[snap.id] = snap.to_dict() or {}
+    return out
 
 
 def increment_field(collection: str, doc_id: str, field: str, amount: int = 1) -> None:

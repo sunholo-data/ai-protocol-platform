@@ -23,6 +23,7 @@ indistinguishable). See `docs/design/v6.21.0/channels-agui-convergence.md`.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -86,6 +87,13 @@ async def stream_skill_events(
         sorted((channel_metadata or {}).keys()),
     )
 
+    from adk.elicitation import CHANNEL_QUESTIONS, NON_INTERACTIVE
+
+    # Channels can't render a clickable form: confirmations go by text.
+    non_interactive = NON_INTERACTIVE.set(True)
+    questions: list[str] = []
+    questions_token = CHANNEL_QUESTIONS.set(questions)
+    reply: list[str] = []
     try:
         async for event in process_skill_request(
             skill_id=skill_id,
@@ -95,6 +103,12 @@ async def stream_skill_events(
             message=message,
             document_ids=attachment_ids or None,
         ):
+            if event.get("type") == "TEXT_MESSAGE_CONTENT" and isinstance(event.get("delta"), str):
+                reply.append(event["delta"])
+            elif event.get("type") == "RUN_FINISHED" and questions and "?" not in "".join(reply):
+                # A pending confirmation the model didn't put to the person (a
+                # fast model can end the turn silently): ask it ourselves.
+                yield {"type": "TEXT_MESSAGE_CONTENT", "delta": _unasked(reply, questions)}
             yield event
     except SkillNotFoundError:
         logger.warning(
@@ -109,6 +123,17 @@ async def stream_skill_events(
             "message": skill_not_found_text(skill_id),
             "code": "SKILL_NOT_FOUND",
         }
+    finally:
+        # An async generator can be closed from another task (aclose), where
+        # the tokens are foreign; the per-request context dies with it anyway.
+        with contextlib.suppress(ValueError):
+            CHANNEL_QUESTIONS.reset(questions_token)
+            NON_INTERACTIVE.reset(non_interactive)
+
+
+def _unasked(reply: list[str], questions: list[str]) -> str:
+    text = "\n".join(dict.fromkeys(questions))
+    return f"\n\n{text}" if "".join(reply).strip() else text
 
 
 async def collect_reply(event_stream: AsyncIterator[dict[str, Any]]) -> str:

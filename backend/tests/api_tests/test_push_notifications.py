@@ -150,6 +150,28 @@ async def test_thread_collaborators_are_notified_by_email(vapid, fake_store):
     assert sent and sent[0]["title"] == "Daneel posted" and sent[0]["body"] == "in Sunholo"
 
 
+@pytest.mark.asyncio
+async def test_token_approval_push_names_the_token_and_never_the_action(vapid, fake_store):
+    store.add("u1", "m@example.com", SUB)
+    sent: list[dict] = []
+
+    async def fake_send(_sub, message):
+        sent.append(message)
+        return "ok"
+
+    with patch.object(hooks, "send", fake_send):
+        hooks.notify_token_approval("u1", "approve", "Claude Code — laptop")
+        await _drain_hooks()
+    assert sent == [
+        {
+            "title": "An action was approved with a token",
+            "body": "Token: Claude Code — laptop. Not you? Revoke it in Settings.",
+            "url": "/settings/mcp",
+            "tag": "approval-token-Claude Code — laptop",
+        }
+    ]
+
+
 def test_hooks_do_nothing_without_vapid_keys(monkeypatch, fake_store):
     for k in VAPID:
         monkeypatch.delenv(k, raising=False)

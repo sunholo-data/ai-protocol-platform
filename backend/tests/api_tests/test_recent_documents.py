@@ -63,7 +63,10 @@ def client() -> TestClient:
 def _get(client: TestClient, *, sessions, docs: dict, library: list, limit: int | None = None):
     with (
         patch("tools.documents.recent.most_recent_session_for_user", return_value=sessions) as m_sessions,
-        patch("tools.documents.recent.get_document", side_effect=lambda _c, i: docs.get(i)),
+        patch(
+            "tools.documents.recent.get_documents",
+            side_effect=lambda _c, ids, fields=None: {i: docs[i] for i in ids if docs.get(i) is not None},
+        ),
         patch("tools.documents.recent.list_documents_for_user", return_value=library),
     ):
         resp = client.get("/api/documents/recent" + (f"?limit={limit}" if limit else ""))

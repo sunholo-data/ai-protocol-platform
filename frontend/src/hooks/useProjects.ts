@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { fetchWithAuth } from "@/lib/apiClient";
+import { fetchWithAuth, type AuthFetchOptions } from "@/lib/apiClient";
 import { subscribeToAuthState } from "@/lib/firebase";
 import { notifyDocumentsChanged, subscribeDocumentsChanged } from "@/lib/documentEvents";
 import { notifyProjectsChanged, subscribeProjectsChanged } from "@/lib/projectEvents";
@@ -55,6 +55,8 @@ export interface Project extends ProjectSummary {
   search?: ProjectSearchStatus | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  /** Knowledge bases this project's chats also search (github-sources.md D9). */
+  attachedKbIds: string[];
 }
 
 /** A document tagged into a project — metadata only, never blocks. */
@@ -108,12 +110,27 @@ async function readError(res: Response, fallback: string): Promise<Failure> {
   return { ok: false, message: `${fallback} (HTTP ${res.status}).` };
 }
 
-async function request(url: string, init: RequestInit, fallback: string): Promise<{ ok: true; body: unknown } | Failure> {
+/** Set on a Failure when no answer came back: the request may still be running
+ * on the server (`TIMEOUT`: we stopped waiting; `NETWORK`: the connection failed). */
+export const NO_ANSWER_CODES = new Set(["TIMEOUT", "NETWORK"]);
+
+/** One API call, mapped to `{ok, body}` or a user-facing Failure (shared with useProjectSources). */
+export async function request(
+  url: string,
+  init: RequestInit,
+  fallback: string,
+  options?: AuthFetchOptions,
+): Promise<{ ok: true; body: unknown } | Failure> {
   let res: Response;
   try {
-    res = await fetchWithAuth(url, init);
-  } catch {
-    return { ok: false, message: `${fallback} (network error).` };
+    res = await (options ? fetchWithAuth(url, init, options) : fetchWithAuth(url, init));
+  } catch (err) {
+    // By name, not instanceof: FetchTimeoutError (apiClient) and the platform's
+    // DOMException both call themselves TimeoutError.
+    if (err instanceof Error && err.name === "TimeoutError") {
+      return { ok: false, message: `${fallback} (no answer from the server in time).`, code: "TIMEOUT" };
+    }
+    return { ok: false, message: `${fallback} (network error).`, code: "NETWORK" };
   }
   if (!res.ok) return readError(res, fallback);
   const body = res.status === 204 ? null : await res.json().catch(() => null);
@@ -147,6 +164,7 @@ export function normalizeProject(raw: unknown): Project | null {
     createdAt: str(o.createdAt) ?? str(o.created_at),
     updatedAt: str(o.updatedAt) ?? str(o.updated_at),
     search: normalizeSearch(o.search),
+    attachedKbIds: Array.isArray(o.attachedKbIds) ? o.attachedKbIds.filter((k): k is string => typeof k === "string") : [],
   };
 }
 
@@ -224,7 +242,7 @@ export function createProjectWithFreeName(input: CreateProjectInput): Promise<Pr
 
 export async function updateProject(
   id: string,
-  patch: { name?: string; instructions?: string; defaultSkillId?: string | null },
+  patch: { name?: string; instructions?: string; defaultSkillId?: string | null; attachedKbIds?: string[] },
 ): Promise<ProjectResult<{ project: Project | null }>> {
   const r = await request(
     `${API}/${encodeURIComponent(id)}`,
@@ -244,13 +262,20 @@ export async function deleteProject(id: string): Promise<ProjectResult> {
   return { ok: true };
 }
 
-export async function addDocumentsToProject(
-  id: string,
-  docIds: string[],
-): Promise<ProjectResult<AddDocumentsOutcome>> {
+export function addDocumentsToProject(id: string, docIds: string[]): Promise<ProjectResult<AddDocumentsOutcome>> {
+  return postDocuments(id, { doc_ids: docIds });
+}
+
+/** "Add whole folder": every document in a library folder and its subfolders —
+ * how a folder upload saved to the library ends up in the project. */
+export function addFolderToProject(id: string, folderId: string): Promise<ProjectResult<AddDocumentsOutcome>> {
+  return postDocuments(id, { folder_id: folderId, include_subfolders: true });
+}
+
+async function postDocuments(id: string, body: Record<string, unknown>): Promise<ProjectResult<AddDocumentsOutcome>> {
   const r = await request(
     `${API}/${encodeURIComponent(id)}/documents`,
-    { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ doc_ids: docIds }) },
+    { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) },
     "Couldn't add to the project",
   );
   if (!r.ok) return r;

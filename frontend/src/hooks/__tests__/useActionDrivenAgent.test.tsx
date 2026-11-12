@@ -412,10 +412,36 @@ describe("useActionDrivenAgent", () => {
       upsertToolCall: vi.fn(),
       upsertDelegation: vi.fn(),
       onRunStart: vi.fn(),
+      onRunRequested: vi.fn(),
+      onRunAcknowledged: vi.fn(),
       onRunSettled: vi.fn(),
       onStage: vi.fn(),
     };
   }
+
+  it("announces pending before the response and starts only after RUN_STARTED", async () => {
+    const sink = makeSink();
+    let respond!: (r: Response) => void;
+    fetchWithAuth.mockImplementationOnce(() => new Promise<Response>((resolve) => { respond = resolve; }));
+    const { result } = renderHook(() => useActionDrivenAgent({ skillId: "s", sessionId: "sess-1", activitySink: sink }));
+    const running = result.current.triggerAction("workspace", { name: "click" });
+    expect(sink.onRunRequested).toHaveBeenCalledOnce();
+    expect(sink.onRunAcknowledged).not.toHaveBeenCalled();
+    respond(sseResponse([frame({ type: "RUN_STARTED" }), frame({ type: "RUN_FINISHED" })]));
+    await running;
+    expect(sink.onRunAcknowledged).toHaveBeenCalledOnce();
+    expect(sink.onRunSettled).toHaveBeenCalledWith({});
+  });
+
+  it("reports an HTTP rejection to the activity sink without claiming work started", async () => {
+    const sink = makeSink();
+    fetchWithAuth.mockResolvedValueOnce(new Response("Forbidden", { status: 403 }));
+    const { result } = renderHook(() => useActionDrivenAgent({ skillId: "s", sessionId: "sess-1", activitySink: sink }));
+    await expect(result.current.triggerAction("workspace", { name: "click" })).rejects.toThrow("403");
+    expect(sink.onRunRequested).toHaveBeenCalledOnce();
+    expect(sink.onRunAcknowledged).not.toHaveBeenCalled();
+    expect(sink.onRunSettled).toHaveBeenCalledWith({ error: expect.stringContaining("403") });
+  });
 
   it("activitySink: drives tool-call transitions (running → success), fires onRunStart + onRunSettled(no error) on RUN_FINISHED", async () => {
     const sink = makeSink();
@@ -537,7 +563,7 @@ describe("useActionDrivenAgent", () => {
     });
   });
 
-  it("activitySink: settles even when the stream ends without a terminal event", async () => {
+  it("activitySink: reports failure when the stream ends without a terminal event", async () => {
     const sink = makeSink();
     fetchWithAuth.mockResolvedValueOnce(
       sseResponse([frame({ type: "RUN_STARTED" })]),
@@ -545,10 +571,10 @@ describe("useActionDrivenAgent", () => {
     const { result } = renderHook(() =>
       useActionDrivenAgent({ skillId: "s", sessionId: "sess-1", activitySink: sink }),
     );
-    await result.current.triggerAction("workspace", { name: "click" });
+    await expect(result.current.triggerAction("workspace", { name: "click" })).rejects.toThrow("confirmed completion");
     expect(sink.onRunStart).toHaveBeenCalledOnce();
     expect(sink.onRunSettled).toHaveBeenCalledOnce();
-    expect(sink.onRunSettled).toHaveBeenCalledWith({});
+    expect(sink.onRunSettled).toHaveBeenCalledWith({ error: expect.stringContaining("confirmed completion"), status: "unknown" });
   });
 
   it("no activitySink: hook still works (backward compatible)", async () => {

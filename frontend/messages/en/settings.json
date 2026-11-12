@@ -1,0 +1,69 @@
+{
+  "SettingsPage": {
+    "title": "Settings",
+    "navLabel": "Settings",
+    "navInstructions": "Instructions",
+    "navMemory": "Memory",
+    "navVoice": "Voice and alerts",
+    "navModels": "Models",
+    "navConnections": "Connections",
+    "navLanguage": "Language",
+    "instructionsTitle": "Instructions",
+    "instructionsBody": "Tell the assistant about you and how you like answers. Used in every chat; projects can add their own.",
+    "memoryTitle": "Memory",
+    "memoryBody": "Notes the assistant keeps from your chats so later ones can build on them. Never the contents of your documents."
+  },
+  "LanguageSection": {
+    "title": "Language",
+    "body": "The language this app shows its menus, buttons and help in. Assistants answer in it too, unless you write in another language.",
+    "switchLabel": "Language"
+  },
+  "VoiceAndAlerts": {
+    "title": "Voice and alerts",
+    "readAloud": "Read replies aloud",
+    "readAloudNote": "Skills with a voice read each reply as it arrives.",
+    "notifications": "Notifications",
+    "notificationsBlocked": "Blocked in this browser’s settings. Allow notifications for this site, then reload.",
+    "notificationsIos": "On iPhone, add the app to your Home Screen first.",
+    "notificationsTest": "Send a test",
+    "notificationsNote": "When a long task finishes or something needs your approval."
+  },
+  "ModelsSection": {
+    "title": "Models",
+    "body": "Chats use Auto: each assistant picks its own model. Fast and Thorough are always in the composer’s + menu.",
+    "specific": "Choose a specific model",
+    "specificNote": "Adds every model this workspace allows to the composer's Model menu. Some are slower or cost more."
+  },
+  "McpTokensSection": {
+    "title": "Connections",
+    "body": "Use your skills from Claude Code or another MCP client. A token lasts 90 days; treat it like a password.",
+    "defaultName": "Claude Code",
+    "loadFailed": "Couldn't load your tokens.",
+    "createFailed": "Couldn't create a token. Please try again.",
+    "revokeTitle": "Revoke this token?",
+    "revokeDescription": "MCP clients using it stop working straight away.",
+    "revokeConfirm": "Revoke",
+    "revokeFailed": "Couldn't revoke that token. Please try again.",
+    "copyFailed": "Couldn't copy — select the command and copy it by hand.",
+    "newToken": "Your new token — copy it now, it won't be shown again.",
+    "newTokenCanApprove": "This token can approve routine actions from that client or the CLI. You'll get a notification each time it does.",
+    "forClaudeCode": "For Claude Code, run:",
+    "otherClients": "Other clients: streamable HTTP at <mono>{endpoint}</mono> with the header <mono>{header}</mono>.",
+    "copyCommand": "Copy command",
+    "copied": "Copied",
+    "tokenName": "Token name",
+    "creating": "Creating…",
+    "create": "Create token",
+    "canApprove": "Can approve actions",
+    "approveWarning": "Lets this client or the CLI approve routine actions that tools prepare for you (for example logging hours), without the web app. Anything holding this token can approve, so give it only to a client you control. It lasts 30 days; anything high-risk still needs you to sign in.",
+    "yourTokens": "Your tokens",
+    "loading": "Loading…",
+    "none": "None yet.",
+    "canApproveBadge": "Can approve",
+    "tokenMeta": "· expires {expires} · last used {lastUsed}",
+    "never": "never",
+    "revokeLabel": "Revoke {name}",
+    "revoke": "Revoke…",
+    "tryAgain": "Try again"
+  }
+}

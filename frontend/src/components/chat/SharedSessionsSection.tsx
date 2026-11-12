@@ -10,6 +10,8 @@ interface SharedSessionsSectionProps {
   /** Called with the thread's own skill id, so a caller can open the thread
    * on the agent it belongs to rather than the one currently on screen. */
   onSelectSession: (sessionId: string, skillId: string) => void;
+  /** The sidebar's one search; this list has no search box of its own. */
+  query?: string;
 }
 
 /**
@@ -23,7 +25,7 @@ interface SharedSessionsSectionProps {
  * - A load failure renders a visible error with a retry (CLAUDE.md #8 NEVER
  *   SILENT) rather than silently hiding the section.
  */
-export function SharedSessionsSection({ activeSessionId, onSelectSession }: SharedSessionsSectionProps) {
+export function SharedSessionsSection({ activeSessionId, onSelectSession, query }: SharedSessionsSectionProps) {
   const { sessions, isLoading, error, refetch } = useSharedSessions();
   // A retry clears `error` while it runs; keep the section (with a pending
   // state) on screen until it resolves, so Retry never makes it vanish.
@@ -57,12 +59,16 @@ export function SharedSessionsSection({ activeSessionId, onSelectSession }: Shar
         </div>
       ) : (
         <div className="max-h-40 overflow-y-auto">
+          <p className="px-3 py-2 text-xs text-muted-foreground">
+            Each row is a separate thread using its own skill. Sharing lets you reply; it doesn&apos;t confirm the owner has started work.
+          </p>
           <SkillSessionPanel
             sessions={sessions}
             activeSessionId={activeSessionId}
             isLoading={false}
             onSelectSession={(sid) => onSelectSession(sid, sessions.find((s) => s.session_id === sid)?.skill_id ?? "")}
             showOwner
+            query={query}
             ariaLabel="Conversations shared with me"
           />
         </div>

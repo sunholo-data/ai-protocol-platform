@@ -71,7 +71,7 @@ export function SidebarSection({
   }
 
   return (
-    <details open={open} className="group border-b border-border">
+    <details open={open} className="group/section pt-2">
       <summary
         onClick={(e) => {
           // Drive open state ourselves so it can be persisted; preventDefault
@@ -81,14 +81,14 @@ export function SidebarSection({
         }}
         // Sentence case, readable weight (brand: no all-caps headings); a
         // 44px row on phones so the sheet's sections are easy to tap.
-        className="flex min-h-[44px] cursor-pointer select-none items-center gap-2 px-4 text-sm font-semibold text-foreground hover:bg-muted/60 md:min-h-[36px] md:px-3"
+        className="flex min-h-[44px] cursor-pointer select-none items-center gap-1.5 px-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground md:min-h-[28px] md:px-3"
       >
-        <SectionChevron />
         <span className="flex-1 truncate">{title}</span>
         {badge}
         {action}
+        <SectionChevron />
       </summary>
-      <div className={bodyClassName ?? "px-3 pb-3 pt-1"}>{children}</div>
+      <div className={bodyClassName ?? "px-2 pb-2"}>{children}</div>
     </details>
   );
 }
@@ -96,7 +96,7 @@ export function SidebarSection({
 function SectionChevron() {
   return (
     <svg
-      className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90"
+      className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-[transform,opacity] group-open/section:rotate-90 group-hover/section:opacity-100 [@media(hover:none)]:opacity-100"
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"

@@ -148,8 +148,21 @@ class TestBuildDocumentContext:
                 "doc123", mode="markdown", section="Introduction", caller_uid=UNCHECKED_INTERNAL
             )
         assert "Introduction" in content
-        # Data section should not appear
-        assert "Data" not in content
+        # "Data" is an H2 inside the H1 "Introduction": a section includes its
+        # subsections. Stopping at the first heading of ANY level returned one
+        # paragraph of a chapter that runs on for pages.
+        assert "Data" in content and "item one" in content
+
+    def test_subsection_excludes_its_parent_text(self):
+        from tools.documents.context import build_document_context
+
+        with patch("tools.documents.context.get_document", return_value=self._fake_firestore_doc()):
+            content, _ = build_document_context(
+                "doc123", mode="markdown", section="Data", caller_uid=UNCHECKED_INTERNAL
+            )
+        assert "item one" in content
+        assert "This is a paragraph." not in content
+        assert "Section 1.1 Data" in content and "in: Introduction" in content
 
     def test_missing_section_refuses_instead_of_returning_an_empty_document(self):
         """A section that matches nothing must SAY so (PRECUT-HARDENING M2).

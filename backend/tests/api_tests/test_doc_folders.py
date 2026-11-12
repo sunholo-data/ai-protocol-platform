@@ -130,15 +130,20 @@ class TestGetFolderDocuments:
 
     def test_listing_omits_parsed_blocks(self, app_a: TestClient):
         """A listing is metadata only — blocks made one folder a 2.2 MB response."""
-        docs = [{"id": "doc1", "parseStatus": "parsed", "blockCount": 2, "blocks": [{"type": "text"}] * 2}]
+        import db.folders as folders_db
+
+        docs = [{"id": "doc1", "parseStatus": "parsed", "blockCount": 2}]
         with (
             patch("db.folders.get_folder", return_value={"id": "f1", "userId": "user_a"}),
-            patch("db.folders.list_folder_documents", return_value=docs),
+            patch("db.folders.list_folder_documents", return_value=docs) as listing,
         ):
             resp = app_a.get("/api/folders/f1/documents")
         assert resp.status_code == 200
-        doc = resp.json()["documents"][0]
-        assert "blocks" not in doc and doc["blockCount"] == 2
+        assert resp.json()["documents"][0]["blockCount"] == 2
+        # Projected at the query, so the content is never even read.
+        fields = listing.call_args.kwargs["fields"]
+        assert fields == folders_db.LISTING_FIELDS
+        assert not {"blocks", "editedBlocks", "sourceMarkdown"} & set(fields)
 
     def test_returns_empty_for_new_folder(self, app_a: TestClient):
         with (

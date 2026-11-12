@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useRef, useState, type MouseEvent } from "react";
+import Link from "next/link";
 import * as Popover from "@radix-ui/react-popover";
-import { Check, ChevronsUpDown, Star } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, SlidersHorizontal, Star } from "lucide-react";
 import type { Skill } from "@/types/skill";
 import { cn } from "@/lib/utils";
 import { skillHref } from "./skillHref";
@@ -11,6 +11,8 @@ import { headerControl } from "./headerControls";
 import { PLATFORM_OWNER_UID } from "@/lib/platformOwner";
 import { SkillStatusBadge } from "@/components/skills/SkillStatusBadge";
 import { FLOATING_SURFACE } from "@/lib/surfaces";
+import { useLocale, type Locale } from "@/i18n";
+import { skillText } from "@/hooks/useSkillText";
 
 /**
  * SkillSwitcher — a single, professional skill picker that replaces the old
@@ -78,8 +80,9 @@ export function isSystemSkill(skill: Pick<Skill, "tags">): boolean {
   return (skill.tags ?? []).includes(SYSTEM_TAG);
 }
 
-function skillName(skill: Skill): string {
-  return skill.displayName || skill.name || skill.skillId.slice(0, 8);
+/** The name a person reads: in their language when the skill translates it. */
+function skillName(skill: Skill, locale: Locale): string {
+  return skillText(skill, locale).displayName || skill.name || skill.skillId.slice(0, 8);
 }
 
 function categoryOf(skill: Skill): string | null {
@@ -118,7 +121,14 @@ interface SkillSwitcherProps {
   currentUserId?: string | null;
   /** Optional hook to notify a parent when a skill is chosen (before navigation). */
   onNavigate?: (skill: Skill) => void;
+  /** Footer action: open the active skill's settings (Skill Studio). */
+  onEditSkill?: () => void;
+  /** Footer action: start a new skill. */
+  onCreateSkill?: () => void;
 }
+
+const FOOTER_ROW =
+  "flex min-h-[44px] w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm text-foreground transition-colors hover:bg-muted md:min-h-[36px]";
 
 /** A rendered group: a labelled (or highlighted) run of skill rows. */
 interface Group {
@@ -134,11 +144,13 @@ export function SkillSwitcher({
   defaultSkillId,
   currentUserId,
   onNavigate,
+  onEditSkill,
+  onCreateSkill,
 }: SkillSwitcherProps) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const locale = useLocale();
 
   const active = skills.find((s) => s.skillId === activeSkillId);
 
@@ -149,10 +161,13 @@ export function SkillSwitcher({
     const q = query.trim().toLowerCase();
     if (!q) return selectable;
     return selectable.filter((s) => {
-      const hay = `${s.displayName ?? ""} ${s.name ?? ""} ${s.description ?? ""}`.toLowerCase();
+      // Match what's shown AND the base text, so either language finds it.
+      const shown = skillText(s, locale);
+      const hay =
+        `${shown.displayName} ${shown.description} ${s.displayName ?? ""} ${s.name ?? ""} ${s.description ?? ""}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [skills, query]);
+  }, [skills, query, locale]);
 
   // Partition every skill into exactly one group. Precedence matters:
   // in-development first (admin skills always corral together), then the pinned
@@ -198,20 +213,29 @@ export function SkillSwitcher({
     return out;
   }, [filtered, defaultSkillId, currentUserId]);
 
-  function selectSkill(skill: Skill) {
+  function footer(action: () => void) {
+    setOpen(false);
+    setQuery("");
+    action();
+  }
+
+  // A real link, so a skill can open in a new tab; a plain click also closes
+  // the picker.
+  function onSkillClick(e: MouseEvent, skill: Skill) {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     setOpen(false);
     setQuery("");
     onNavigate?.(skill);
-    router.push(skillHref(skill));
   }
 
   function renderRow(s: Skill, highlight?: boolean) {
     const isActive = s.skillId === activeSkillId;
     return (
-      <button
+      <Link
         key={s.skillId}
-        type="button"
-        onClick={() => selectSkill(s)}
+        href={skillHref(s)}
+        aria-current={isActive ? "page" : undefined}
+        onClick={(e) => onSkillClick(e, s)}
         className={cn(
           "flex min-h-[44px] w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm text-foreground transition-colors hover:bg-muted md:min-h-[36px]",
           highlight && "bg-accent/60 ring-1 ring-border",
@@ -219,11 +243,11 @@ export function SkillSwitcher({
         )}
       >
         <SkillAvatar skill={s} />
-        <span className="min-w-0 flex-1 truncate">{skillName(s)}</span>
+        <span className="min-w-0 flex-1 truncate">{skillName(s, locale)}</span>
         {highlight ? <Star className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden /> : null}
         <SkillStatusBadge tags={s.tags} variant="dot" />
         {isActive ? <Check className="h-4 w-4 shrink-0 text-foreground" aria-hidden /> : null}
-      </button>
+      </Link>
     );
   }
 
@@ -238,7 +262,7 @@ export function SkillSwitcher({
       <Popover.Trigger asChild>
         <button
           type="button"
-          aria-label="Switch skill"
+          aria-label={active ? `Skill: ${skillName(active, locale)}. Switch skill` : "Switch skill"}
           // Phones: the skill name IS the page title — borderless, semibold,
           // allowed two lines instead of truncating to "Demo Resear…". From
           // `sm` it is a bordered control like the rest of the header.
@@ -251,7 +275,7 @@ export function SkillSwitcher({
             <>
               <SkillAvatar skill={active} />
               <span className="min-w-0 font-semibold leading-tight max-sm:line-clamp-2 max-sm:break-words sm:truncate sm:font-medium">
-                {skillName(active)}
+                {skillName(active, locale)}
               </span>
             </>
           ) : (
@@ -299,6 +323,23 @@ export function SkillSwitcher({
               ))
             )}
           </div>
+          {/* Skill actions live with the skills, not in the account menu. */}
+          {onEditSkill || onCreateSkill ? (
+            <div className="mt-1 border-t border-border pt-1">
+              {onEditSkill && active ? (
+                <button type="button" className={FOOTER_ROW} onClick={() => footer(onEditSkill)}>
+                  <SlidersHorizontal className="h-4 w-4 text-muted-foreground" aria-hidden />
+                  <span className="min-w-0 truncate">Edit the {skillName(active, locale)} skill</span>
+                </button>
+              ) : null}
+              {onCreateSkill ? (
+                <button type="button" className={FOOTER_ROW} onClick={() => footer(onCreateSkill)}>
+                  <Plus className="h-4 w-4 text-muted-foreground" aria-hidden />
+                  Create a skill
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

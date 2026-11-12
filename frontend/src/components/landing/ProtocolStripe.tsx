@@ -9,13 +9,13 @@ export function ProtocolStripe() {
     <section className="border-y border-border bg-muted/20">
       <div className="mx-auto w-full max-w-7xl px-6 py-10 md:px-10">
         <div className="mb-6 flex items-end justify-between">
-          <h2 className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+          <h2 className="font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
             Built on
           </h2>
           {hasTechRoute ? (
             <Link
               href={demo.techHref}
-              className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:text-primary"
+              className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:text-primary"
             >
               See the full stack ↗
             </Link>
@@ -51,7 +51,7 @@ export function ProtocolStripe() {
                     href={pillar.spec}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="absolute right-2 top-2 rounded px-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/70 transition-colors hover:text-primary"
+                    className="absolute right-2 top-2 rounded px-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground/70 transition-colors hover:text-primary"
                     aria-label={`${pillar.label} spec — opens in a new tab`}
                   >
                     spec ↗

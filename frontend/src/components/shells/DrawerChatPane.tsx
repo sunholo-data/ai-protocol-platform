@@ -62,7 +62,7 @@ export function DrawerChatPane({
 
   const sessionId = searchParams.get("session");
   const enteredViaResume = useRef<boolean>(sessionId !== null).current;
-  const { initialMessages, historyError } = useSessionMessages(sessionId);
+  const { initialMessages, isLoadingHistory, historyError } = useSessionMessages(sessionId);
 
   const navigateToSession = useCallback(
     (sid: string) => {
@@ -116,6 +116,7 @@ export function DrawerChatPane({
         messages={messages}
         initialMessages={enteredViaResume ? initialMessages : undefined}
         historyError={historyError}
+        isLoadingHistory={enteredViaResume && isLoadingHistory}
         skillDisplayName={displayName}
         toolCalls={toolCalls}
         thinkingContent={thinkingContent}

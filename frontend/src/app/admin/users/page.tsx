@@ -13,6 +13,8 @@ import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/apiClient";
 import { SignInRequired } from "@/components/chat/SignInRequired";
+import { useConfirm } from "@/components/ui/confirm";
+import { PageLoading } from "@/components/ui/skeleton";
 
 type UserGroups = { email: string; uid: string; group_tags: string[] };
 type ProvenancedTag = { tag: string; provenances: string[] };
@@ -82,8 +84,16 @@ export default function UsersPage() {
     }
   };
 
+  const confirm = useConfirm();
   const revoke = async (tag: string) => {
     if (!data) return;
+    const ok = await confirm({
+      title: `Remove "${tag}" from ${data.email}?`,
+      description: "They lose whatever this tag gives them access to.",
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy(true);
     setNotice(null);
     try {
@@ -126,7 +136,7 @@ export default function UsersPage() {
     }
   };
 
-  if (loading) return <Centered>Loading…</Centered>;
+  if (loading) return <PageLoading />;
   if (!user) return <SignInRequired />;
   if (status === "forbidden") {
     return (
@@ -254,7 +264,7 @@ export default function UsersPage() {
                         {t.provenances.map((p) => (
                           <span
                             key={p}
-                            className="rounded-sm bg-muted px-1 text-[10px] uppercase text-muted-foreground"
+                            className="rounded-sm bg-muted px-1 text-[11px] uppercase text-muted-foreground"
                           >
                             {p}
                           </span>

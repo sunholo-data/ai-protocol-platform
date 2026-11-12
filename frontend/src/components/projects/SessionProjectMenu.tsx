@@ -30,9 +30,15 @@ function chatTitle(session: ChatSessionSummary): string {
 export function SessionProjectMenu({
   session,
   onFeedback,
+  onRename,
+  onDelete,
 }: {
   session: ChatSessionSummary;
   onFeedback: (feedback: SessionProjectFeedback) => void;
+  /** Adds "Rename" at the top: the row's one menu holds every action. */
+  onRename?: () => void;
+  /** Adds "Delete…" at the bottom (the parent confirms). */
+  onDelete?: () => void;
 }) {
   const title = chatTitle(session);
   const current = session.project_id ?? null;
@@ -69,18 +75,26 @@ export function SessionProjectMenu({
           onClick={(e) => e.stopPropagation()}
           aria-label={`More actions for ${title}`}
           title="More"
-          className="shrink-0 rounded p-1 text-gray-400 opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
         >
           <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} className={MENU_CONTENT_CLASS} onClick={(e) => e.stopPropagation()}>
+          {onRename && (
+            <>
+              <DropdownMenu.Item className={MENU_ITEM_CLASS} onSelect={onRename}>
+                Rename
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator className="my-1 h-px bg-border" />
+            </>
+          )}
           <DropdownMenu.Item className={MENU_ITEM_CLASS} onSelect={() => void makeProject()}>
             Make this a project
           </DropdownMenu.Item>
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
-          <DropdownMenu.Label className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <DropdownMenu.Label className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             Move to project
           </DropdownMenu.Label>
           <MoveTargets current={current} onMove={(id, name) => void move(id, name)} />
@@ -88,6 +102,14 @@ export function SessionProjectMenu({
             <DropdownMenu.Item className={MENU_ITEM_CLASS} onSelect={() => void move(null, "")}>
               No project
             </DropdownMenu.Item>
+          )}
+          {onDelete && (
+            <>
+              <DropdownMenu.Separator className="my-1 h-px bg-border" />
+              <DropdownMenu.Item className={`${MENU_ITEM_CLASS} text-destructive`} onSelect={onDelete}>
+                Delete…
+              </DropdownMenu.Item>
+            </>
           )}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

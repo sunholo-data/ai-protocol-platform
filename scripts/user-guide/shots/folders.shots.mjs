@@ -17,16 +17,23 @@ export default async function folders({ page, base, shot, tidy, lib, around }) {
   const open = async (url) => {
     await page.goto(`${base}${url}`, { waitUntil: "networkidle", timeout: 90000 });
     await tidy();
-    const show = page.getByRole("button", { name: "Show sidebar" });
+    const show = page.getByRole("button", { name: /^(Show conversations and files|Show sidebar)$/ });
     if (await show.count()) await show.first().click();
+    // Files starts as your recent files; the folder tree is behind "Browse all folders".
+    const browse = page.getByRole("button", { name: "Browse all folders" });
+    if (await browse.count()) await browse.first().click();
     await page.getByText("Project Phoenix").first().waitFor({ timeout: 30000 });
     await page.waitForTimeout(800);
   };
-  const sidebar = () => page.locator("aside").filter({ hasText: "Your files" }).first();
+  const sidebar = () => page.locator("aside").filter({ has: page.getByPlaceholder("Search chats and files") }).first();
   const folderRow = (name) => page.locator("div.group\\/folder").filter({ hasText: name }).first();
   // The nearest row around the file name (outer containers also carry `group`).
   const docRow = (name) =>
-    page.getByText(name, { exact: true }).first().locator('xpath=ancestor::div[contains(concat(" ", @class, " "), " group ")][1]');
+    page
+      // In the folder tree, not the Recent list above it.
+      .locator(`xpath=//*[normalize-space(text())="${name}"][not(ancestor::ul[@aria-label="Recent files"])]`)
+      .first()
+      .locator('xpath=ancestor::div[contains(concat(" ", @class, " "), " group ")][1]');
   async function folderMenu(name) {
     const row = folderRow(name);
     await row.hover();
@@ -70,14 +77,14 @@ export default async function folders({ page, base, shot, tidy, lib, around }) {
   // Delete: a folder with documents is kept; an empty one asks first
   await folderMenu("Project Phoenix 2026");
   await page.getByRole("menuitem", { name: "Delete" }).click();
-  await page.getByRole("alertdialog", { name: "Delete folder?" }).getByRole("button", { name: "Delete" }).click();
+  await page.getByRole("alertdialog", { name: /^Delete folder/ }).getByRole("button", { name: "Delete" }).click();
   await page.getByText(/still has \d+ documents/).waitFor();
   await crop("07-folder-delete-not-empty", folderRow("Project Phoenix 2026"), page.getByRole("alert").filter({ hasText: "still has" }));
   await page.getByRole("alert").filter({ hasText: "still has" }).getByRole("button", { name: "Dismiss" }).click();
   await folderMenu("Old drafts");
   await page.getByRole("menuitem", { name: "Delete" }).click();
-  await crop("08-folder-delete-confirm", folderRow("Old drafts"), page.getByRole("alertdialog", { name: "Delete folder?" }));
-  await page.getByRole("alertdialog", { name: "Delete folder?" }).getByRole("button", { name: "Delete" }).click();
+  await shot("08-folder-delete-confirm", page.getByRole("alertdialog", { name: /^Delete folder/ }));
+  await page.getByRole("alertdialog", { name: /^Delete folder/ }).getByRole("button", { name: "Delete" }).click();
   await folderRow("Old drafts").waitFor({ state: "detached" });
 
   // Move documents
@@ -94,7 +101,7 @@ export default async function folders({ page, base, shot, tidy, lib, around }) {
   await page.getByRole("alertdialog", { name: "Replace document?" }).getByRole("button", { name: "Cancel" }).click();
   const dt = await page.evaluateHandle(() => new DataTransfer());
   const target = folderRow("Market research").locator("..");
-  const dragged = page.getByText("Phoenix budget 2026.xlsx", { exact: true }).first().locator('xpath=ancestor::*[@draggable="true"][1]');
+  const dragged = page.locator('[draggable="true"]').filter({ hasText: "Phoenix budget 2026.xlsx" }).last();
   await dragged.dispatchEvent("dragstart", { dataTransfer: dt });
   await target.dispatchEvent("dragenter", { dataTransfer: dt });
   await target.dispatchEvent("dragover", { dataTransfer: dt });
@@ -136,7 +143,7 @@ export default async function folders({ page, base, shot, tidy, lib, around }) {
   await page.getByRole("dialog", { name: "Who can search this folder" }).getByRole("button", { name: "Cancel" }).click();
   await folderMenu("Project Phoenix 2026");
   await page.getByRole("menuitem", { name: "Stop searching" }).click();
-  await crop("20-stop-searching-confirm", folderRow("Project Phoenix 2026"), page.getByText(/Stop searching ‘/).first().locator(".."));
+  await shot("20-stop-searching-confirm", page.getByRole("alertdialog", { name: /^Stop searching/ }));
   await page.keyboard.press("Escape");
 
   // A skill shared with you: flagged up front, one button makes your copy

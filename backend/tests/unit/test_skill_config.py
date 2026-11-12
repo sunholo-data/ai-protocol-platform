@@ -298,3 +298,68 @@ def test_list_marketplace_excludes_system_agents(mock_fs):
 def test_increment_usage(mock_fs):
     skill_config.increment_usage("abc-123")
     mock_fs.increment_field.assert_called_once_with("skills", "abc-123", "usageCount")
+
+
+# --- lookup cache (2026-10-30): building one agent's delegates was 26 round trips ---
+
+
+def test_slug_resolution_and_misses_are_cached_until_a_write(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from db.models import SkillConfig
+    from skills import skill_config
+
+    doc = SkillConfig(
+        skillId="uuid-1", name="ppa-expert", description="PPA analysis", slug="ppa-expert", ownerId="platform"
+    ).model_dump(by_alias=True)
+    query = MagicMock(
+        side_effect=lambda *a, **k: [dict(doc, __id="uuid-1")] if ("slug", "==", "ppa-expert") in k["filters"] else []
+    )
+    get = MagicMock(return_value=None)
+    monkeypatch.setattr(skill_config.fs, "query_documents", query)
+    monkeypatch.setattr(skill_config.fs, "get_document", get)
+
+    assert skill_config.find_by_slug("platform", "ppa-expert").skill_id == "uuid-1"
+    assert skill_config.find_by_slug("platform", "ppa-expert").skill_id == "uuid-1"
+    assert skill_config.find_by_slug("platform", "gone") is None
+    assert skill_config.find_by_slug("platform", "gone") is None
+    assert query.call_count == 2  # one per distinct slug, not per call
+
+    assert skill_config.get_skill("deep-reasoner") is None
+    assert skill_config.get_skill("deep-reasoner") is None
+    assert get.call_count == 1  # a missing id is not re-read within the TTL
+
+    skill_config._cache_invalidate("uuid-1")  # any write
+    assert skill_config.find_by_slug("platform", "gone") is None
+    assert query.call_count == 3
+
+
+def test_prime_refs_resolves_many_delegates_in_one_read(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from db.models import SkillConfig
+    from skills import skill_config
+
+    docs = [
+        dict(
+            SkillConfig(skillId=f"uuid-{n}", name=n, description="d", slug=n, ownerId="platform").model_dump(
+                by_alias=True
+            ),
+            __id=f"uuid-{n}",
+        )
+        for n in ("ppa-expert", "web-researcher")
+    ]
+    query = MagicMock(return_value=docs)
+    get = MagicMock(return_value=None)
+    monkeypatch.setattr(skill_config.fs, "query_documents", query)
+    monkeypatch.setattr(skill_config.fs, "get_document", get)
+
+    skill_config.prime_refs("platform", ["ppa-expert", "web-researcher", "deep-reasoner"])
+    assert query.call_count == 1
+    assert skill_config.find_by_slug("platform", "ppa-expert").skill_id == "uuid-ppa-expert"
+    assert skill_config.find_by_slug("platform", "web-researcher").skill_id == "uuid-web-researcher"
+    assert skill_config.find_by_slug("platform", "deep-reasoner") is None
+    assert skill_config.get_skill("ppa-expert") is None  # a slug is not a doc id
+    assert query.call_count == 1 and get.call_count == 0  # all from the one read
+    skill_config.prime_refs("platform", ["ppa-expert", "deep-reasoner"])
+    assert query.call_count == 1  # already settled

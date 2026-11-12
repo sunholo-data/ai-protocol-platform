@@ -75,8 +75,10 @@ def _content_disposition(filename: str) -> str:
 
 
 @router.get("/api/browser/artefacts/{artefact_id}")
+@router.get("/api/media/{artefact_id}")
 async def get_browser_artefact(artefact_id: str, user: _CurrentUser):
-    """Stream one browser artefact belonging to the caller.
+    """Stream one artefact belonging to the caller: a browser screenshot, or media
+    a tool made (``adk.media_results.save_user_media``, served as ``/api/media/<id>``).
 
     Returns 400 for a malformed id, 404 when the caller's namespace holds no
     such artefact (including when it is somebody else's), 502 when the store

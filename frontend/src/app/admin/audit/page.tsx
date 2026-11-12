@@ -14,6 +14,8 @@ import { SignInRequired } from "@/components/chat/SignInRequired";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminScope } from "@/hooks/useAdminScope";
 import { fetchWithAuth } from "@/lib/apiClient";
+import { PageLoading } from "@/components/ui/skeleton";
+import { useFormat, type Formatter } from "@/i18n";
 
 interface AuditEntry {
   id: string;
@@ -37,14 +39,15 @@ type State =
   | { kind: "error"; message: string }
   | { kind: "ready"; data: AuditResponse };
 
-function fmt(ts: string): string {
+function fmtTs(ts: string, fmt: Formatter): string {
   if (!ts) return "—";
   const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? ts : d.toLocaleString();
+  return Number.isNaN(d.getTime()) ? ts : fmt.dateTime(d);
 }
 
 export default function AuditPage() {
   const { user, loading } = useAuth();
+  const fmt = useFormat();
   const { state: scopeState, isAdmin } = useAdminScope(!loading && !!user);
   const [state, setState] = useState<State>({ kind: "loading" });
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -73,7 +76,7 @@ export default function AuditPage() {
     if (isAdmin) void load();
   }, [isAdmin, load]);
 
-  if (loading || scopeState === "loading") return <Centered>Loading…</Centered>;
+  if (loading || scopeState === "loading") return <PageLoading />;
   if (!user) return <SignInRequired />;
   if (scopeState === "error") {
     return (
@@ -143,7 +146,7 @@ export default function AuditPage() {
                   <tbody>
                     {state.data.entries.map((e) => (
                       <tr key={e.id} className="border-t align-top">
-                        <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{fmt(e.ts)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{fmtTs(e.ts, fmt)}</td>
                         <td className="px-3 py-2 text-xs">{e.actorEmail || e.actorUid || "—"}</td>
                         <td className="px-3 py-2">
                           <code className="text-xs">{e.action}</code>

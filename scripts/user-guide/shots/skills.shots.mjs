@@ -115,11 +115,13 @@ export default async function skills({ page, base, shot, tidy }) {
   await crop("01-skill-switcher", [switcher, list], { pad: 10 });
   await page.keyboard.press("Escape");
 
-  // Header buttons: configure this skill, create a new skill
-  await crop("02-header-buttons", [
-    page.getByRole("button", { name: "Configure this skill" }).first(),
-    page.getByRole("button", { name: "Create a new skill" }).first(),
-  ], { pad: 12 });
+  // Account menu: Edit this skill, Create a new skill
+  const accountButton = page.getByRole("button", { name: "Account menu" }).first();
+  await accountButton.click();
+  const accountMenu = page.getByRole("menu", { name: "Account" });
+  await accountMenu.waitFor();
+  await crop("02-account-menu", [accountButton, accountMenu], { pad: 10 });
+  await page.keyboard.press("Escape");
 
   // A built-in skill in Studio: read-only, Fork to customize
   await page.setViewportSize({ width: 1280, height: 1300 });

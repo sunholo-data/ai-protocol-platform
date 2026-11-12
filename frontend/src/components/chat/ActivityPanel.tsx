@@ -21,13 +21,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchWithAuth } from "@/lib/apiClient";
 import { DocIcon } from "@/components/icons";
-import type { ToolCallState, DelegationMarkerItem } from "@/hooks/useSkillAgent";
+import type { ToolCallState, DelegationMarkerItem, ModelEventItem, ModelWaitState } from "@/hooks/useSkillAgent";
 import { A2UISurfaceMount } from "@/components/protocols/A2UISurfaceMount";
 import { useSurfaceState } from "@/providers/SurfaceRegistry";
 import { ArrowIcon, StatusDot, WrenchIcon } from "@/components/activity/bits";
 import { ToolCallDetails, hasToolDetail } from "@/components/activity/ToolCallDetails";
 import { absoluteTime, activityTime, useNow } from "@/components/activity/format";
 import { useToolLabels } from "@/hooks/useToolLabels";
+import { useFormat } from "@/i18n";
 
 /** Session context shown in the pinned header row (model + voice config). */
 export interface ActivityContext {
@@ -68,6 +69,15 @@ interface ActivityPanelProps {
    * silently rewrites what the assistant can remember; this is the only place
    * the user (or a triager) can see it happened. */
   compactions?: { id: string; ts: number; eventsCompacted: number; summaryChars: number }[];
+  /** Model retries and fallbacks — each one is time the turn spent not
+   * answering, so they belong in the feed beside the tools. */
+  modelEvents?: ModelEventItem[];
+  /** The model request the turn is waiting on → a live "Waiting for…" row. */
+  modelWait?: ModelWaitState | null;
+  /** When the streaming chat turn began, or null when none is. Only a tool that
+   * started in THIS turn and has no result yet is running — tools loaded from
+   * history carry no result time and must not count up. */
+  turnStartedAt?: number | null;
 }
 
 type Entry =
@@ -79,10 +89,12 @@ type Entry =
       status: ToolCallState["status"];
       argsJson?: string;
       resultContent?: string;
+      endTs?: number;
     }
   | { id: string; ts: number; kind: "delegation"; name: string; mode: DelegationMarkerItem["mode"] }
   | { id: string; ts: number; kind: "document"; name: string }
   | { id: string; ts: number; kind: "compaction"; eventsCompacted: number; summaryChars: number }
+  | { id: string; ts: number; kind: "model"; event: ModelEventItem }
   | { id: string; ts: number; kind: "session" };
 
 // v6.11.0 — the curated workbench hides pure orchestration plumbing from the
@@ -93,6 +105,57 @@ type Entry =
 const _INTERNAL_TOOL_NAMES = new Set(["transfer_to_agent", "request_handoff"]);
 function isInternalToolName(name: string): boolean {
   return _INTERNAL_TOOL_NAMES.has(name);
+}
+
+/** "12s", "1m 05s" — elapsed wall-clock for a step. */
+export function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+const _MODEL_ERROR_LABELS: Record<string, string> = {
+  MODEL_RATE_LIMITED: "rate limited",
+  MODEL_UNAVAILABLE: "unavailable",
+  MODEL_AUTH_FAILED: "auth failed",
+  MODEL_REQUEST_INVALID: "rejected the request",
+  MODEL_TOOL_CALL_INVALID: "wrote a broken tool call",
+};
+
+function displayModel(model: string): string {
+  return model.includes("/") ? model.split("/").pop()! : model;
+}
+
+/** One sentence per retry/fallback: what failed, how long it cost, what's next. */
+function modelEventText(e: ModelEventItem): ReactNode {
+  const from = <span className="font-medium text-foreground/80">{displayModel(e.model)}</span>;
+  const to = e.toModel ? <span className="font-medium text-foreground/80">{displayModel(e.toModel)}</span> : null;
+  const waited = e.waitedS !== undefined ? `${e.waitedS.toFixed(e.waitedS < 10 ? 1 : 0)}s` : null;
+  const next =
+    e.kind === "fallback" ? (
+      <>switched to {to}</>
+    ) : (
+      <>retrying{e.delayS !== undefined ? ` in ${e.delayS.toFixed(1)}s` : ""}</>
+    );
+  if (e.reason === "provider_cooldown" || e.reason === "model_cooldown")
+    return (
+      <>
+        Skipped {from} after repeated failures — using {to}
+      </>
+    );
+  if (e.code === "MODEL_SILENT_STALL")
+    return (
+      <>
+        {from} sent nothing{waited ? ` for ${waited}` : ""} — {next}
+      </>
+    );
+  const what = _MODEL_ERROR_LABELS[e.code] ?? e.code.toLowerCase().replace(/^model_/, "").replace(/_/g, " ");
+  return (
+    <>
+      {from} {what}
+      {waited ? ` after ${waited}` : ""} — {next}
+    </>
+  );
 }
 
 // Resolve a model tier (e.g. "smart") → the actual model id via /api/models,
@@ -165,13 +228,14 @@ function ContextRow({ context }: { context: ActivityContext }) {
   );
 }
 
-function ToolRow({ entry, now }: { entry: Extract<Entry, { kind: "tool" }>; now: number }) {
+function ToolRow({ entry, now, live }: { entry: Extract<Entry, { kind: "tool" }>; now: number; live: boolean }) {
   const [open, setOpen] = useState(false);
   const hasDetail = hasToolDetail(entry.argsJson, entry.resultContent);
   // CLAUDE.md #9 — friendly label first; the raw tool name is secondary
   // detail (row tooltip + the expanded view).
   const labelFor = useToolLabels();
   const label = labelFor(entry.name);
+  const fmt = useFormat();
 
   return (
     <li className="rounded-md text-xs text-muted-foreground">
@@ -186,13 +250,22 @@ function ToolRow({ entry, now }: { entry: Extract<Entry, { kind: "tool" }>; now:
       >
         <WrenchIcon />
         <span className="flex-1 truncate font-medium text-foreground/80">{label}</span>
+        {entry.ts && (entry.endTs || live) ? (
+          <span
+            data-testid="activity-tool-duration"
+            title={entry.endTs ? "How long the tool took" : "Running for"}
+            className={`shrink-0 tabular-nums text-[11px] ${entry.endTs ? "text-muted-foreground/70" : "text-orange-500/80"}`}
+          >
+            {formatDuration((entry.endTs ?? now) - entry.ts)}
+          </span>
+        ) : null}
         {entry.ts ? (
           <time
             dateTime={new Date(entry.ts).toISOString()}
-            title={absoluteTime(entry.ts)}
-            className="shrink-0 tabular-nums text-[10px] text-muted-foreground/70"
+            title={absoluteTime(entry.ts, fmt)}
+            className="shrink-0 tabular-nums text-[11px] text-muted-foreground/70"
           >
-            {activityTime(entry.ts, now)}
+            {activityTime(entry.ts, now, fmt)}
           </time>
         ) : null}
         <StatusDot status={entry.status} />
@@ -205,7 +278,7 @@ function ToolRow({ entry, now }: { entry: Extract<Entry, { kind: "tool" }>; now:
       {open && hasDetail && (
         <div className="ml-6 mb-1.5 mr-2">
           {label !== entry.name && (
-            <p data-testid="activity-tool-raw-name" className="mb-1 font-mono text-[10px] text-muted-foreground/70">
+            <p data-testid="activity-tool-raw-name" className="mb-1 font-mono text-[11px] text-muted-foreground/70">
               {entry.name}
             </p>
           )}
@@ -218,6 +291,7 @@ function ToolRow({ entry, now }: { entry: Extract<Entry, { kind: "tool" }>; now:
 
 /** A simple icon + label + time row (delegation / document / session). */
 function SimpleRow({ icon, children, ts, now }: { icon: ReactNode; children: ReactNode; ts: number; now: number }) {
+  const fmt = useFormat();
   return (
     <li className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/40">
       {icon}
@@ -225,10 +299,10 @@ function SimpleRow({ icon, children, ts, now }: { icon: ReactNode; children: Rea
       {ts ? (
         <time
           dateTime={new Date(ts).toISOString()}
-          title={absoluteTime(ts)}
-          className="shrink-0 tabular-nums text-[10px] text-muted-foreground/70"
+          title={absoluteTime(ts, fmt)}
+          className="shrink-0 tabular-nums text-[11px] text-muted-foreground/70"
         >
-          {activityTime(ts, now)}
+          {activityTime(ts, now, fmt)}
         </time>
       ) : null}
     </li>
@@ -247,8 +321,16 @@ export function ActivityPanel({
   runStageLabel = null,
   runError = null,
   compactions,
+  modelEvents,
+  modelWait = null,
+  turnStartedAt = null,
 }: ActivityPanelProps) {
-  const now = useNow();
+  const isLive = (tc: { ts?: number; endTs?: number; status: ToolCallState["status"] }) =>
+    turnStartedAt !== null && !tc.endTs && tc.status !== "error" && (tc.ts ?? 0) >= turnStartedAt;
+  // Tick every second while something is counting up, else every 10s.
+  const liveTool = toolCalls.some(isLive);
+  const now = useNow(modelWait || liveTool ? 1000 : 10_000);
+  const fmt = useFormat();
   const [showInternal, setShowInternal] = useState(false);
   // A skill may push structured rich detail into the same tab via the A2UI
   // "activity" surface — rendered above the timeline when present.
@@ -264,8 +346,10 @@ export function ActivityPanel({
         status: tc.status,
         argsJson: tc.argsJson,
         resultContent: tc.resultContent,
+        endTs: tc.endTs,
       }),
     ),
+    ...(modelEvents ?? []).map((m): Entry => ({ id: m.id, ts: m.ts, kind: "model", event: m })),
     ...delegations.map(
       (d): Entry => ({ id: d.id, ts: d.ts, kind: "delegation", name: d.targetDisplay, mode: d.mode }),
     ),
@@ -293,6 +377,7 @@ export function ActivityPanel({
     !isThinking &&
     !isRunning &&
     !runError &&
+    !modelWait &&
     !activitySurface?.surface;
 
   // Nothing at all to show — the full-panel invitation (no context row either).
@@ -344,6 +429,25 @@ export function ActivityPanel({
                 <span className="min-w-0 flex-1 break-words">{runError}</span>
               </li>
             )}
+            {modelWait && !isThinking && (
+              <li
+                data-testid="activity-model-wait-row"
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground"
+                title={
+                  modelWait.deadlineS
+                    ? `If it sends nothing for ${Math.round(modelWait.deadlineS)}s the backup model takes over`
+                    : undefined
+                }
+              >
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-orange-400 animate-pulse" />
+                <span className="flex-1 truncate">
+                  Waiting for <span className="font-medium text-foreground/80">{displayModel(modelWait.model)}</span>
+                </span>
+                <span className="shrink-0 tabular-nums text-[11px] text-orange-500/80">
+                  {formatDuration(now - modelWait.since)}
+                </span>
+              </li>
+            )}
             {isThinking && (
               <li className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground">
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-orange-400 animate-pulse" />
@@ -370,7 +474,7 @@ export function ActivityPanel({
             {entries.map((e) => {
               if (e.kind === "tool") {
                 if (isInternalToolName(e.name) && !showInternal) return null;
-                return <ToolRow key={e.id} entry={e} now={now} />;
+                return <ToolRow key={e.id} entry={e} now={now} live={isLive(e)} />;
               }
               if (e.kind === "delegation")
                 return (
@@ -378,6 +482,26 @@ export function ActivityPanel({
                     {e.mode === "suggest" ? "Suggested " : "Delegated to "}
                     <span className="font-medium text-foreground/80">{e.name}</span>
                   </SimpleRow>
+                );
+              // Wraps rather than truncates: the sentence IS the detail.
+              if (e.kind === "model")
+                return (
+                  <li
+                    key={e.id}
+                    data-testid="activity-model-event"
+                    className="flex items-start gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/40"
+                    title={`${e.event.model}${e.event.toModel ? ` → ${e.event.toModel}` : ""} (${e.event.code}${e.event.reason ? `, ${e.event.reason}` : ""})`}
+                  >
+                    <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500/70" />
+                    <span className="min-w-0 flex-1 break-words">{modelEventText(e.event)}</span>
+                    <time
+                      dateTime={new Date(e.ts).toISOString()}
+                      title={absoluteTime(e.ts, fmt)}
+                      className="shrink-0 tabular-nums text-[11px] text-muted-foreground/70"
+                    >
+                      {activityTime(e.ts, now, fmt)}
+                    </time>
+                  </li>
                 );
               if (e.kind === "document")
                 return (

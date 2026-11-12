@@ -1,22 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { CircleHelp, LogOut, NotebookPen, Plus, Shield } from "lucide-react";
-import { SettingsIcon } from "@/components/icons";
+import { ChevronUp, CircleHelp, FolderKanban, LogOut, Settings, Shield } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminScope } from "@/hooks/useAdminScope";
-import { useAccountActions } from "@/components/shells/ShellActionsContext";
-import { NotificationsToggle } from "./NotificationsToggle";
+import { LanguageSwitch } from "@/components/settings/LanguageSwitch";
 
 /**
- * The account block at the foot of the phone menu sheet. On a phone the header
- * shows only menu · skill · new chat, so who you are and the skill-level
- * actions (Configure, Create, Admin, Sign out) live here instead of behind an
- * avatar button. Desktop keeps the header's UserMenu.
+ * The account block at the foot of the phone menu sheet: the same five links
+ * as the desktop avatar menu (UserMenu). Skill actions are in the skill picker.
  */
 export function AccountPanel() {
   const { user, signOut } = useAuth();
-  const account = useAccountActions();
   const { isAdmin } = useAdminScope(true);
   if (!user) return null;
 
@@ -26,8 +21,10 @@ export function AccountPanel() {
     "flex min-h-[44px] w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted";
 
   return (
-    <div className="border-t border-border p-2" data-testid="account-panel">
-      <div className="flex items-center gap-3 px-3 py-2">
+    // One row (who you are) that opens to the links, so the drawer's first
+    // view is chats and files, not an account menu.
+    <details className="group/account border-t border-border p-2" data-testid="account-panel">
+      <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-3 rounded-[var(--radius)] px-3 py-1 hover:bg-muted [&::-webkit-details-marker]:hidden">
         <span
           aria-hidden
           className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-sm font-medium text-muted-foreground"
@@ -45,20 +42,13 @@ export function AccountPanel() {
             <span className="block truncate text-xs text-muted-foreground">{user.email}</span>
           ) : null}
         </span>
-      </div>
-      {account?.onConfigure ? (
-        <button type="button" className={row} onClick={account.onConfigure}>
-          <SettingsIcon className="h-4 w-4 text-muted-foreground" /> Configure this skill
-        </button>
-      ) : null}
-      {account ? (
-        <button type="button" className={row} onClick={account.onCreate}>
-          <Plus className="h-4 w-4 text-muted-foreground" aria-hidden /> Create a new skill
-        </button>
-      ) : null}
-      <NotificationsToggle rowClassName={row} />
-      <Link href="/settings/instructions" className={row}>
-        <NotebookPen className="h-4 w-4 text-muted-foreground" aria-hidden /> Your instructions
+        <ChevronUp className="ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open/account:rotate-180" aria-hidden />
+      </summary>
+      <Link href="/settings" className={row}>
+        <Settings className="h-4 w-4 text-muted-foreground" aria-hidden /> Settings
+      </Link>
+      <Link href="/projects" className={row}>
+        <FolderKanban className="h-4 w-4 text-muted-foreground" aria-hidden /> Projects
       </Link>
       <Link href="/help" className={row}>
         <CircleHelp className="h-4 w-4 text-muted-foreground" aria-hidden /> Help
@@ -68,9 +58,10 @@ export function AccountPanel() {
           <Shield className="h-4 w-4 text-muted-foreground" aria-hidden /> Admin
         </Link>
       ) : null}
+      <LanguageSwitch className="mx-3 my-2" />
       <button type="button" className={row} onClick={() => void signOut()}>
         <LogOut className="h-4 w-4 text-muted-foreground" aria-hidden /> Sign out
       </button>
-    </div>
+    </details>
   );
 }

@@ -81,6 +81,19 @@ describe("DocListFolder", () => {
     expect(screen.getByText("summary.docx")).toBeInTheDocument();
   });
 
+  it("an open folder that is no longer selected offers its documents instead of claiming none", async () => {
+    const onSelect = vi.fn();
+    render(
+      <DocListFolder folder={folder} documents={[]} isActive={false} defaultOpen onSelect={onSelect} onDocClick={vi.fn()}>
+        <p>subfolder rows</p>
+      </DocListFolder>,
+    );
+    expect(screen.getByText("subfolder rows")).toBeInTheDocument();
+    expect(screen.queryByText("No documents yet")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Show 3 documents" }));
+    expect(onSelect).toHaveBeenCalledWith("f1");
+  });
+
   it("calls onSelect when folder is opened", async () => {
     const onSelect = vi.fn();
     render(

@@ -34,7 +34,7 @@ export function useProjectChatHref(
   uid: string | null,
 ): (project: { id: string; defaultSkillId?: string | null }, ask?: string) => string | null {
   const { skills } = useUserSkills(uid);
-  const tenantDefault = useTenantDefaultSkill(skills);
+  const tenantDefault = useTenantDefaultSkill(skills, uid);
   return useCallback(
     (project, ask = "") => {
       const skillId = project.defaultSkillId ?? tenantDefault ?? skills[0]?.skillId ?? null;

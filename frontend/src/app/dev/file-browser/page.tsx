@@ -286,7 +286,7 @@ export default function FileBrowserDevPage() {
             <aside className="flex w-64 shrink-0 flex-col border-r bg-muted/30">
               <div className="flex items-center justify-between border-b px-3 py-2">
                 <span className="text-xs font-semibold">My Documents</span>
-                <span className="text-[10px] text-muted-foreground">3 folders</span>
+                <span className="text-[11px] text-muted-foreground">3 folders</span>
               </div>
               <DocListSearch value={search} onChange={setSearch} />
               <div className="min-h-0 flex-1 overflow-y-auto px-1 py-1">

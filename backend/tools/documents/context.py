@@ -22,6 +22,31 @@ _PARSED_DOCS_COLLECTION = "parsed_documents"
 # --- Markdown renderer ---
 
 
+def _runs_markdown(runs: Any) -> str | None:
+    """A paragraph's text with its links kept, when any run is a link; else None.
+
+    The parser keeps a link's target only on the run (``href``); the block's
+    ``text`` is the visible words. Rendering ``text`` turned "Joined with
+    [customers](/tables/customers.md)" into "Joined with customers", so a
+    Markdown wiki's links could not be followed. Stored list-item runs are
+    wrapped as ``{"items": [...]}`` (ailang_parse._unnest_arrays).
+    """
+    if isinstance(runs, dict):
+        runs = runs.get("items")
+    if not isinstance(runs, list) or not any(isinstance(r, dict) and r.get("href") for r in runs):
+        return None
+    out: list[str] = []
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        text = str(run.get("text") or "")
+        href = str(run.get("href") or "").strip()
+        if text and run.get("code"):
+            text = f"`{text}`"
+        out.append(f"[{text}]({href})" if text and href else text)
+    return "".join(out)
+
+
 def blocks_to_markdown(blocks: list[dict[str, Any]]) -> str:
     """Convert AILANG Parse blocks (as dicts) to a markdown string."""
     parts: list[str] = []
@@ -34,6 +59,7 @@ def blocks_to_markdown(blocks: list[dict[str, Any]]) -> str:
             parts.append(f"{'#' * level} {text}")
 
         elif block_type in ("paragraph", "text"):
+            text = _runs_markdown(block.get("runs")) or text
             if text:
                 parts.append(text)
 
@@ -51,9 +77,11 @@ def blocks_to_markdown(blocks: list[dict[str, Any]]) -> str:
         elif block_type == "list":
             items = block.get("items") or []
             ordered = block.get("ordered", False)
+            item_runs = block.get("itemRuns") or block.get("item_runs") or []
             for i, item in enumerate(items):
                 prefix = f"{i + 1}." if ordered else "-"
-                parts.append(f"{prefix} {item}")
+                linked = _runs_markdown(item_runs[i]) if i < len(item_runs) else None
+                parts.append(f"{prefix} {linked or item}")
 
         elif block_type == "change":
             change_type = block.get("change_type", "")
@@ -143,7 +171,9 @@ def apply_edits(blocks: list[dict[str, Any]], edited_blocks: dict[str, Any]) -> 
 # --- Public API ---
 
 
-def list_documents_for_user(user_id: str, skill_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+def list_documents_for_user(
+    user_id: str, skill_id: str | None = None, limit: int = 20, select: list[str] | None = None
+) -> list[dict[str, Any]]:
     """List parsed documents owned by a user, optionally filtered by skill."""
     filters: list[tuple[str, str, Any]] = [
         ("userId", "==", user_id),
@@ -157,6 +187,7 @@ def list_documents_for_user(user_id: str, skill_id: str | None = None, limit: in
         order_by="createdAt",
         order_direction="DESCENDING",
         limit=limit,
+        select=select,
     )
 
 
@@ -234,13 +265,16 @@ def build_document_context(
 
     Args:
         doc_id: Firestore document ID under parsed_documents/{doc_id}.
-        mode: "markdown" for chat (compact), "blocks" for extraction (structured JSON).
-        section: Optional section heading to extract (case-insensitive substring match).
+        mode: "markdown" for chat (compact), "blocks" for extraction (structured JSON),
+            "outline" for the section tree (ids, titles, printed pages, sizes) without the text.
+        section: Optional section(s) to extract: outline ids ("3.2" or "3.2, 5"), or a heading
+            title (exact, else a unique substring; several matches are listed, never guessed).
+            With mode="outline", the outline of that section.
 
     Returns:
         (content_str, blocks_or_none)
         content_str — formatted content to return to the agent
-        blocks_or_none — raw blocks list when mode="blocks", else None
+        blocks_or_none — raw blocks list when mode="blocks", else None (also for "outline")
 
     Raises:
         KeyError: if the document is not found.
@@ -272,27 +306,41 @@ def build_document_context(
             "Its content is not yet available. Ask the user to try again in a moment."
         ), None
 
-    raw_blocks: list[dict[str, Any]] = raw.get("blocks") or []
+    from tools.documents.block_store import load_blocks
+
+    raw_blocks: list[dict[str, Any]] = load_blocks(doc_id, raw)
     edited_blocks_raw: dict[str, Any] = raw.get("editedBlocks") or {}
     metadata: dict = raw.get("metadata") or {}
 
     blocks = apply_edits(raw_blocks, edited_blocks_raw)
 
-    if section:
-        filtered = _filter_by_section(blocks, section)
-        if not filtered:
+    structure = None
+    selected: list[Any] = []
+    if mode == "outline" or section:
+        from tools.documents.outline import build_structure, section_blocks, select_sections
+
+        structure = build_structure(blocks)
+    if section and structure is not None:
+        selection = select_sections(structure, section)
+        if selection.problem:
             # Say the section is missing rather than rendering an empty document.
             # An empty blocks list reads to the model as "this section exists and
             # is blank", which is the same silent-substitution failure as answering
             # about the wrong document — a plausible shape standing in for "not
             # found". Name what WAS asked for so the model can retry or refuse.
             return (
-                f"No section matching '{section}' was found in {original_filename}. "
-                f"Retrieve the document without a section filter to see its actual "
-                f"headings before trying again.",
+                f"In {original_filename}: {selection.problem}\n\n"
+                'Call get_document_content with mode="outline" to see this document\'s sections '
+                "and their ids, then ask for the section by id.",
                 None,
             )
-        blocks = filtered
+        selected = selection.nodes
+
+    if mode == "outline" and structure is not None:
+        return _outline_context(original_filename, metadata, structure, selected, _location_lines(doc_id, raw)), None
+
+    if selected and structure is not None:
+        blocks = section_blocks(structure, selected)
 
     if mode == "blocks":
         return json.dumps(
@@ -307,9 +355,10 @@ def build_document_context(
         preamble_lines.append(f"**Author:** {metadata['author']}")
     if metadata.get("pageCount"):
         preamble_lines.append(f"**Pages:** {metadata['pageCount']}")
+    preamble_lines += _location_lines(doc_id, raw)
     preamble = "\n".join(preamble_lines)
 
-    body = blocks_to_markdown(blocks)
+    body = _sections_markdown(structure, selected) if selected and structure is not None else blocks_to_markdown(blocks)
     if not body:
         body = raw.get("text", "") or "(No text content extracted.)"
 
@@ -347,28 +396,99 @@ def build_document_context(
     return f"{preamble}\n\n---\n\n{body}", None
 
 
-def _filter_by_section(blocks: list[dict[str, Any]], section: str) -> list[dict[str, Any]]:
-    """Return blocks under the heading matching section (case-insensitive).
+def _metadata_preamble(original_filename: str, metadata: dict[str, Any]) -> list[str]:
+    lines = [f"**Document:** {original_filename}"]
+    if metadata.get("title") and metadata["title"] != original_filename:
+        lines.append(f"**Title:** {metadata['title']}")
+    if metadata.get("pageCount"):
+        lines.append(f"**Pages:** {metadata['pageCount']}")
+    return lines
 
-    Returns all blocks from the matching heading up to the next same-or-higher heading.
-    Falls back to keyword search in text if no heading matches.
+
+def _sections_markdown(structure: Any, nodes: list[Any]) -> str:
+    """Each requested section under a line saying which section it is, where it
+    sits and which pages it covers, so a quote can be cited without re-asking."""
+    from tools.documents.outline import describe, heading_path, section_blocks
+
+    chosen = {id(n) for n in nodes}
+
+    def inside_another(node: Any) -> bool:
+        parent = node.parent
+        while parent is not None:
+            if id(parent) in chosen:
+                return True
+            parent = parent.parent
+        return False
+
+    parts = []
+    for node in nodes:
+        if inside_another(node):
+            continue  # already printed as part of its parent
+        where = heading_path(node.parent) if node.parent else ""
+        label = f"**Section {describe(node)}**" + (f" — in: {where}" if where else "")
+        parts.append(f"{label}\n\n{blocks_to_markdown(section_blocks(structure, [node]))}")
+    return "\n\n---\n\n".join(parts)
+
+
+def _location_lines(doc_id: str, raw: dict[str, Any]) -> list[str]:
+    """Where the document sits, and the YAML header of a Markdown file.
+
+    The path is what a relative link inside the document resolves against
+    (tools/documents/paths.py). The header is what the parser drops, apart from
+    ``title``: in an Open Knowledge Format bundle its ``type`` and
+    ``description`` say what the document IS.
     """
-    section_lower = section.lower()
-    # Find matching heading
-    start_idx = None
+    from tools.documents.frontmatter import stored_frontmatter
+    from tools.documents.paths import document_path
 
-    for i, b in enumerate(blocks):
-        if b.get("type") == "heading" and section_lower in (b.get("text") or "").lower():
-            start_idx = i
-            break
+    lines: list[str] = []
+    path = document_path(raw)
+    if path and "/" in path:
+        lines.append(f"**Path:** {path}")
+    frontmatter = stored_frontmatter(doc_id, raw).strip()
+    if frontmatter:
+        lines.append(f"**Properties** (the file's YAML header):\n```yaml\n{frontmatter}\n```")
+    return lines
 
-    if start_idx is not None:
-        result = [blocks[start_idx]]
-        for b in blocks[start_idx + 1 :]:
-            if b.get("type") == "heading":
-                break
-            result.append(b)
-        return result
 
-    # Keyword fallback: return blocks containing the section string
-    return [b for b in blocks if section_lower in (b.get("text") or "").lower()]
+def _outline_context(
+    original_filename: str,
+    metadata: dict[str, Any],
+    structure: Any,
+    within: list[Any],
+    location: list[str] | None = None,
+) -> str:
+    """The document's outline: section ids, titles, printed pages and sizes.
+
+    The cheap first look at a long document. A 421-page filing's outline is a
+    few thousand tokens; its full text is about a hundred times that.
+    """
+    from tools.documents.outline import DEFAULT_OUTLINE_DEPTH, describe, render_outline, token_estimate
+
+    head = "\n".join(_metadata_preamble(original_filename, metadata) + list(location or []))
+    size = token_estimate(sum(leaf.chars for leaf in structure.leaves))
+    if not structure.roots:
+        return (
+            f"{head}\n\n---\n\nThis document has no headings or named sections, so it has no outline. "
+            f"Its full text is {size}: read it without a section, or search it for the words you need."
+        )
+    how = (
+        'Open sections with get_document_content(doc_id, section="<id>"); several ids can be '
+        'comma-separated (section="2.1, 4"). Pages are the printed page numbers, for citing. '
+        'For the subsections of one section: mode="outline", section="<id>".'
+    )
+    outlines: list[str] = []
+    for node in within or [None]:
+        lines, depth = render_outline(structure, within=node, max_depth=DEFAULT_OUTLINE_DEPTH)
+        if node is None:
+            count = len(structure.nodes)
+            title = f"Outline — {count} section{'s' if count != 1 else ''}, showing {depth} level{'s' if depth != 1 else ''}; whole document {size}."
+            front = structure.front_matter_chars
+            if front:
+                title += f" Before the first section: {token_estimate(front)} of front matter."
+        else:
+            title = f"Outline of section {describe(node)}"
+            if not lines:
+                lines = ["- (no subsections — open it by id to read it)"]
+        outlines.append(title + "\n\n" + "\n".join(lines))
+    return f"{head}\n\n---\n\n" + "\n\n".join(outlines) + f"\n\n{how}"

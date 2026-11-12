@@ -38,6 +38,10 @@ import {
 import type { InteractionStyle, Skill, SkillVoiceConfig } from "@/types/skill";
 import { DEFAULT_AVATARS, randomDefaultAvatar } from "@/lib/defaultAvatars";
 import { PLATFORM_OWNER_UID } from "@/lib/platformOwner";
+import { useConfirm } from "@/components/ui/confirm";
+import { SkillLanguageTabs } from "@/components/studio/SkillLanguageTabs";
+import { localesForSave } from "@/components/studio/skillLocales";
+import { PageLoading } from "@/components/ui/skeleton";
 
 const STUDIO_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SKILL_STUDIO === "true";
 
@@ -78,7 +82,7 @@ export default function StudioPage({
 function StudioGate({ skillId }: { skillId: string }) {
   const { user, loading } = useAuth();
   if (loading) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
+    return <PageLoading />;
   }
   if (!user) return <SignInRequired />;
   return <StudioInner skillId={skillId} />;
@@ -145,7 +149,10 @@ function StudioInner({ skillId }: { skillId: string }) {
   const handleSave = useCallback(async () => {
     setSaveState({ status: "saving" });
     try {
-      const body = buildSaveBody(draft, isNew);
+      // Whether the skill had translations when loaded/last saved: clearing the
+      // last one must still send `locales: {}`; never having any sends nothing.
+      const hadLocales = JSON.parse(pristine).locales !== undefined;
+      const body = buildSaveBody(draft, isNew, hadLocales);
       const path = isNew
         ? "/api/proxy/api/skills"
         : `/api/proxy/api/skills/${skillId}`;
@@ -175,19 +182,29 @@ function StudioInner({ skillId }: { skillId: string }) {
         message: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [draft, isNew, skillId]);
+  }, [draft, isNew, skillId, pristine]);
 
   const isDirty = useMemo(
     () => JSON.stringify(draft) !== pristine,
     [draft, pristine],
   );
 
-  const handleCancel = useCallback(() => {
-    if (isDirty && !window.confirm("Discard unsaved changes and leave the editor?")) {
+  const confirm = useConfirm();
+  const handleCancel = useCallback(async () => {
+    if (
+      isDirty &&
+      !(await confirm({
+        title: "Discard your changes?",
+        description: "You have unsaved changes to this skill.",
+        confirmLabel: "Discard",
+        cancelLabel: "Keep editing",
+        destructive: true,
+      }))
+    ) {
       return;
     }
     router.back();
-  }, [isDirty, router]);
+  }, [confirm, isDirty, router]);
 
   // Platform-owned skills are read-only unless you're a platform admin. Any
   // user can fork them into a private, editable copy.
@@ -357,7 +374,17 @@ function StudioInner({ skillId }: { skillId: string }) {
               your own editable copy.
             </div>
           )}
-          <BuilderForm draft={draft} setDraft={setDraft} isNew={isNew} />
+          <SkillLanguageTabs
+            base={{
+              displayName: draft.displayName || draft.name || "",
+              description: draft.description ?? "",
+              greeting: draft.welcome?.introMessage?.trim() || draft.initialMessage || "",
+            }}
+            locales={draft.locales}
+            onLocalesChange={(next) => setDraft((prev) => ({ ...prev, locales: next }))}
+          >
+            <BuilderForm draft={draft} setDraft={setDraft} isNew={isNew} />
+          </SkillLanguageTabs>
         </div>
         {/* Kept mounted on phones when hidden, so the copilot's stream and
             thread survive switching to the editor and back. */}
@@ -1262,6 +1289,11 @@ function skillToDraft(s: Skill): StudioDraft {
     persona: s.persona ?? { interactionStyle: "concise" },
     welcome: s.welcome ?? {},
     accessControl: s.accessControl as unknown as Record<string, unknown>,
+    // Not edited or sent by the Studio — the greeting placeholder on a
+    // language tab shows it when the skill has no welcome intro.
+    initialMessage: s.initialMessage ?? "",
+    // Only present when the skill has translations (see components/studio/skillLocales).
+    ...(s.locales && Object.keys(s.locales).length ? { locales: s.locales } : {}),
   };
 }
 
@@ -1270,7 +1302,7 @@ function skillToDraft(s: Skill): StudioDraft {
  * requires `name`; on update `name` is not accepted (routes.py UpdateSkillRequest)
  * so we omit it. camelCase keys match the request-model aliases.
  */
-function buildSaveBody(draft: StudioDraft, isNew: boolean): Record<string, unknown> {
+function buildSaveBody(draft: StudioDraft, isNew: boolean, hadLocales: boolean): Record<string, unknown> {
   const body: Record<string, unknown> = {
     description: draft.description ?? "",
     instructions: draft.instructions ?? "",
@@ -1285,6 +1317,10 @@ function buildSaveBody(draft: StudioDraft, isNew: boolean): Record<string, unkno
   if (isNew) {
     body.name = draft.name ?? "";
   }
+  // Translations: only the filled fields, and no key at all for a skill that
+  // has none and had none (so an untranslated skill saves exactly as before).
+  const locales = localesForSave(draft.locales, hadLocales);
+  if (locales) body.locales = locales;
   return body;
 }
 

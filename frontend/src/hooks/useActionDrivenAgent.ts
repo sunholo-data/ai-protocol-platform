@@ -20,11 +20,8 @@
 // `A2UISurfaceDispatcher` makes. Single point of dispatch into the
 // registry; this hook just feeds it through a different ingress.
 //
-// Graceful HTTP 4xx fallback: when the backend gate rejects (skill not
-// opted into `allow_action_triggered_runs`, missing JWT, etc.), the
-// promise resolves cleanly with a `console.warn`. The surface stays in
-// its last-rendered state — no broken loading spinner, no thrown error
-// bubbling into React's error boundary.
+// HTTP rejects and incomplete streams reject visibly. Callers retain the
+// surface and show an error; a missing completion event never means success.
 
 "use client";
 
@@ -65,13 +62,17 @@ export interface ActionRunActivitySink {
   upsertDelegation?: (delegation: DelegationMarkerItem) => void;
   /** The run's stream has opened — mark it in-flight (live/running badge). */
   onRunStart?: () => void;
+  /** Request sent; the server has not acknowledged a run yet. */
+  onRunRequested?: () => void;
+  /** RUN_STARTED received from the server. */
+  onRunAcknowledged?: () => void;
   /**
    * The run reached a terminal state (RUN_FINISHED / RUN_ERROR) or its stream
    * ended. Clears the in-flight indicator and — this is the point — signals
    * ChatShell to re-fetch GET /activity so persisted history syncs. `error` is
    * set only on RUN_ERROR (or a translated stream failure).
    */
-  onRunSettled?: (outcome: { error?: string }) => void;
+  onRunSettled?: (outcome: { error?: string; status?: "unknown" }) => void;
   /** Server-authored STAGE_PROGRESS label, if the action path emits one. */
   onStage?: (label: string) => void;
   /** Resolved model for this action turn (MODEL_RESOLVED) — the delegate is
@@ -96,8 +97,8 @@ export interface UseActionDrivenAgentReturn {
   /**
    * POST the action to `surface-action-run`, consume the SSE stream, and
    * dispatch A2UI updates into the SurfaceRegistry. Resolves on
-   * `RUN_FINISHED`; rejects on `RUN_ERROR`. Resolves cleanly (no throw)
-   * on HTTP 4xx — the skill is not opted in and the surface stays put.
+   * `RUN_FINISHED`; rejects on `RUN_ERROR`, HTTP refusal or an incomplete
+   * stream. Callers preserve the surface and report the outcome.
    */
   triggerAction: (
     surfaceId: string,
@@ -215,6 +216,16 @@ export function useActionDrivenAgent({
       surfaceId: string,
       action: ActionDrivenAgentAction,
     ): Promise<void> => {
+      let settled = false;
+      const settle = (error?: string, unconfirmed = false): void => {
+        if (settled) return;
+        settled = true;
+        activitySink?.onRunSettled?.(error ? (unconfirmed ? { error, status: "unknown" } : { error }) : {});
+      };
+      const rejectRun: (message: string, unconfirmed?: boolean) => never = (message, unconfirmed = false) => {
+        settle(message, unconfirmed);
+        throw new Error(message);
+      };
       const url = `/api/proxy/api/skills/${encodeURIComponent(
         skillId,
       )}/sessions/${encodeURIComponent(sessionId)}/surface-action-run`;
@@ -250,6 +261,7 @@ export function useActionDrivenAgent({
           body: JSON.stringify(body),
         });
 
+      activitySink?.onRunRequested?.();
       let res: Response;
       try {
         res = await doPost();
@@ -264,7 +276,7 @@ export function useActionDrivenAgent({
         // Both callers (A2UISurfaceMount, CompareLauncher) catch this and
         // render a message. The opt-in/fallback decision happens BEFORE
         // triggerAction is ever called, so reaching here is a real failure.
-        throw new Error("Couldn't reach the server. Check your connection and try again.");
+        rejectRun("Couldn't reach the server. Check your connection and try again.", true);
       }
 
       // Self-heal a vanished session. LOCAL_MODE sessions live in memory and
@@ -298,7 +310,7 @@ export function useActionDrivenAgent({
           }
           // NEVER SILENT (#8): a failed self-heal must be visible, not a silent
           // return that reads as a dead button. The caller renders this.
-          throw new Error(
+          rejectRun(
             "Your session expired and couldn't be restored. Reload the page and try again.",
           );
         }
@@ -314,7 +326,7 @@ export function useActionDrivenAgent({
           `[useActionDrivenAgent] surface-action-run returned HTTP ${res.status} for ${url}`,
           detail,
         );
-        throw new Error(
+        rejectRun(
           res.status === 403
             ? "This action isn't permitted for this skill (403)."
             : `The run was rejected (HTTP ${res.status}). Check the Activity tab or try again.`,
@@ -322,14 +334,7 @@ export function useActionDrivenAgent({
       }
 
       if (!res.body) {
-        // No stream body — backend contract violation, but resolving
-        // cleanly keeps the UI alive.
-        if (process.env.NODE_ENV !== "production") {
-          console.warn(
-            `[useActionDrivenAgent] surface-action-run returned 200 with empty body for ${url}`,
-          );
-        }
-        return;
+        rejectRun("The platform returned no run stream. Try again.", true);
       }
 
       // Track in-flight tool calls so we can pair TOOL_CALL_RESULT with
@@ -354,16 +359,6 @@ export function useActionDrivenAgent({
         activityToolCalls.set(id, next);
         activitySink.upsertToolCall(next);
       };
-      // onRunSettled must fire exactly once — whether via RUN_FINISHED,
-      // RUN_ERROR, or an abrupt stream end (network drop mid-run). The finally
-      // below is the backstop; `settled` guards against a double emit.
-      let settled = false;
-      const settle = (error?: string): void => {
-        if (settled) return;
-        settled = true;
-        activitySink?.onRunSettled?.(error ? { error } : {});
-      };
-
       // The stream is open — announce the run so the Activity tab shows a
       // live/running indicator immediately (never a silent grey button).
       activitySink?.onRunStart?.();
@@ -375,6 +370,10 @@ export function useActionDrivenAgent({
           if (typeof type !== "string") continue;
 
           switch (type) {
+          case "RUN_STARTED": {
+            activitySink?.onRunAcknowledged?.();
+            break;
+          }
           case "TOOL_CALL_START": {
             const toolCallId = event.toolCallId;
             const toolCallName = event.toolCallName;
@@ -538,7 +537,7 @@ export function useActionDrivenAgent({
             settle(message);
             break;
           }
-          // Other events (RUN_STARTED, TEXT_MESSAGE_*, STATE_*, CUSTOM,
+          // Other events (TEXT_MESSAGE_*, STATE_*, CUSTOM,
           // REASONING_*) are accepted but not surfaced — Pattern 1
           // surfaces don't render an inline chat bubble, and surface
           // state is delivered via the tool call above.
@@ -550,7 +549,13 @@ export function useActionDrivenAgent({
         // Backstop: a stream that ends without a terminal event (network
         // drop) still clears the in-flight indicator. No-op after a terminal
         // event already settled.
-        settle();
+        if (!terminated) {
+          runError = new Error("The connection ended before the platform confirmed completion. Try again.");
+          for (const [id, tc] of activityToolCalls) {
+            if (tc.status === "running") emitToolCall(id, { status: "error" });
+          }
+          settle(runError.message, true);
+        }
       }
 
       if (runError) {

@@ -9,14 +9,14 @@ export function MoveFeedback({ state }: { state: MoveState }) {
   const { pending, error, conflict, confirmReplace, cancel, dismissError } = state;
   if (pending) {
     return (
-      <p role="status" className="px-2 pb-1 text-[10px] text-muted-foreground leading-tight">
+      <p role="status" className="px-2 pb-1 text-[11px] text-muted-foreground leading-tight">
         Moving…
       </p>
     );
   }
   if (conflict) {
     return (
-      <div role="alertdialog" aria-label="Replace document?" className="mx-2 mb-1 rounded border border-amber-400/60 px-2 py-1 text-[10px] leading-tight">
+      <div role="alertdialog" aria-label="Replace document?" className="mx-2 mb-1 rounded border border-amber-400/60 px-2 py-1 text-[11px] leading-tight">
         <p className="text-foreground">{conflict.message}</p>
         <div className="mt-1 flex gap-1.5">
           <button
@@ -39,7 +39,7 @@ export function MoveFeedback({ state }: { state: MoveState }) {
   }
   if (error) {
     return (
-      <div role="alert" className="flex items-start gap-2 px-2 pb-1 text-[10px] leading-tight text-destructive">
+      <div role="alert" className="flex items-start gap-2 px-2 pb-1 text-[11px] leading-tight text-destructive">
         <span className="flex-1">{error}</span>
         <button
           type="button"

@@ -1,4 +1,4 @@
-.PHONY: guide-bundle guide-check guide-shots guide-verify publish-check verify-house-style promote sweep-test-logs dev dev-restart dev-local proxy-check logs help cli-install cli-reinstall cli-uninstall cli-doctor cli-selftest-mock cli-selftest-live cli-selftest verify-a2a setup-gemini-enterprise smoke-long-stream handoff-e2e elicitation-e2e model-fallback-e2e adk-conformance fetch-ailang-wasm gate-obligation-artefact toolbox-install template-parity template-triage link-check materialize-config upstream-merge check-routing port-up pwa-icons
+.PHONY: guide-bundle guide-check i18n-check guide-shots guide-verify publish-check verify-house-style promote sweep-test-logs dev dev-restart dev-local proxy-check logs help cli-install cli-reinstall cli-uninstall cli-doctor cli-selftest-mock cli-selftest-live cli-selftest verify-a2a setup-gemini-enterprise smoke-long-stream handoff-e2e elicitation-e2e model-fallback-e2e adk-conformance fetch-ailang-wasm gate-obligation-artefact toolbox-install template-parity template-triage link-check materialize-config upstream-merge check-routing port-up check-guards pwa-icons knowledge-scheduler
 
 # ── AILANG WASM deontic engine (ppa-obligation-analysis artefact, 7.6) ──────
 # Runtime is pinned in ONE place. Bump AILANG_VERSION in a reviewed one-liner
@@ -125,6 +125,12 @@ smoke-long-stream:
 # Dry run by default — pass GO=1 to actually execute.
 #   make promote FROM=test TO=prod VERSION=v6.20.0        # plan only
 #   make promote FROM=test TO=prod VERSION=v6.20.0 GO=1   # execute
+# Knowledge-base freshness (docs/design/private/knowledge-base-freshness.md §3.1):
+# the Cloud Scheduler job that keeps operator-declared KBs current.
+# ENV=dev|test|prod, dry run unless GO=1.
+knowledge-scheduler:
+	@./scripts/knowledge-scheduler.sh $(or $(ENV),dev) $(if $(GO),--yes,)
+
 promote:
 	@./scripts/promote-env.sh --from $(or $(FROM),dev) --to $(or $(TO),test) \
 		--version $(VERSION) $(if $(GO),--yes,)
@@ -232,6 +238,12 @@ guide-check:
 	@node --test scripts/user-guide/*.test.mjs
 	@node scripts/user-guide/check.mjs
 
+# Hard-coded interface strings may only go down (multi-language.md §8).
+# Lower the baseline after migrating some: node scripts/i18n/literals.mjs --update
+i18n-check:
+	@node --test scripts/i18n/*.test.mjs
+	@node scripts/i18n/literals.mjs
+
 # Regenerate screenshots against the local app with synthetic data: PAGE=folders
 guide-shots:
 	@PAGE="$(PAGE)" ./scripts/user-guide/shots.sh
@@ -269,6 +281,14 @@ check-routing:
 # suite fails without this deployment's customer content present.
 port-up:
 	@./scripts/port-up.sh $(RANGE) $(if $(GO),GO=1,)
+
+## Footgun guards: the same set CI runs in `scripts/ci/check.sh safety`
+check-guards:
+	@bash scripts/check-auth-dispatcher.sh
+	@bash scripts/audit-trust-cards.sh
+	@python3 scripts/check-cloudbuild-substitutions.py
+	@bash scripts/check-app-routes-tracked.sh
+	@bash scripts/check-client-api-mounted.sh
 
 ## Regenerate home-screen/PWA icons from an SVG mark (SRC=…svg BG='#rrggbb')
 pwa-icons:

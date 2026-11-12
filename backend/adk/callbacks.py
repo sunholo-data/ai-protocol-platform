@@ -227,6 +227,10 @@ def _capture_a2ui_submission(state: Any, callback_context: Any) -> None:
         logger.warning("a2ui submission capture failed (suppressed): %s", exc)
 
 
+# The skill whose agent is running in this invocation (set by before_agent).
+ACTIVE_SKILL_KEY = "temp:active_skill_id"
+
+
 def make_before_agent(
     skill_id: str,
     tool_configs: dict[str, Any] | None = None,
@@ -263,6 +267,12 @@ def make_before_agent(
         span = trace.get_current_span()
         span.set_attribute("skill_id", skill_id)
         state = callback_context.state if hasattr(callback_context, "state") else None
+        if state is not None:
+            # The skill RUNNING now (after a handoff, the delegate — not the
+            # session's door). temp: = this invocation only. Read by tools that
+            # record provenance, e.g. generate_document's skillId, which was
+            # empty on every generated document until 2026-10-27.
+            state[ACTIVE_SKILL_KEY] = skill_id
         routing_choice = state.get("routing_choice") if state is not None else None
         if routing_choice:
             span.set_attribute("routing_choice", routing_choice)
@@ -422,6 +432,9 @@ _STATE_RESUMED_SESSION = "resumed_session"  # THIS session was resumed → sessi
 # is what kept this from being visible). `user:` gives the intended persistence
 # without the cross-user bleed.
 _STATE_DOCS_LOADED = "user:docs_loaded"
+# The loaded ids that also have a picture (`doc:{id}.image`), same scope as
+# docs_loaded, so the injector reads a picture only where one was saved.
+_STATE_DOCS_WITH_PICTURE = "user:docs_with_picture"
 # Map of doc_id -> error string for any doc that failed to load. Per-doc so a
 # single bad doc doesn't suppress the error message for a different one.
 _STATE_DOC_LOAD_ERROR = "user:doc_load_error"  # per-user load errors — see the scoping note at the top
@@ -483,7 +496,10 @@ async def _rag_loader(callback_context: Any, state: Any, document_ids: list[str]
     try:
         corpus_name = await get_or_create_user_corpus(user_id) if to_import else await get_existing_user_corpus(user_id)
         if not corpus_name:
-            state.pop(_STATE_RAG_CORPUS_NAME, None)
+            # ADK's State has no pop/del: clear by writing None, which
+            # search_documents reads as "no corpus".
+            if state.get(_STATE_RAG_CORPUS_NAME):
+                state[_STATE_RAG_CORPUS_NAME] = None
             return
         state[_STATE_RAG_CORPUS_NAME] = corpus_name
     except Exception as exc:
@@ -522,7 +538,8 @@ async def _rag_loader(callback_context: Any, state: Any, document_ids: list[str]
     if errors:
         state[_STATE_DOC_LOAD_ERROR] = errors
     elif _STATE_DOC_LOAD_ERROR in state:
-        del state[_STATE_DOC_LOAD_ERROR]
+        # ADK's State has no __delitem__; clear it the way the non-RAG path does.
+        state[_STATE_DOC_LOAD_ERROR] = {}
 
     if rag_loaded:
         session = getattr(callback_context, "session", None)
@@ -532,6 +549,35 @@ async def _rag_loader(callback_context: Any, state: Any, document_ids: list[str]
                 add_session_documents(session_id, rag_loaded)
             except Exception as exc:
                 logger.warning("doc loader (RAG): failed to update session docs: %s", exc)
+
+
+async def _save_image_artifact(callback_context: Any, doc_id: str, uid: str | None) -> bool:
+    """Save an attached IMAGE document's pixels as ``doc:{id}.image`` (resized JPEG).
+
+    A photo reached the model only as the text description written at import,
+    so a model that can see was answering from a caption. The JSON artifact
+    stays (orphan probe, citations); this adds the picture beside it, and the
+    injector sends both. Best-effort: False (logged) when the document is not
+    an image or its bytes cannot be read. Same shape as cphu-aipla-app 1.1.122.
+    """
+    from google.genai.types import Blob, Part
+
+    from db.firestore import get_document
+    from tools.documents.media_bytes import media_document_kind, read_document_media
+
+    try:
+        raw = await asyncio.to_thread(get_document, "parsed_documents", doc_id)
+        if not raw or media_document_kind(raw) != "image":
+            return False
+        _kind, data, mime = await asyncio.to_thread(read_document_media, raw, doc_id, uid)
+        await callback_context.save_artifact(
+            filename=f"doc:{doc_id}.image", artifact=Part(inline_data=Blob(data=data, mime_type=mime))
+        )
+    except Exception as exc:
+        logger.warning("doc loader: no picture for image doc:%s (%s) — text only", doc_id, exc)
+        return False
+    logger.info("document artifact saved: doc:%s.image (%d bytes)", doc_id, len(data))
+    return True
 
 
 def make_document_loader() -> Any:
@@ -622,6 +668,13 @@ def make_document_loader() -> Any:
         for doc_id in to_load:
             try:
                 _content, blocks = build_document_context(doc_id, mode="blocks", caller_uid=loader_uid)
+                has_picture = await _save_image_artifact(callback_context, doc_id, loader_uid)
+                if has_picture:
+                    with_picture = [d for d in (state.get(_STATE_DOCS_WITH_PICTURE) or []) if d != doc_id]
+                    state[_STATE_DOCS_WITH_PICTURE] = [*with_picture, doc_id]
+                if not blocks and has_picture:
+                    # An image whose import wrote no description is still readable: as pixels.
+                    blocks = [{"type": "paragraph", "text": "Image (no text description).", "block_id": "p0"}]
                 if not blocks:
                     errors[doc_id] = (
                         "Document has no parsed content. Re-upload the document to make it available to the AI."
@@ -842,6 +895,7 @@ def make_document_injector() -> Any:
 
         from google.genai.types import Content, Part
 
+        with_picture = set(state.get(_STATE_DOCS_WITH_PICTURE) or [])
         injected = 0
         for doc_id in loaded:
             try:
@@ -873,6 +927,26 @@ def make_document_injector() -> Any:
             # docs first, then the question.
             contents.insert(-1, doc_content)
             injected += 1
+            # An attached IMAGE also goes in as pixels (_save_image_artifact),
+            # so the model sees the photo rather than reading its caption.
+            if doc_id not in with_picture:
+                continue
+            try:
+                picture = await callback_context.load_artifact(filename=f"doc:{doc_id}.image")
+            except Exception as exc:
+                logger.warning("doc injector: picture load failed for %s: %s", doc_id, exc)
+                picture = None
+            if isinstance(picture, Part) and picture.inline_data is not None:
+                contents.insert(
+                    -1,
+                    Content(
+                        role="user",
+                        parts=[
+                            Part.from_text(text=f"[Attached picture: doc:{doc_id} — provided by the user]"),
+                            picture,
+                        ],
+                    ),
+                )
 
         logger.info(
             "doc injector: prepended %d/%d document(s) to LLM request (loaded=%s)",
@@ -1027,7 +1101,8 @@ def make_after_agent_response() -> Any:
     - Increments the in-memory turn counter stored in session state.
     - Flushes ``turnCount`` + ``lastMessageAt`` to Firestore every
       ``_TURN_FLUSH_INTERVAL`` turns.
-    - Triggers title generation after exactly turn 2 (first full exchange).
+    - Generates a title after the first reply, retrying on later turns until
+      one succeeds.
     """
 
     def _after_response(callback_context: Any) -> None:
@@ -1043,11 +1118,13 @@ def make_after_agent_response() -> Any:
         turn_count: int = int(state.get(_STATE_TURN_COUNT) or 0) + 1
         state[_STATE_TURN_COUNT] = turn_count
 
-        # B3 (chat-history-fixes v6.1.0): retry title generation on a later
-        # flush turn if turn 2 produced None (thin context). ``state["titleSet"]``
-        # is set to True only on a successful generation, so retries stop
-        # once the session has a title.
-        needs_title_gen = turn_count == 2 or (turn_count >= 4 and not state.get("titleSet"))
+        # Title after the FIRST reply: waiting for turn 2 left every
+        # one-question chat as "Untitled chat" in the history list. If that
+        # yields None (B3, chat-history-fixes v6.1.0: a thin first exchange),
+        # retry at turn 2 and then on the regular flush turns, so the debounce
+        # still holds. ``state["titleSet"]`` is set only on success, so a title
+        # — generated, or the user's rename after it — is never overwritten.
+        needs_title_gen = not state.get("titleSet") and (turn_count <= 2 or turn_count % _TURN_FLUSH_INTERVAL == 0)
         # Turn 1 ALWAYS flushes. The debounce below is for bursty loops, but with
         # interval 5 the first flush landed on turn 2 (via title-gen) — so after a
         # single message the row still carried the ``lastMessageAt`` written when
@@ -1270,9 +1347,12 @@ def _stash_surface_for_resume(
 # just rows, with no trace of the request, so a transform had no way to tell an
 # answer from an intermediate probe. See a2ui_bigquery_render.
 A2UI_TOOL_ARGS_STATE_KEY = "temp:_a2ui_tool_args"
+# The tool's NAME, for transforms registered on several tools that draw each
+# differently (a2ui_github_render). The transform signature carries no name.
+A2UI_TOOL_NAME_STATE_KEY = "temp:_a2ui_tool_name"
 
 
-def make_a2ui_result_emitter() -> Callable[..., Any]:
+def make_a2ui_result_emitter(*, before_offload: bool = False) -> Callable[..., Any]:
     """Return an ``after_tool_callback`` that renders a registered tool result
     to A2UI and pushes it to the ``workspace`` surface as an out-of-model CUSTOM
     event (tool-results-as-a2ui / 7.3, Model B).
@@ -1287,8 +1367,14 @@ def make_a2ui_result_emitter() -> Callable[..., Any]:
     extract → compare each emitting a workspace update — is NOT deduped by the
     frontend SurfaceRegistry's ``consumedToolCallIds`` guard, while a genuine
     SSE re-delivery of the same event (same key) still collapses.
+
+    ``before_offload=True`` builds the second stage: placed in the mutator chain
+    BEFORE ``_handle_large_output``, it renders only mappings registered with
+    ``offload=True`` from the full response, and still returns ``None`` (no
+    rewrite). The default stage renders every other mapping, as before.
     """
     seq = 0
+    stage = "pre" if before_offload else ""
 
     def _emit(
         tool: BaseTool,
@@ -1302,6 +1388,8 @@ def make_a2ui_result_emitter() -> Callable[..., Any]:
             if not isinstance(tool_name, str) or not tool_name:
                 return None
             typed = _coerce_typed_result(tool_response)
+            if typed is None and before_offload:
+                return None
             if typed is None:
                 # Some mapped tools (the web/enterprise search AgentTools) return
                 # free TEXT but carry renderable side-data in tool_context.state
@@ -1320,14 +1408,16 @@ def make_a2ui_result_emitter() -> Callable[..., Any]:
             # metadata (see backend/adk/CLAUDE.md trap 1).
             try:
                 tool_context.state[A2UI_TOOL_ARGS_STATE_KEY] = args if isinstance(args, dict) else {}
+                tool_context.state["temp:a2ui_mcp_render"] = getattr(tool, "_aitana_render_config", None)
+                tool_context.state[A2UI_TOOL_NAME_STATE_KEY] = tool_name
             except Exception as exc:  # pragma: no cover - defensive, never break a turn
                 logger.debug("a2ui emitter: could not stash tool args: %s", exc)
-            rendered = render_for_emit(tool_name, typed, tool_context)
+            rendered = render_for_emit(tool_name, typed, tool_context, offload=before_offload)
             if rendered is None:
                 return None
             seq += 1
             invocation_id = getattr(tool_context, "invocation_id", "") or ""
-            source_id = f"{invocation_id}:{tool_name}:{seq}"
+            source_id = f"{invocation_id}:{tool_name}:{stage}{seq}"
 
             from observability.timing import get_current_tracker
 

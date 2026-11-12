@@ -111,3 +111,17 @@ def test_search_sends_filters() -> None:
     assert body == {"query": "upload retries", "filters": {"status": "implemented"}, "sort": "newest", "pageSize": 8}
     assert "1. Retries  [notes/r.md]" in result.output and "seven times" in result.output
     assert run("search", "shared", "q", "--filter", "nope").exit_code != 0
+
+
+def test_status_line_shows_source_health():
+    """knowledge-base-freshness.md §3.6: a stopped source shows as QUIET."""
+    import time
+
+    from aiplatform.commands.kb import _source_line
+
+    day = 86400
+    line = _source_line({"files": 143, "lastArrivalAt": time.time() - 90 * day, "quiet": True})
+    assert line.startswith("143 files, newest ") and "QUIET: nothing new for 90 days" in line
+    assert _source_line({"files": 0, "quiet": True}) == "0 files  QUIET: no files"
+    assert _source_line({"files": 2, "newSinceLastSync": 2}) == "2 files, 2 new or changed in this sync"
+    assert _source_line({"error": "can't be listed"}) == "can't be listed"

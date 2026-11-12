@@ -125,7 +125,7 @@ export const StaticArtefactFrame = forwardRef<
     hostContext,
     innerSandbox = "allow-scripts allow-same-origin",
     className,
-    title = "MCP App artefact",
+    title = "Interactive view",
   },
   ref,
 ) {

@@ -106,17 +106,23 @@ def test_rag_hint_no_warning_when_loads_clean():
 
 @pytest.mark.asyncio
 async def test_rag_loader_does_not_provision_a_corpus_without_attachments():
+    from google.adk.sessions.state import State
+
     from adk.callbacks import _STATE_RAG_CORPUS_NAME, _rag_loader
 
-    state = {_STATE_RAG_CORPUS_NAME: "legacy/pdf-corpus"}
+    # ADK's real State, not a dict: it has no pop(), and a dict double let a
+    # state.pop() ship and fail on every prod turn by a user with no corpus.
+    state = State(value={_STATE_RAG_CORPUS_NAME: "legacy/pdf-corpus"}, delta={})
     cc = SimpleNamespace(state=state, _invocation_context=SimpleNamespace(user_id="alice"), session=None)
     with (
         patch("rag.corpus.get_existing_user_corpus", new=AsyncMock(return_value=None)),
         patch("rag.corpus.get_or_create_user_corpus", new=AsyncMock()) as create,
+        patch("adk.callbacks.logger") as log,
     ):
         await _rag_loader(cc, state, [])
     create.assert_not_called()
-    assert _STATE_RAG_CORPUS_NAME not in state
+    assert not state.get(_STATE_RAG_CORPUS_NAME)
+    assert not any("corpus unavailable" in str(c) for c in log.warning.call_args_list)
 
 
 @pytest.mark.asyncio
@@ -158,9 +164,12 @@ async def test_rag_loader_degrades_when_whole_corpus_unavailable():
 async def test_rag_loader_clears_stale_error_on_successful_retry():
     """A later turn where the import succeeds must clear the prior error so the
     AI isn't told search is down when it's actually back."""
+    from google.adk.sessions.state import State
+
     from adk.callbacks import _STATE_DOC_LOAD_ERROR, _STATE_DOCS_FILES, _rag_loader
 
-    state: dict = {"user:id": "u1", _STATE_DOC_LOAD_ERROR: {"doc-A": "old failure"}}
+    # Real State (no __delitem__): a dict double hid a `del state[...]` here.
+    state = State(value={"user:id": "u1", _STATE_DOC_LOAD_ERROR: {"doc-A": "old failure"}}, delta={})
     cc = SimpleNamespace(state=state, _invocation_context=SimpleNamespace(user_id="u1"), session=None)
     with (
         patch("rag.corpus.get_or_create_user_corpus", new=AsyncMock(return_value="corpus/1")),
@@ -170,4 +179,4 @@ async def test_rag_loader_clears_stale_error_on_successful_retry():
         await _rag_loader(cc, state, ["doc-A"])
 
     assert "doc-A" in (state.get(_STATE_DOCS_FILES) or [])
-    assert _STATE_DOC_LOAD_ERROR not in state  # cleared
+    assert not state.get(_STATE_DOC_LOAD_ERROR)  # cleared

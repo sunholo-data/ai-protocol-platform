@@ -88,6 +88,10 @@ interface WorkbenchProps {
   activeTabId: string;
   onActiveTabChange: (id: string) => void;
   className?: string;
+  /** Run feedback stays visible while switching between results and Activity. */
+  status?: React.ReactNode;
+  /** Controls at the end of the tab strip (the All results menu). */
+  actions?: React.ReactNode;
 }
 
 export function Workbench({
@@ -95,6 +99,8 @@ export function Workbench({
   activeTabId,
   onActiveTabChange,
   className,
+  status,
+  actions,
 }: WorkbenchProps) {
   const tabListRef = useRef<HTMLDivElement | null>(null);
 
@@ -131,12 +137,9 @@ export function Workbench({
       )}
     >
       <header className="flex items-stretch border-b border-border bg-background">
-        {/* Phones already name this pane in the Chat | Workbench switch above
-            it, so the label only earns its width from `md` up. Sentence case,
-            not letterspaced mono caps (brand: no all-caps headings). */}
-        <div className="hidden items-center border-r border-border px-4 md:flex">
-          <span className="text-sm font-semibold text-foreground">Workbench</span>
-        </div>
+        {/* No "Workbench" title cell: beside the tabs it read as one more tab
+            (a "Workbench" tab next to a "Workspace" tab). The pane is named by
+            the Chat | Workbench switch on phones and the tablist's label. */}
         {/* Tab strip scrolls horizontally when it overflows, but the native
             scrollbar is hidden (`no-scrollbar`) — it was big + ugly with many
             tabs. Labels truncate (full text in the `title` tooltip), and a soft
@@ -189,7 +192,7 @@ export function Workbench({
                       {/* Soft ping halo — three pulses then naturally fades;
                           works in tandem with the solid dot so the eye is
                           drawn to the tab. (v6.4.0 INTERNAL-SHELL M2) */}
-                      <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-primary/40" />
+                      <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-primary/40 [animation-iteration-count:3]" />
                       <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
                     </span>
                   )}
@@ -231,7 +234,10 @@ export function Workbench({
             );
           })}
         </div>
+        {actions ? <div className="flex shrink-0 items-center pr-1 md:pr-8">{actions}</div> : null}
       </header>
+
+      {status}
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {tabs.map((tab) => {

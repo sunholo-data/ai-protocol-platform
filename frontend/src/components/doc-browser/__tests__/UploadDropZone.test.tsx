@@ -198,6 +198,25 @@ describe("UploadDropZone — folder upload", () => {
     expect(onUploadComplete).not.toHaveBeenCalled();
   });
 
+  it("into a project: every file carries project_id, and one not added is a named failure", async () => {
+    respond = (name) =>
+      name === "full.pdf"
+        ? { status: 200, body: { docId: "d2", projectError: "Already in 20 projects." } }
+        : { status: 200, body: { docId: "d1", unchanged: false } };
+    render(<UploadDropZone projectId="p1" />);
+    await userEvent.upload(screen.getByTestId("folder-input") as HTMLInputElement, [
+      relFile("Client/a.pdf"),
+      relFile("Client/full.pdf"),
+    ]);
+    await vi.waitFor(() => {
+      expect(screen.getByText("Folder upload: 1 uploaded, 1 failed.")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(/Client\/full\.pdf: Saved to your library, but not added to the project: Already in 20 projects\./),
+    ).toBeInTheDocument();
+    for (const s of sent) expect(s.fields.project_id).toBe("p1");
+  });
+
   it("uploads a dropped folder by walking its entries", async () => {
     render(<UploadDropZone />);
     const fileEntry = (name: string) => ({
@@ -280,5 +299,18 @@ describe("UploadDropZone — documents-changed notification", () => {
     await userEvent.upload(screen.getByTestId("folder-input") as HTMLInputElement, [mk("R/a.pdf"), mk("R/b.pdf")]);
     await vi.waitFor(() => expect(screen.getByText("Folder upload: 2 uploaded.")).toBeInTheDocument());
     expect(changes).toBe(1);
+  });
+
+  it("into a project, the list refreshes while the folder uploads, not only at the end", async () => {
+    render(<UploadDropZone projectId="p1" />);
+    const mk = (p: string) => {
+      const f = new File(["x"], p.split("/").pop()!);
+      Object.defineProperty(f, "webkitRelativePath", { value: p });
+      return f;
+    };
+    await userEvent.upload(screen.getByTestId("folder-input") as HTMLInputElement, [mk("R/a.pdf"), mk("R/b.pdf")]);
+    await vi.waitFor(() => expect(screen.getByText("Folder upload: 2 uploaded.")).toBeInTheDocument());
+    // One as the first file landed (the rest fall inside the throttle), one at the end.
+    expect(changes).toBe(2);
   });
 });

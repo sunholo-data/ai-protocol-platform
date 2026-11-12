@@ -15,7 +15,7 @@ import secrets
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from auth import User, admin_roles, get_current_user
 from auth.tailnet_auth import check_machine_access_control
@@ -23,6 +23,7 @@ from db.chat_sessions import list_sessions_for_skill
 from db.clients import resolve_enabled_skills
 from db.models import SkillConfig
 from extensions import validate_skill as validate_skill_extensions
+from i18n import SKILL_LOCALE_FIELDS, validate_locales_block
 from protocols.sessions_route import ListSessionsResponse, _to_summary
 from skills import skill_config
 from skills.platform import PLATFORM_OWNER_UID
@@ -57,6 +58,9 @@ def _can_edit(config: SkillConfig, access: Any) -> bool:
     return access.is_skill_admin(config)
 
 
+_FORK_SUFFIX = " (Fork)"
+
+
 # === Request / Response models ===
 
 
@@ -77,8 +81,15 @@ class CreateSkillRequest(BaseModel):
     # part of the whole-draft Save. Pass-through dicts validated by SkillConfig.
     persona: dict | None = None
     welcome: dict | None = None
+    # v6.43.0 MULTI-LANG M3: `{tag: {display_name?, description?, initial_message?}}`.
+    locales: dict[str, dict[str, str]] | None = None
 
     model_config = {"populate_by_name": True}
+
+    @field_validator("locales", mode="before")
+    @classmethod
+    def _validate_locales(cls, v: object) -> dict[str, dict[str, str]] | None:
+        return None if v is None else validate_locales_block(v)
 
 
 class UpdateSkillRequest(BaseModel):
@@ -102,8 +113,17 @@ class UpdateSkillRequest(BaseModel):
     # handler; a non-admin sending it is rejected, not silently applied).
     shell: dict | None = None
     featured: bool | None = None
+    # v6.43.0 MULTI-LANG M3: omitted (None) leaves a skill's translations alone;
+    # `{}` removes them all. Otherwise it REPLACES the whole map — the Studio
+    # sends every locale it shows, pruned to the filled fields.
+    locales: dict[str, dict[str, str]] | None = None
 
     model_config = {"populate_by_name": True}
+
+    @field_validator("locales", mode="before")
+    @classmethod
+    def _validate_locales(cls, v: object) -> dict[str, dict[str, str]] | None:
+        return None if v is None else validate_locales_block(v)
 
 
 class SkillResponse(BaseModel):
@@ -122,6 +142,9 @@ class SkillResponse(BaseModel):
     owner_email: str = Field(alias="ownerEmail")
     protocols: dict
     initial_message: str = Field(alias="initialMessage")
+    # v6.43.0 MULTI-LANG M3: per-locale text, returned unchanged; the frontend
+    # resolves it for the person (localizedField). Empty for most skills.
+    locales: dict[str, dict[str, str]] = Field(default_factory=dict)
     tags: list[str]
     featured: bool
     usage_count: int = Field(alias="usageCount")
@@ -233,6 +256,8 @@ def create_skill(req: CreateSkillRequest, user: User = Depends(get_current_user)
         kwargs["persona"] = req.persona
     if req.welcome:
         kwargs["welcome"] = req.welcome
+    if req.locales:
+        kwargs["locales"] = req.locales
 
     try:
         config = skill_config.create_skill(
@@ -446,15 +471,33 @@ def fork_skill(
         instructions=source.instructions,
         owner_id=user.uid,
         owner_email=user.email,
-        displayName=f"{source.display_name} (Fork)" if source.display_name else "",
+        displayName=f"{source.display_name}{_FORK_SUFFIX}" if source.display_name else "",
         avatar=source.avatar,
         accessControl={"type": "private"},
         skillMetadata=source.skill_metadata.model_dump(by_alias=True),
         protocols=source.protocols.model_dump(by_alias=True),
         tags=list(source.tags),
         references=dict(source.references),
+        # A fork keeps what a person reads in every language: the greeting and
+        # the translations, each translated name marked as a fork like the base.
+        initialMessage=source.initial_message,
+        locales=_forked_locales(source.locales),
     )
     return SkillResponse.from_config(new_skill, request.state.access)
+
+
+def _forked_locales(locales: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
+    """Copy a skill's translations for a fork, suffixing each translated name
+    with " (Fork)" as the base name is, so the two can be told apart in any
+    language. The name is trimmed to keep within the display-name limit."""
+    limit = SKILL_LOCALE_FIELDS["display_name"] - len(_FORK_SUFFIX)
+    out: dict[str, dict[str, str]] = {}
+    for tag, fields in locales.items():
+        copy = dict(fields)
+        if copy.get("display_name"):
+            copy["display_name"] = copy["display_name"][:limit] + _FORK_SUFFIX
+        out[tag] = copy
+    return out
 
 
 @router.get("/{skill_id}/sessions", response_model=ListSessionsResponse)

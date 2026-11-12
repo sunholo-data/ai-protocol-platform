@@ -3,13 +3,21 @@ import Link from "next/link";
 import { skillHref } from "@/components/navigation/skillHref";
 import { BRANDING } from "@/lib/branding";
 import { PLATFORM_OWNER_UID } from "@/lib/platformOwner";
-import { readManifest } from "@/lib/userGuide";
+import { LocaleVariant } from "@/components/help/LocaleVariant";
+import { readManifest, translatedCards } from "@/lib/userGuide";
 import { withAppName } from "@/lib/userGuideParse";
 
 export default function HelpIndex() {
   const { pages } = readManifest();
+  const cards = translatedCards();
+  const cardText = (title: string, summary: string) => (
+    <>
+      <span className="block font-semibold text-foreground">{withAppName(title, BRANDING.appName)}</span>
+      <span className="block text-sm text-muted-foreground">{withAppName(summary, BRANDING.appName)}</span>
+    </>
+  );
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">Using {BRANDING.appName}</h1>
         <p className="text-muted-foreground">Step-by-step guides with screenshots. Pick a topic to start.</p>
@@ -34,8 +42,17 @@ export default function HelpIndex() {
                 href={`/help/${p.slug}`}
                 className="block h-full space-y-1 rounded-lg border border-border p-4 hover:bg-muted"
               >
-                <span className="block font-semibold text-foreground">{withAppName(p.title, BRANDING.appName)}</span>
-                <span className="block text-sm text-muted-foreground">{withAppName(p.summary, BRANDING.appName)}</span>
+                {cards[p.slug] ? (
+                  <LocaleVariant
+                    variants={Object.fromEntries(
+                      Object.entries(cards[p.slug]).map(([l, c]) => [l, cardText(c.title, c.summary || p.summary)]),
+                    )}
+                  >
+                    {cardText(p.title, p.summary)}
+                  </LocaleVariant>
+                ) : (
+                  cardText(p.title, p.summary)
+                )}
               </Link>
             </li>
           ))}

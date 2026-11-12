@@ -1,0 +1,222 @@
+{
+  "surfaceId": "inbox_board",
+  "messages": [
+    {
+      "version": "v0.9",
+      "createSurface": {
+        "surfaceId": "inbox_board",
+        "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json"
+      }
+    },
+    {
+      "version": "v0.9",
+      "updateComponents": {
+        "surfaceId": "inbox_board",
+        "components": [
+          {
+            "id": "t-1",
+            "component": "Text",
+            "text": "Inbox",
+            "variant": "h2"
+          },
+          {
+            "id": "t-2",
+            "component": "Text",
+            "text": "user: 1"
+          },
+          {
+            "id": "t-3",
+            "component": "Text",
+            "text": "user",
+            "variant": "h3"
+          },
+          {
+            "id": "cb-4",
+            "component": "CheckBox",
+            "label": "1. Review plan",
+            "value": {
+              "path": "/selected/1"
+            }
+          },
+          {
+            "id": "t-5",
+            "component": "Text",
+            "text": "user \u00b7 fixture-agent \u00b7 unread \u00b7 ",
+            "variant": "body"
+          },
+          {
+            "id": "t-6",
+            "component": "Text",
+            "text": "Please review the plan."
+          },
+          {
+            "id": "btn-label-7",
+            "component": "Text",
+            "text": "Open"
+          },
+          {
+            "id": "btn-8",
+            "component": "Button",
+            "child": "btn-label-7",
+            "action": {
+              "event": {
+                "name": "direct:open",
+                "context": {
+                  "ref": "1"
+                }
+              }
+            }
+          },
+          {
+            "id": "col-9",
+            "component": "Column",
+            "children": [
+              "cb-4",
+              "t-5",
+              "t-6",
+              "btn-8"
+            ]
+          },
+          {
+            "id": "card-10",
+            "component": "Card",
+            "child": "col-9"
+          },
+          {
+            "id": "btn-label-11",
+            "component": "Text",
+            "text": "Mark read"
+          },
+          {
+            "id": "btn-12",
+            "component": "Button",
+            "child": "btn-label-11",
+            "action": {
+              "event": {
+                "name": "direct:mark_read",
+                "context": {
+                  "selected": {
+                    "path": "/selected"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "btn-label-13",
+            "component": "Text",
+            "text": "Mark unread"
+          },
+          {
+            "id": "btn-14",
+            "component": "Button",
+            "child": "btn-label-13",
+            "action": {
+              "event": {
+                "name": "direct:mark_unread",
+                "context": {
+                  "selected": {
+                    "path": "/selected"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "btn-label-15",
+            "component": "Text",
+            "text": "Summarise these"
+          },
+          {
+            "id": "btn-16",
+            "component": "Button",
+            "child": "btn-label-15",
+            "action": {
+              "event": {
+                "name": "chat:send",
+                "context": {
+                  "prompt": "Summarise the selected inbox messages."
+                }
+              }
+            }
+          },
+          {
+            "id": "btn-label-17",
+            "component": "Text",
+            "text": "Draft replies"
+          },
+          {
+            "id": "btn-18",
+            "component": "Button",
+            "child": "btn-label-17",
+            "action": {
+              "event": {
+                "name": "chat:send",
+                "context": {
+                  "prompt": "Draft replies to the selected inbox messages. Show drafts for review; do not send them."
+                }
+              }
+            }
+          },
+          {
+            "id": "row-19",
+            "component": "Row",
+            "children": [
+              "btn-12",
+              "btn-14",
+              "btn-16",
+              "btn-18"
+            ]
+          },
+          {
+            "id": "root",
+            "component": "Column",
+            "children": [
+              "t-1",
+              "t-2",
+              "t-3",
+              "card-10",
+              "row-19"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "version": "v0.9",
+      "updateDataModel": {
+        "surfaceId": "inbox_board",
+        "value": {
+          "items": [
+            {
+              "id": "msg-one",
+              "inbox": "user",
+              "from": "fixture-agent",
+              "title": "Review plan",
+              "created_at": null,
+              "status": "unread",
+              "category": "",
+              "excerpt": "Please review the plan.",
+              "ref": 1
+            }
+          ],
+          "selected": {
+            "1": false
+          },
+          "filter": "current listing",
+          "counts_by_inbox": {
+            "user": 1
+          },
+          "counts_note": "",
+          "error": ""
+        }
+      }
+    }
+  ],
+  "sourceId": "e-bed9802b-4936-4c2d-ba2d-6bfe5146cee9:ailang_inbox_list:1",
+  "artifact": {
+    "kind": "inbox_board",
+    "title": "Inbox",
+    "description": "Select messages to triage"
+  }
+}

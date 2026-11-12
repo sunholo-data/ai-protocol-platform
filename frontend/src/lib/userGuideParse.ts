@@ -30,6 +30,8 @@ export interface GuidePageMeta {
 export interface GuideManifest {
   tags: string[];
   pages: GuidePageMeta[];
+  /** Translated slugs per locale (`<locale>/<slug>.md` in the bundle). Absent in bundles made before translations. */
+  locales?: Record<string, string[]>;
 }
 
 export interface Figure {

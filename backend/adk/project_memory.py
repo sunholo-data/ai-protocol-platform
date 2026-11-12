@@ -41,6 +41,7 @@ from google.adk.tools.tool_context import ToolContext
 from google.genai import types
 from typing_extensions import override
 
+from adk.memory_client import ingest_events_api, memories_api
 from adk.memory_tools import _bank, memory_scope_async
 
 if TYPE_CHECKING:
@@ -49,8 +50,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 _background_tasks: set[asyncio.Task] = set()
-_PURGE_PAGE = 100
-_PURGE_MAX = 2000
 
 
 async def search_scoped_memory(tool_context: Any, query: str) -> list[MemoryEntry]:
@@ -67,7 +66,7 @@ async def search_scoped_memory(tool_context: Any, query: str) -> list[MemoryEntr
         log.info("project memory: no Memory Bank behind this invocation; project recall is empty")
         return []
     client, engine = bank
-    pager = await client.agent_engines.memories.retrieve(
+    pager = await memories_api(client).retrieve(
         name=engine, scope=scope, similarity_search_params={"search_query": query}
     )
     entries: list[MemoryEntry] = []
@@ -87,7 +86,7 @@ async def search_scoped_memory(tool_context: Any, query: str) -> list[MemoryEntr
     return entries
 
 
-async def load_memory(query: str, tool_context: ToolContext) -> LoadMemoryResponse:
+async def load_memory(query: str, tool_context: ToolContext) -> dict[str, Any]:
     """Loads the memory for the current user.
 
     Args:
@@ -96,7 +95,11 @@ async def load_memory(query: str, tool_context: ToolContext) -> LoadMemoryRespon
     Returns:
       A list of memory results.
     """
-    return LoadMemoryResponse(memories=await search_scoped_memory(tool_context, query))
+    response = LoadMemoryResponse(memories=await search_scoped_memory(tool_context, query))
+    # ADK wraps non-dict tool returns in {"result": ...}. Keep that wire shape,
+    # but normalize its typed payload before GenAI telemetry's JSON uploader
+    # sees it (its encoder cannot serialize Pydantic LoadMemoryResponse).
+    return {"result": response.model_dump(mode="json")}
 
 
 class ProjectAwareLoadMemoryTool(LoadMemoryTool):
@@ -181,7 +184,7 @@ async def ingest_project_turn(
     if not direct_events:
         return False
     task = asyncio.create_task(
-        client.agent_engines.memories.ingest_events(
+        ingest_events_api(client)(
             name=engine,
             scope=scope,
             direct_contents_source=vertexai.types.IngestionDirectContentsSource(events=direct_events),
@@ -198,42 +201,19 @@ async def ingest_project_turn(
 async def purge_project_memories(user_id: str, project_id: str) -> int:
     """Delete every memory in the project's scope. Returns how many were deleted.
 
-    Lists by EXACT scope (``retrieve`` with ``simple_retrieval_params``) and deletes
-    each, re-checking the scope on every row, rather than a filter-expression
-    purge: a filter typo there could delete personal memory. Best-effort — the
-    caller logs and carries on.
+    Lists by EXACT scope and deletes each after re-checking its scope
+    (``adk.memory_store.delete_all``), rather than a filter-expression purge: a
+    filter typo there could delete personal memory. Best-effort — the caller logs
+    and carries on.
     """
-    from adk.agui import APP_NAME
-    from adk.session import get_memory_service
+    from adk import memory_store
 
-    service = get_memory_service()
-    engine_id = getattr(service, "_agent_engine_id", None)
-    get_client = getattr(service, "_get_api_client", None)
-    if not engine_id or not callable(get_client):
+    found = memory_store.bank()
+    if found is None:
         return 0
-    client = get_client()
-    engine = f"reasoningEngines/{engine_id}"
-    scope = {"app_name": APP_NAME, "user_id": user_id, "project_id": project_id}
-    names: list[str] = []
-    pager = await client.agent_engines.memories.retrieve(
-        name=engine, scope=scope, simple_retrieval_params={"page_size": _PURGE_PAGE}
-    )
-    async for item in pager:
-        memory = getattr(item, "memory", None)
-        if memory is None or dict(getattr(memory, "scope", None) or {}) != scope:
-            continue
-        if getattr(memory, "name", ""):
-            names.append(memory.name)
-        if len(names) >= _PURGE_MAX:
-            break
-    deleted = 0
-    for name in names:
-        try:
-            await client.agent_engines.memories.delete(name=name)
-            deleted += 1
-        except Exception as exc:
-            log.warning("project memory: could not delete %s: %s", name, exc)
-    return deleted
+    client, engine = found
+    result = await memory_store.delete_all(client, engine, memory_store.scope_for(user_id, project_id))
+    return len(result.deleted)
 
 
 __all__ = [

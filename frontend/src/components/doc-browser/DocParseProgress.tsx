@@ -17,10 +17,10 @@ export function DocParseProgress({ parsedCount, failedCount, docCount }: DocPars
       {pendingCount > 0 && (
         <>
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-[11px] text-muted-foreground">
               Parsing: {parsedCount} / {docCount - failedCount} complete
             </span>
-            <span className="text-[10px] font-medium text-foreground">{pct}%</span>
+            <span className="text-[11px] font-medium text-foreground">{pct}%</span>
           </div>
           <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
             <div
@@ -31,7 +31,7 @@ export function DocParseProgress({ parsedCount, failedCount, docCount }: DocPars
         </>
       )}
       {failedCount > 0 && (
-        <p className="text-[10px] text-destructive">
+        <p className="text-[11px] text-destructive">
           {failedCount} file{failedCount !== 1 ? "s" : ""} failed to parse — hover for details
         </p>
       )}

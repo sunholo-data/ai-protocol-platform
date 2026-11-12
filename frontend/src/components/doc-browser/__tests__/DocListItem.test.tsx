@@ -110,9 +110,9 @@ describe("DocListItem", () => {
     const onClick = vi.fn();
     const doc = makeDoc();
     render(<DocListItem doc={doc} onClick={onClick} />);
-    // Row is role=button; the inner delete/reparse <button>s share that role.
-    // Click the row by walking up from the filename text.
-    const row = screen.getByText("report.docx").closest("[role=\"button\"]");
+    // The row's open control is a real <button>, a sibling of the action buttons.
+    // Click it by walking up from the filename text.
+    const row = screen.getByText("report.docx").closest("button");
     expect(row).not.toBeNull();
     await userEvent.click(row!);
     expect(onClick).toHaveBeenCalledWith(doc);
@@ -125,7 +125,7 @@ describe("DocListItem — hover preview", () => {
     try {
       render(<DocListItem doc={makeDoc({ id: "p1", originalFilename: "a.pdf", sourceFormat: "pdf" })} onClick={vi.fn()} />);
       expect(thumbCalls()).toEqual([]);
-      const trigger = screen.getByText("a.pdf").closest("[role=button]") as HTMLElement;
+      const trigger = screen.getByText("a.pdf").closest("button") as HTMLElement;
       fireEvent.pointerMove(trigger, { pointerType: "mouse" });
       // Still nothing inside the hover-intent delay.
       expect(thumbCalls()).toEqual([]);

@@ -266,3 +266,15 @@ def test_optimization_m1_marks_silent_in_off_mode(monkeypatch):
     payload = tracker.report_payload()
     assert "agent_factory_done_ms" not in payload
     assert "runner_setup_done_ms" not in payload
+
+
+def test_run_outcome_keeps_the_first_terminal(monkeypatch):
+    """The ttft line says how the run ended; a later terminal must not overwrite it."""
+    from observability import timing
+
+    monkeypatch.setattr(timing, "_ENABLED", True, raising=True)
+    tracker = timing.LatencyTracker(skill_id="s")
+    assert tracker.report_payload()["run_outcome"] == ""  # client left before a terminal
+    tracker.set_outcome("error:EMPTY_RUN")
+    tracker.set_outcome("ok")
+    assert tracker.report_payload()["run_outcome"] == "error:EMPTY_RUN"

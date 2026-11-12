@@ -129,7 +129,7 @@ function renderChange(b: Block): ReactNode {
   return (
     <span className={`text-sm ${cls}`}>
       {b.text}
-      {b.author && <em className="ml-1 text-[10px] opacity-70 not-italic">— {b.author}</em>}
+      {b.author && <em className="ml-1 text-[11px] opacity-70 not-italic">— {b.author}</em>}
     </span>
   );
 }
@@ -160,7 +160,7 @@ function renderBlock(b: Block, key: number): ReactNode {
     case "section":
       return (
         <section key={key} className="my-2">
-          {b.kind && <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">{b.kind}</div>}
+          {b.kind && <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{b.kind}</div>}
           {(b.children ?? []).map((c, i) => renderBlock(c, i))}
         </section>
       );

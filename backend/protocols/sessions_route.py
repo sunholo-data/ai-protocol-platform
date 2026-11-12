@@ -225,6 +225,8 @@ class ChatSessionSummary(BaseModel):
     # Projects (projects.md §5): explicit membership, so a chat header / row can
     # show which project the chat is in. Derived membership is not listed here.
     project_id: str | None = None
+    # The composer's Model pick for this chat (adk.model_choice); None = Auto.
+    model_choice: str | None = None
 
 
 class ListSessionsResponse(BaseModel):
@@ -295,6 +297,7 @@ def _to_summary(
         can_fork=(idx.archived_at is None),
         transcript_lost=idx.transcript_lost,
         project_id=idx.project_id if is_owner else None,
+        model_choice=idx.model_choice if is_owner else None,
     )
 
 
@@ -810,11 +813,20 @@ async def get_session_messages(
     if not ctx.can_access(idx):
         raise HTTPException(status_code=403, detail="Access denied")
 
+    from db.chat_sessions import list_turn_authors
+
+    # Concurrently: the session's events (a remote Vertex read), the author map
+    # (skill and delegate lookups) and the turn authors (Firestore). One after
+    # another they cost their sum on every chat open (~2 s on 2026-10-30).
     session_service = get_messages_session_service()
-    session = await session_service.get_session(
-        app_name=APP_NAME,
-        user_id=idx.owner_uid,
-        session_id=session_id,
+    session, author_map, turn_authors = await asyncio.gather(
+        session_service.get_session(
+            app_name=APP_NAME,
+            user_id=idx.owner_uid,
+            session_id=session_id,
+        ),
+        asyncio.to_thread(_author_agent_map, idx, ctx),
+        asyncio.to_thread(list_turn_authors, session_id),
     )
     events = session.events if session is not None else []
     state = session.state if session is not None else None
@@ -832,10 +844,8 @@ async def get_session_messages(
             idx.owner_uid,
         )
 
-    from db.chat_sessions import list_turn_authors
-
-    messages = _events_to_messages(events, _author_agent_map(idx, ctx))
-    _join_turn_authors(messages, await asyncio.to_thread(list_turn_authors, session_id))
+    messages = _events_to_messages(events, author_map)
+    _join_turn_authors(messages, turn_authors)
     email = (getattr(ctx, "email", "") or "").strip().lower()
     collaborators = list(idx.collaborators or [])
     show_collaborators = idx.owner_uid == ctx.uid or (bool(email) and email in collaborators)

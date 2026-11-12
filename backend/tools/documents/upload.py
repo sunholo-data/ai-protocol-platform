@@ -16,8 +16,9 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 
+import db.projects as projects_db
 from auth import User, get_current_user
 from tools.documents.ingest import (
     _COLLECTION,
@@ -60,6 +61,7 @@ async def upload_document(
     folder_id: Annotated[str, Form()] = "",
     folder_path: Annotated[str, Form()] = "",
     skip_unchanged: Annotated[bool, Form()] = False,
+    project_id: Annotated[str, Form()] = "",
 ) -> ParsedDocumentResponse:
     """Upload a document, parse it with AILANG Parse, store in Firestore.
 
@@ -79,11 +81,20 @@ async def upload_document(
     Folder upload sends ``folder_path`` (the file's directory relative to the
     chosen folder, e.g. ``Reports/2026``) instead of ``folder_id``, and
     ``skip_unchanged=true`` so a re-upload only processes changed files.
+
+    ``project_id`` (a project's page): the document is also added to that
+    project in the same request. Checked before anything is stored — an unknown
+    or foreign project is a 404, not a silently unfiled upload.
     """
     if folder_id.strip():
         # A caller-supplied id must name one of the caller's folders — an unknown
         # id used to be stored verbatim, orphaning the document (NEVER-SILENT #8).
         require_owned_folder(user.uid, folder_id.strip())
+    project_id = project_id.strip()
+    if project_id and projects_db.get_project(user.uid, project_id) is None:
+        raise HTTPException(
+            status_code=404, detail={"code": "PROJECT_NOT_FOUND", "message": "That project no longer exists."}
+        )
     return await ingest_document(
         user=user,
         file_bytes=await file.read(),
@@ -94,4 +105,5 @@ async def upload_document(
         source="uploaded",
         folder_path=folder_path,
         skip_unchanged=skip_unchanged,
+        project_id=project_id,
     )

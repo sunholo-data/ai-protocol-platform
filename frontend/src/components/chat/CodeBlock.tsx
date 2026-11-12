@@ -81,7 +81,7 @@ function CopyCodeButton({ text }: { text: string }) {
       type="button"
       onClick={copy}
       data-testid="code-copy"
-      className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+      className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
       title={state === "failed" ? "Copying failed — select and copy manually" : "Copy to clipboard"}
       aria-label="Copy code to clipboard"
     >
@@ -124,7 +124,7 @@ export function CodeBlock({
   return (
     <div className="mb-2 overflow-hidden rounded border border-border">
       <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/60 px-2 py-1">
-        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           {language === "ail" ? "ailang" : language || "code"}
         </span>
         <span className="flex items-center gap-1">

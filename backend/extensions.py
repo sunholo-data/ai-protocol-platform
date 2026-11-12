@@ -14,7 +14,8 @@ import that bypasses this seam.
 Conventions for a private extension package ``backend/private/<name>/``:
 
 * ``routes.py`` exposing ``router`` (a FastAPI ``APIRouter``) — mounted by
-  :func:`include_private_routers`.
+  :func:`include_private_routers`, with an optional ``internal_router`` for
+  ``/internal/...`` routes.
 * ``tools.py`` exposing ``TOOL_REGISTRY`` (name → factory, same shape as
   ``adk.tools.TOOL_REGISTRY``) and optionally ``TOOL_CATALOG`` (same shape as
   ``adk.tools.TOOL_CATALOG``) — merged by :func:`private_tools`.
@@ -27,6 +28,13 @@ Conventions for a private extension package ``backend/private/<name>/``:
 * ``project_search.py`` exposing ``make_toolsets()`` (ADK toolsets every agent
   gets — :func:`private_toolsets`) and ``search_status(uid, project_id)`` (a
   project's search readiness — :func:`project_search_status`).
+* ``imagegen.py`` exposing ``IMAGE_PROVIDERS`` (engine name → zero-argument
+  factory returning an ``imagegen.base.ImageProvider``) — offered by
+  :func:`private_image_provider` to the image registry, the same way.
+* ``voice.py`` exposing ``TTS_PROVIDERS`` (provider name → zero-argument
+  factory returning a ``voice.base.TTSProvider``) — offered by
+  :func:`private_tts_provider` to the voice registry, so a deployment can add
+  a speech source (e.g. a host-local model) that skills pick by name.
 
 A private module that fails to import is logged loudly and skipped: one broken
 extension must not take down the public surface. Validators are the exception:
@@ -73,7 +81,10 @@ def _optional_module(package: str, module: str) -> Any | None:
 
 
 def include_private_routers(app: Any) -> list[str]:
-    """Mount every private package's ``routes.router``. Returns the package names mounted."""
+    """Mount every private package's ``routes.router``, and its
+    ``routes.internal_router`` when it has one (``/internal/...`` routes a
+    scheduler calls, kept apart from the package's API prefix). Returns the
+    package names mounted."""
     mounted: list[str] = []
     for pkg in private_packages():
         mod = _optional_module(pkg, "routes")
@@ -81,6 +92,9 @@ def include_private_routers(app: Any) -> list[str]:
         if router is None:
             continue
         app.include_router(router)
+        internal = getattr(mod, "internal_router", None)
+        if internal is not None:
+            app.include_router(internal)
         mounted.append(pkg)
     if mounted:
         log.info("private extensions: mounted routers from %s", ", ".join(mounted))
@@ -201,6 +215,24 @@ def project_search_status(uid: str, project_id: str) -> dict[str, Any] | None:
     return None
 
 
+def attachable_knowledge_bases(access: Any) -> list[dict[str, str]] | None:
+    """``[{id, name}]`` of the knowledge bases this caller may attach to a project
+    (github-sources.md D9) — the ones they can search — from the first private
+    package that provides it, or ``None`` where knowledge bases don't exist (the
+    public template) or the lookup failed (logged). Never raises."""
+    for pkg in private_packages():
+        mod = _optional_module(pkg, "project_search")
+        fn = getattr(mod, "attachable_kbs", None) if mod is not None else None
+        if fn is None:
+            continue
+        try:
+            return [dict(row) for row in fn(access)]
+        except Exception:
+            log.exception("attachable knowledge bases from %s.project_search failed", pkg)
+            return None
+    return None
+
+
 def access_tags(name: str) -> list[str] | None:
     """Tags a private package supplies for ``access_control: {type: tagged, tags_from: <name>}``
     in a template skill (e.g. ``user_guide`` → the deployment's guide tags).
@@ -260,4 +292,56 @@ def outside_project_tools() -> set[str]:
         module = _optional_module(package, "project_scope")
         if module is not None:
             names.update(module.OUTSIDE_DOCUMENT_TOOLS)
+    return names
+
+
+def private_tts_provider(name: str) -> Any | None:
+    """A TTS provider named ``name`` from a private package's ``voice.py``, or None.
+
+    The voice registry asks this for a name it does not know, so a deployment's
+    own speech source is chosen exactly like a built-in one (a skill's
+    ``voice.ttsProvider``, ``VOICE_TTS_PROVIDER``, or the ``speak`` tool). None
+    in the public template; a factory that fails is logged and skipped.
+    """
+    for package in private_packages():
+        module = _optional_module(package, "voice")
+        factory = (getattr(module, "TTS_PROVIDERS", None) or {}).get(name) if module is not None else None
+        if factory is None:
+            continue
+        try:
+            return factory()
+        except Exception:
+            log.exception("private TTS provider %r from %s failed to build; skipping it", name, package)
+    return None
+
+
+def private_tts_provider_names() -> list[str]:
+    """Names of the TTS providers private packages offer (``[]`` in the public template)."""
+    names: list[str] = []
+    for package in private_packages():
+        module = _optional_module(package, "voice")
+        names.extend(sorted((getattr(module, "TTS_PROVIDERS", None) or {}) if module is not None else {}))
+    return names
+
+
+def private_image_provider(name: str) -> Any | None:
+    """An image engine named ``name`` from a private package's ``imagegen.py``, or None."""
+    for package in private_packages():
+        module = _optional_module(package, "imagegen")
+        factory = (getattr(module, "IMAGE_PROVIDERS", None) or {}).get(name) if module is not None else None
+        if factory is None:
+            continue
+        try:
+            return factory()
+        except Exception:
+            log.exception("private image engine %r from %s failed to build; skipping it", name, package)
+    return None
+
+
+def private_image_provider_names() -> list[str]:
+    """Names of the image engines private packages offer (``[]`` in the public template)."""
+    names: list[str] = []
+    for package in private_packages():
+        module = _optional_module(package, "imagegen")
+        names.extend(sorted((getattr(module, "IMAGE_PROVIDERS", None) or {}) if module is not None else {}))
     return names

@@ -34,6 +34,9 @@ from typing import Any
 
 from google.adk.tools import ToolContext
 
+from adk.memory_client import memories_api
+from adk.memory_store import bank_of, delete_refs
+
 log = logging.getLogger(__name__)
 
 MAX_FACT_CHARS = 2000
@@ -76,12 +79,7 @@ def _bank(ctx: Any) -> tuple[Any, str] | None:
     """``(async api client, "reasoningEngines/<id>")`` for the Memory Bank behind
     this invocation, or None when memory runs on a backend without one."""
     inv = getattr(ctx, "_invocation_context", None)
-    service = getattr(inv, "memory_service", None) if inv is not None else None
-    engine_id = getattr(service, "_agent_engine_id", None)
-    get_client = getattr(service, "_get_api_client", None)
-    if not engine_id or not callable(get_client):
-        return None
-    return get_client(), f"reasoningEngines/{engine_id}"
+    return bank_of(getattr(inv, "memory_service", None) if inv is not None else None)
 
 
 _UNAVAILABLE = (
@@ -127,7 +125,7 @@ async def remember(fact: str = "", tool_context: ToolContext = None) -> str:
         return _UNAVAILABLE
     client, engine = bank
     try:
-        await client.agent_engines.memories.generate(
+        await memories_api(client).generate(
             name=engine,
             direct_memories_source={"direct_memories": [{"fact": fact}]},
             scope=scope,
@@ -150,12 +148,6 @@ def _parse_refs(raw: str) -> list[str]:
         if ref and ref not in refs:
             refs.append(ref)
     return refs
-
-
-def _belongs_to_engine(ref: str, engine: str) -> bool:
-    """A memory name under THIS Memory Bank: ``…/reasoningEngines/<id>/memories/<m>``."""
-    prefix_at = ref.find(engine + "/memories/")
-    return prefix_at == 0 or (prefix_at > 0 and ref[prefix_at - 1] == "/")
 
 
 async def forget(about: str = "", memory_refs: str = "", tool_context: ToolContext = None) -> str:
@@ -196,13 +188,13 @@ async def forget(about: str = "", memory_refs: str = "", tool_context: ToolConte
 async def _find(client: Any, engine: str, scope: dict[str, str], about: str) -> str:
     try:
         if about:
-            pager = await client.agent_engines.memories.retrieve(
+            pager = await memories_api(client).retrieve(
                 name=engine,
                 scope=scope,
                 similarity_search_params={"search_query": about, "top_k": _SEARCH_TOP_K},
             )
         else:
-            pager = await client.agent_engines.memories.retrieve(
+            pager = await memories_api(client).retrieve(
                 name=engine, scope=scope, simple_retrieval_params={"page_size": _LIST_PAGE}
             )
         found: list[tuple[str, str]] = []
@@ -231,41 +223,20 @@ async def _find(client: Any, engine: str, scope: dict[str, str], about: str) -> 
 
 
 async def _delete(client: Any, engine: str, scope: dict[str, str], refs: list[str]) -> str:
-    deleted: list[str] = []
-    refused = 0
-    failed = 0
-    for ref in refs:
-        if not _belongs_to_engine(ref, engine):
-            refused += 1
-            continue
-        try:
-            memory = await client.agent_engines.memories.get(name=ref)
-        except Exception as exc:
-            log.warning("forget: could not read memory %s: %s", ref, exc)
-            refused += 1
-            continue
-        # Never trust the ref alone: the memory must be in THIS caller's scope,
-        # exactly — another user's memory, or a project's, is not theirs to delete.
-        if dict(getattr(memory, "scope", None) or {}) != scope:
-            log.warning("forget: refused %s — scope is not the caller's", ref)
-            refused += 1
-            continue
-        try:
-            await client.agent_engines.memories.delete(name=ref)
-        except Exception as exc:
-            log.warning("forget: delete of %s failed: %s", ref, exc)
-            failed += 1
-            continue
-        deleted.append(str(getattr(memory, "fact", "") or "a memory"))
+    # Never trust a ref alone: delete_refs re-reads each memory and refuses any
+    # whose scope is not exactly this caller's.
+    result = await delete_refs(client, engine, scope, refs)
     parts: list[str] = []
-    if deleted:
-        parts.append("Deleted from memory:\n" + "\n".join(f'- "{fact}"' for fact in deleted))
+    if result.deleted:
+        parts.append("Deleted from memory:\n" + "\n".join(f'- "{fact}"' for fact in result.deleted))
     else:
         parts.append("Nothing was deleted.")
-    if refused:
-        parts.append(f"{refused} ref(s) were not memories of this user and were left alone.")
-    if failed:
-        parts.append(f"{failed} memory(ies) could not be deleted because of an error; tell the user to try again.")
+    if result.refused:
+        parts.append(f"{result.refused} ref(s) were not memories of this user and were left alone.")
+    if result.failed:
+        parts.append(
+            f"{result.failed} memory(ies) could not be deleted because of an error; tell the user to try again."
+        )
     return "\n".join(parts)
 
 

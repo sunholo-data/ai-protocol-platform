@@ -16,17 +16,21 @@ import Link from "next/link";
 import { useAdminScope } from "@/hooks/useAdminScope";
 import { useAuth } from "@/contexts/AuthContext";
 import { headerControl } from "./headerControls";
-import { NotificationsToggle } from "./NotificationsToggle";
+import { CircleHelp, FolderKanban, LogOut, Settings, Shield } from "lucide-react";
 
-/** An action shown at the top of the menu on phone widths only — where the
- * header has no room for its own buttons (SkillsBar's Configure / Create). */
-export interface UserMenuPhoneItem {
-  label: string;
-  icon: ReactNode;
-  onSelect: () => void;
-}
+// Short on purpose: Settings holds instructions, memory, voice, notifications
+// and connections; skill actions are in the skill picker.
+const LINKS: { href: string; label: string; icon: ReactNode; admin?: boolean }[] = [
+  { href: "/settings", label: "Settings", icon: <Settings className="h-4 w-4" /> },
+  { href: "/projects", label: "Projects", icon: <FolderKanban className="h-4 w-4" /> },
+  { href: "/help", label: "Help", icon: <CircleHelp className="h-4 w-4" /> },
+  { href: "/admin", label: "Admin", icon: <Shield className="h-4 w-4" />, admin: true },
+];
 
-export function UserMenu({ phoneItems = [] }: { phoneItems?: UserMenuPhoneItem[] } = {}) {
+const ROW =
+  "flex min-h-[44px] w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted focus-visible:bg-muted focus-visible:outline-none md:min-h-[36px]";
+
+export function UserMenu() {
   const { user, loading, signIn, signOut } = useAuth();
   const [open, setOpen] = useState(false);
   // Admin discoverability: the /admin area was URL-only. Ask the backend for
@@ -36,6 +40,23 @@ export function UserMenu({ phoneItems = [] }: { phoneItems?: UserMenuPhoneItem[]
   // why a tenant-admin holder never saw this link.
   const { isAdmin } = useAdminScope(open);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Keyboard: focus moves into the menu when it opens, arrows move between
+  // items, Esc closes and returns focus to the avatar.
+  useEffect(() => {
+    if (open) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [open]);
+  const onMenuKeyDown = (e: React.KeyboardEvent) => {
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    const go = (n: number) => items[(n + items.length) % items.length]?.focus();
+    if (e.key === "ArrowDown") (e.preventDefault(), go(i + 1));
+    else if (e.key === "ArrowUp") (e.preventDefault(), go(i - 1));
+    else if (e.key === "Home") (e.preventDefault(), go(0));
+    else if (e.key === "End") (e.preventDefault(), go(items.length - 1));
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -43,7 +64,10 @@ export function UserMenu({ phoneItems = [] }: { phoneItems?: UserMenuPhoneItem[]
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
     function onEsc(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     }
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onEsc);
@@ -75,6 +99,7 @@ export function UserMenu({ phoneItems = [] }: { phoneItems?: UserMenuPhoneItem[]
   return (
     <div ref={ref} className="relative shrink-0">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
@@ -92,8 +117,11 @@ export function UserMenu({ phoneItems = [] }: { phoneItems?: UserMenuPhoneItem[]
 
       {open && (
         <div
+          ref={menuRef}
           role="menu"
-          className="absolute right-0 top-full z-50 mt-2 w-60 rounded-[var(--radius)] border border-border bg-background p-1"
+          aria-label="Account"
+          onKeyDown={onMenuKeyDown}
+          className="absolute right-0 top-full z-50 mt-2 w-64 rounded-[var(--radius)] border border-border bg-popover p-1 shadow-lg motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150"
         >
           <div className="border-b px-3 py-2">
             <p className="truncate text-sm font-medium text-foreground">
@@ -103,56 +131,14 @@ export function UserMenu({ phoneItems = [] }: { phoneItems?: UserMenuPhoneItem[]
               <p className="truncate text-xs text-muted-foreground">{user.email}</p>
             )}
           </div>
-          {phoneItems.length > 0 && (
-            <div className="border-b border-border py-1 sm:hidden">
-              {phoneItems.map((item) => (
-                <button
-                  key={item.label}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setOpen(false);
-                    item.onSelect();
-                  }}
-                  className="flex min-h-[44px] w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted"
-                >
-                  <span className="text-muted-foreground" aria-hidden>
-                    {item.icon}
-                  </span>
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="mt-1">
-            <NotificationsToggle rowClassName="flex min-h-[44px] w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted md:min-h-[36px]" />
-          </div>
-          <Link
-            href="/settings/instructions"
-            role="menuitem"
-            onClick={() => setOpen(false)}
-            className="mt-1 flex min-h-[44px] w-full items-center rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted md:min-h-[36px]"
-          >
-            Your instructions
-          </Link>
-          <Link
-            href="/help"
-            role="menuitem"
-            onClick={() => setOpen(false)}
-            className="mt-1 flex min-h-[44px] w-full items-center rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted md:min-h-[36px]"
-          >
-            Help
-          </Link>
-          {isAdmin && (
-            <Link
-              href="/admin"
-              role="menuitem"
-              onClick={() => setOpen(false)}
-              className="mt-1 flex min-h-[44px] w-full items-center rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted md:min-h-[36px]"
-            >
-              Admin
+          {LINKS.filter((l) => !l.admin || isAdmin).map((l) => (
+            <Link key={l.href} href={l.href} role="menuitem" onClick={() => setOpen(false)} className={`mt-1 ${ROW}`}>
+              <span className="text-muted-foreground" aria-hidden>
+                {l.icon}
+              </span>
+              {l.label}
             </Link>
-          )}
+          ))}
           <button
             type="button"
             role="menuitem"
@@ -160,8 +146,9 @@ export function UserMenu({ phoneItems = [] }: { phoneItems?: UserMenuPhoneItem[]
               setOpen(false);
               void signOut();
             }}
-            className="mt-1 flex min-h-[44px] w-full items-center rounded-[var(--radius)] px-3 text-left text-sm text-foreground hover:bg-muted md:min-h-[36px]"
+            className={`mt-1 border-t border-border ${ROW}`}
           >
+            <LogOut className="h-4 w-4 text-muted-foreground" aria-hidden />
             Sign out
           </button>
         </div>

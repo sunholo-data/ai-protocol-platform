@@ -41,6 +41,8 @@ function makeReturn(overrides: Partial<UseSkillAgentReturn> = {}): UseSkillAgent
     stageLabel: null,
     delegations: [],
     fallbacks: [],
+    modelEvents: [],
+    modelWait: null,
     compactions: [],
     tidyingUp: false,
     resolvedModel: null,
@@ -171,35 +173,42 @@ beforeEach(() => {
   vi.mocked(useSkillAgent).mockReturnValue(makeReturn());
 });
 
-describe("ChatShell — Workspace Home persistence (B6)", () => {
-  it("keeps the examples picker on Home after a result artifact arrives — THE regression guard", async () => {
-    // A front door, mid-conversation: the exact state where the tiles used to
-    // vanish and the only way back was a new chat.
-    vi.mocked(useSkillAgent).mockReturnValue(
-      makeReturn({ messages: [{ id: "m1", role: "user", content: "hello" }] }),
-    );
+// UI round 2: the workbench's tabs are the results. The old Home ("Workspace")
+// tab is now "Start" — a skill's launchers and examples — and exists only when
+// the skill has some; its results index moved to the All results menu.
+// Example prompts sit in one place at a time: chips under the landing composer
+// on a fresh chat, the Start tab once the conversation is going.
+const midConversation = () =>
+  vi.mocked(useSkillAgent).mockReturnValue(makeReturn({ messages: [{ id: "m1", role: "user", content: "hello" }] }));
+
+async function openAllResults() {
+  const trigger = screen.getByRole("button", { name: /All results/i });
+  await act(async () => {
+    trigger.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+  });
+  return screen.findByRole("menu");
+}
+
+describe("ChatShell — the workbench's tabs are the results (B6 kept)", () => {
+  it("keeps the examples on Start after a result artifact arrives — THE regression guard", async () => {
+    midConversation();
     await renderChat();
     expect(screen.getByTestId("example-prompts")).toBeTruthy();
 
     emitSurface(pricesEnvelope);
     await screen.findByRole("tab", { name: /DE_LU prices/i });
 
-    // Before this change the picker was gone the moment a result landed, and the
-    // only route back to it was a NEW CHAT. It must still be mounted — one click
-    // away on Home, not destroyed.
+    // Still mounted, one click away on Start — not destroyed by the result.
     expect(screen.getByTestId("example-prompts")).toBeTruthy();
-    expect(screen.getByRole("tab", { name: /Workspace/i })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /Start/i })).toBeTruthy();
   });
 
-  it("keeps the picker on Home after a DOMINANT workspace surface arrives", async () => {
-    // The harder case: a bare `workspace` surface carries no artifact metadata,
-    // so it can't ride the 7.5 artifact-tab model. It used to render INSIDE the
-    // Workspace tab, replacing Home outright.
+  it("on a fresh chat shows the prompts as chips under the composer, and no Start tab for prompts alone", async () => {
     await renderChat();
-    emitSurface(workspaceEnvelope);
-
-    await screen.findByRole("tab", { name: /Assistant/i });
-    expect(screen.getByTestId("example-prompts")).toBeTruthy();
+    const chips = screen.getByRole("list", { name: "Example prompts" });
+    expect(chips.textContent).toContain("Chart DK1 market prices");
+    expect(screen.queryByTestId("example-prompts")).toBeNull();
+    expect(screen.queryByRole("tab", { name: /Start/i })).toBeNull();
   });
 
   it("promotes the dominant workspace surface to its own closable Result tab", async () => {
@@ -209,110 +218,71 @@ describe("ChatShell — Workspace Home persistence (B6)", () => {
     emitSurface(workspaceEnvelope);
 
     const tab = await screen.findByRole("tab", { name: /Assistant/i });
-    // Repo principle #7 — auto-focus new workbench elements. The user still
-    // lands on the result; the difference is that Home survives.
+    // Repo principle #7 — auto-focus new workbench elements.
     expect(tab.getAttribute("aria-selected")).toBe("true");
-    // Every Result tab is closable; the structural tabs (Home/Document/Activity)
-    // are not. The promoted surface joins the result family, close included.
     expect(screen.getByRole("button", { name: /close .*assistant/i })).toBeTruthy();
   });
 
-  it("never auto-focuses Home away from a result — Home is furniture, not a target", async () => {
-    // B4 ("Workspace tab sometimes needs a second click") is a focus-stealing
-    // shape: before this change an arriving workspace surface called
-    // onWorkbenchTabChange("workspace"), the SAME id the user clicks to reach
-    // Home. A click could therefore be undone by an in-flight surface. Now the
-    // surface targets its own tab id, so Home is never contested.
+  it("never auto-focuses Start away from a result — Start is furniture, not a target", async () => {
+    midConversation();
     await renderChat();
     emitSurface(workspaceEnvelope);
     await screen.findByRole("tab", { name: /Assistant/i });
 
-    const home = screen.getByRole("tab", { name: /Workspace/i });
-    expect(home.getAttribute("aria-selected")).toBe("false");
-
-    // A second surface update must not yank focus onto Home.
+    expect(screen.getByRole("tab", { name: /Start/i }).getAttribute("aria-selected")).toBe("false");
     emitSurface(workspaceEnvelope);
     await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /Workspace/i }).getAttribute("aria-selected")).toBe(
-        "false",
-      ),
+      expect(screen.getByRole("tab", { name: /Start/i }).getAttribute("aria-selected")).toBe("false"),
     );
   });
 
-  it("Home indexes both artifact results and the promoted workspace surface", async () => {
+  it("All results lists both artifact results and the promoted workspace surface", async () => {
     await renderChat();
     emitSurface(pricesEnvelope);
     emitSurface(workspaceEnvelope);
     await screen.findByRole("tab", { name: /Assistant/i });
 
-    // Home is a navigation index (WorkbenchHome), so both results must be
-    // reachable from it — the promoted surface included, or it would be the one
-    // result you can't get back to after closing its tab.
-    const home = screen.getByRole("tab", { name: /Workspace/i });
-    act(() => {
-      home.click();
-    });
-    await waitFor(() => expect(home.getAttribute("aria-selected")).toBe("true"));
-    expect(screen.getByTestId("example-prompts")).toBeTruthy();
-    // Both results listed by friendly title (CLAUDE.md #9 — never a surfaceId).
-    const index = await screen.findByTestId("workbench-index");
-    expect(index.textContent).toContain("DE_LU prices");
-    expect(index.textContent).toContain("Assistant");
-    expect(index.textContent).not.toContain("entsoe_prices");
+    // Every result stays reachable after its tab is closed — the promoted
+    // surface included — by friendly title (CLAUDE.md #9, never a surfaceId).
+    const menu = await openAllResults();
+    expect(menu.textContent).toContain("DE_LU prices");
+    expect(menu.textContent).toContain("Assistant");
+    expect(menu.textContent).toContain("Activity log");
+    expect(menu.textContent).not.toContain("entsoe_prices");
   });
 
-  it("keeps focus on Home when the SAME result surface is re-emitted (B4, integration half)", async () => {
-    // B4 — "Workspace tab sometimes needs a second click" (a tester; Mark had seen
-    // it too). Reproduced live 2026-08-07: with a prices result open and
-    // auto-focused, clicking Workspace mid-run showed Home, and by the time the
-    // run finished focus was back on the Result tab.
-    //
-    // HONEST SCOPE: this test does NOT reproduce the underlying blink — a
-    // re-emission through the event router keeps `state.surface` non-null
-    // throughout, so the artifact never leaves `listArtifacts()`. Verified: it
-    // passes against the pre-fix implementation too. What it guards is the
-    // weaker, still-worth-having property that an ordinary re-emission does not
-    // move the user's focus.
-    //
-    // The blink itself is guarded where it is actually decidable, as a pure
-    // rule: src/lib/__tests__/workbenchFocus.test.ts, "does NOT re-focus after a
-    // surface blinks out and returns". That one DOES fail against the old code.
+  it("keeps focus on Start when the SAME result surface is re-emitted (B4, integration half)", async () => {
+    // See src/lib/__tests__/workbenchFocus.test.ts for the blink itself.
+    midConversation();
     await renderChat();
     emitSurface(pricesEnvelope);
     const result = await screen.findByRole("tab", { name: /DE_LU prices/i });
     expect(result.getAttribute("aria-selected")).toBe("true");
 
-    const home = screen.getByRole("tab", { name: /Workspace/i });
+    const start = screen.getByRole("tab", { name: /Start/i });
     act(() => {
-      home.click();
+      start.click();
     });
-    await waitFor(() => expect(home.getAttribute("aria-selected")).toBe("true"));
+    await waitFor(() => expect(start.getAttribute("aria-selected")).toBe("true"));
 
-    // The re-registration. No NEW result — the same surfaceId again.
     emitSurface(pricesEnvelope);
-
     await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /Workspace/i }).getAttribute("aria-selected")).toBe(
-        "true",
-      ),
+      expect(screen.getByRole("tab", { name: /Start/i }).getAttribute("aria-selected")).toBe("true"),
     );
-    // Still exactly one result tab — nothing was added, so nothing justified a
-    // focus change.
     expect(screen.getAllByRole("tab", { name: /DE_LU prices/i })).toHaveLength(1);
   });
 
   it("still auto-focuses a genuinely NEW result while another is open (#7 intact)", async () => {
-    // The B4 fix must not blunt auto-focus: a second, different result still
-    // takes the stage even though the user is sitting on Home.
+    midConversation();
     await renderChat();
     emitSurface(pricesEnvelope);
     await screen.findByRole("tab", { name: /DE_LU prices/i });
 
-    const home = screen.getByRole("tab", { name: /Workspace/i });
+    const start = screen.getByRole("tab", { name: /Start/i });
     act(() => {
-      home.click();
+      start.click();
     });
-    await waitFor(() => expect(home.getAttribute("aria-selected")).toBe("true"));
+    await waitFor(() => expect(start.getAttribute("aria-selected")).toBe("true"));
 
     emitSurface({
       ...pricesEnvelope,
@@ -328,38 +298,18 @@ describe("ChatShell — Workspace Home persistence (B6)", () => {
   });
 
   it("does NOT keep tiles up for a skill that cannot delegate", async () => {
-    // A specialist answers its own prompts; it cannot route to another skill.
-    // Persisting a front door's tile list there would advertise handoffs it
-    // can't perform — a dead end (CLAUDE.md #8). Specialists keep the original
-    // first-turn-only onboarding picker, so once a result lands it is gone.
+    // A specialist can't route a front door's tiles anywhere (CLAUDE.md #8).
     skillMeta.canDelegate = false;
-    // A conversation already under way — isFreshChat is false, which is the
-    // specialist's fallback gate.
-    vi.mocked(useSkillAgent).mockReturnValue(
-      makeReturn({ messages: [{ id: "m1", role: "user", content: "hello" }] }),
-    );
+    midConversation();
     await renderChat();
 
     emitSurface(pricesEnvelope);
     await screen.findByRole("tab", { name: /DE_LU prices/i });
 
-    // The tiles must be gone — this skill cannot route them anywhere.
     await waitFor(() => expect(screen.queryByTestId("example-prompts")).toBeNull());
-    // Home still exists and still indexes the result — it is never a blank pane.
-    const home = screen.getByRole("tab", { name: /Workspace/i });
-    act(() => {
-      home.click();
-    });
-    await waitFor(() => expect(home.getAttribute("aria-selected")).toBe("true"));
-    expect((await screen.findByTestId("workbench-index")).textContent).toContain("DE_LU prices");
-  });
-
-  it("renders Home content, never a blank pane, with no results at all", async () => {
-    // NEVER SILENT (#8): Home always has something to show. With no artifacts
-    // and no launcher, that is the picker.
-    await renderChat();
-    const home = screen.getByRole("tab", { name: /Workspace/i });
-    expect(home.getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByTestId("example-prompts")).toBeTruthy();
+    // No Start tab to show, and the result is still listed — never a blank pane.
+    expect(screen.queryByRole("tab", { name: /Start/i })).toBeNull();
+    const menu = await openAllResults();
+    expect(menu.textContent).toContain("DE_LU prices");
   });
 });

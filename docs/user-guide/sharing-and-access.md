@@ -10,7 +10,7 @@ surfaces:
   - frontend/src/components/navigation/SkillSwitcher.tsx
   - backend/auth/access_context.py
   - backend/skills/visibility.py
-reviewed: 2026-10-16
+reviewed: 2026-10-27
 ---
 
 Everything in {{appName}} has an owner and a setting for who else may use it. This page explains those settings for skills, what a group is, and what you see when something isn't open to you.
@@ -86,6 +86,7 @@ Folders you make searchable have their own setting, chosen from the folder's **W
 
 ## Your documents stay yours
 
-- **My Documents is private.** Nobody else sees your folders or documents in their sidebar, whatever you share.
+- **Your files are private.** Nobody else sees your folders or documents in their sidebar, whatever you share.
 - **Skills only read your documents for you.** When you ask a skill about your documents, it can only reach your own. When a colleague uses the same skill, it can only reach theirs.
+- **Projects, your instructions and memory are private.** Only you see your projects and your instructions, and what the assistant remembers from your chats is recalled only in your own chats. See [Instructions and memory](memory.md#what-the-assistant-remembers).
 - **Searching follows the folder's setting.** A skill shared with others reaches your documents only through folders you made searchable *and* shared with those people. You're asked before a folder is shared more widely.

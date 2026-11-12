@@ -29,6 +29,9 @@ from google.genai.errors import ClientError
 from opentelemetry import trace
 
 from adk import agent_cache as _agent_cache
+from adk import model_choice as _model_choice
+from adk import ui_locale as _ui_locale
+from adk.a2ui_privacy import public_surface_snapshot
 from adk.agent import _HeuristicRouter, create_agent_with_thinking
 from adk.agui import build_agui_adk_agent, stream_agui_events
 from adk.model_errors import ErrorClass, ModelTurnError, classify
@@ -92,6 +95,8 @@ async def process_skill_request(
     turn_author: str | None = None,
     author: dict[str, str] | None = None,
     project_id: str | None = None,
+    model_choice: str | None = None,
+    ui_locale: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Yield AG-UI events for one turn of `skill_id`.
 
@@ -175,6 +180,10 @@ async def process_skill_request(
     # closes the race window. The callback is now idempotent: it observes
     # the existing row and short-circuits.
     thread_id = session_id or f"thread-{uuid.uuid4().hex[:12]}"
+    # The composer's Model pick (adk.model_choice). The chat UI sends it on
+    # every turn and reads it back from the row when a chat is reopened; a
+    # caller that sends nothing (CLI, channels) runs on Auto.
+    turn_model_choice = _model_choice.normalize(model_choice)
     # Projects (projects.md §6.3): a project the frontend sent is used only if it
     # is the caller's; it is stamped on the row, and a resumed chat that sends
     # nothing gets its project back from the row (re-checked, never trusted).
@@ -192,6 +201,7 @@ async def process_skill_request(
         getattr(user, "email", "") or "",
         collaborators=getattr(user, "supervisors", ()) or (),
         project_id=requested_project or None,
+        model_choice=turn_model_choice if model_choice is not None else None,
     )
     turn_project = requested_project or await asyncio.to_thread(resolve_turn_project, user.uid, None, stored_project)
     if turn_project:
@@ -228,11 +238,17 @@ async def process_skill_request(
     # function of those, so a repeat turn in the same session skips the full
     # rebuild (model chain + tools + MCP toolsets + recursive delegate builds).
     # See adk.agent_cache for the key/TTL rationale (v6.14.0 cold-start work).
-    agent_or_router, _agent_cache_hit = _agent_cache.get_or_build(
-        skill,
-        access,
-        lambda: create_agent_with_thinking(skill, user, access_context=access),
-    )
+    _choice_token = _model_choice.ACTIVE_CHOICE.set(turn_model_choice)
+    try:
+        agent_or_router, _agent_cache_hit = _agent_cache.get_or_build(
+            skill,
+            access,
+            lambda: create_agent_with_thinking(skill, user, access_context=access),
+        )
+    finally:
+        _model_choice.ACTIVE_CHOICE.reset(_choice_token)
+    if turn_model_choice != _model_choice.AUTO:
+        logger.info("skill=%s model_choice=%s", skill_id, turn_model_choice)
     logger.debug("skill=%s agent_cache_%s", skill_id, "hit" if _agent_cache_hit else "miss")
     if isinstance(agent_or_router, _HeuristicRouter):
         agent = agent_or_router.pick_agent(message)
@@ -272,6 +288,17 @@ async def process_skill_request(
     # Always written, "" when unscoped: a chat moved OUT of a project must stop
     # carrying the previous turn's value in session state.
     initial_state["project_id"] = turn_project
+    # The person's interface language (multi-language.md §6), validated against
+    # UI_LOCALES. Always written, "" when unused, like project_id: a plain key,
+    # not temp: (wire temp keys are stripped — see document_ids below).
+    turn_ui_locale = _ui_locale.normalize(ui_locale)
+    initial_state[_ui_locale.STATE_KEY] = turn_ui_locale
+    if turn_ui_locale:
+        logger.info("skill=%s ui_locale=%s", skill_id, turn_ui_locale)
+        try:
+            trace.get_current_span().set_attribute("aitana.ui.locale", turn_ui_locale)
+        except Exception as exc:  # instrumentation never breaks the chat path
+            logger.warning("ui_locale span attribute failed (suppressed): %s", exc)
     if document_ids:
         # NOTE: bare ``document_ids`` round-trips on the AG-UI wire because
         # ag_ui_adk emits it in STATE_SNAPSHOT. We considered ``temp:`` prefix
@@ -289,17 +316,9 @@ async def process_skill_request(
         # Read by make_document_injector — eager-inject loaded docs into
         # the first LLM request of every turn for resumed sessions.
         initial_state["app:resumed_session"] = True
-    if a2ui_surface_state:
-        # Sprint 2.10 — per-turn snapshot of every active A2UI surface's
-        # dataModel + catalogId. The wrap_with_a2ui_surface_context
-        # InstructionProvider reads this from ctx.state on the next
-        # agent turn and injects the values into the system prompt
-        # under the `a2ui_surface_context.{surfaceId}` namespace.
-        # Empty/None bypasses (the snapshot is omitted for skills that
-        # haven't rendered any A2UI yet — InstructionProvider is a
-        # no-op when state has neither this key nor namespaced action
-        # writes).
-        initial_state["a2ui_surface_state"] = a2ui_surface_state
+    # Always replace the previous turn's view, including when all remaining
+    # surfaces are browser-only details or the user has closed their tabs.
+    initial_state["a2ui_surface_state"] = public_surface_snapshot(a2ui_surface_state)
     if turn_author:
         message = f"[{turn_author}] {message}"
         initial_state["turn_author"] = turn_author
@@ -413,6 +432,7 @@ def _ensure_session_index(
     owner_email: str = "",
     collaborators: tuple[str, ...] | list[str] = (),
     project_id: str | None = None,
+    model_choice: str | None = None,
 ) -> str | None:
     """Synchronously create the chat_sessions/{thread_id} row if absent,
     and ArrayUnion this turn's document_ids onto it whether or not the
@@ -473,6 +493,7 @@ def _ensure_session_index(
         except Exception as exc:
             logger.warning("synchronous session-index write failed for %s: %s", thread_id, exc)
             return None
+        _stamp_model_choice(thread_id, None, model_choice)
         return _stamp_project(thread_id, None, project_id)
 
     # v6.10.0 unified-adk-handoff: the index FOLLOWS the current skill. The
@@ -526,7 +547,25 @@ def _ensure_session_index(
                 thread_id,
                 exc,
             )
+    _stamp_model_choice(thread_id, getattr(existing, "model_choice", None), model_choice)
     return _stamp_project(thread_id, getattr(existing, "project_id", None), project_id)
+
+
+def _stamp_model_choice(thread_id: str, current: str | None, requested: str | None) -> None:
+    """Keep the chat's Model pick on its row so a reopened chat shows it.
+    ``None`` = the caller didn't say (leave the row alone); Auto is stored as
+    no value. Best-effort, like the project stamp."""
+    if requested is None:
+        return
+    value = None if requested == "auto" else requested
+    if value == (current or None):
+        return
+    try:
+        from db.chat_sessions import update_session_fields
+
+        update_session_fields(thread_id, {"modelChoice": value})
+    except Exception as exc:
+        logger.warning("session-index model choice stamp failed for %s: %s", thread_id, exc)
 
 
 def _stamp_project(thread_id: str, current: str | None, requested: str | None) -> str | None:

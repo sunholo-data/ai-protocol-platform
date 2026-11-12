@@ -50,6 +50,7 @@ _COST_PER_1M: dict[str, tuple[float, float]] = {
     "gemini-3.8-flash": (0.75, 3.75),  # introductory through 2026-12-31; then (1.50, 7.50)
     # Claude (direct Anthropic API — see backend/CLAUDE.md privacy boundary)
     "claude-haiku-4-5": (1.00, 5.00),
+    "claude-haiku-5-5": (0.10, 0.50),  # prompts <= 100K; (0.50, 2.50) beyond, not modeled
     "claude-sonnet-4-6": (3.00, 15.00),
     "claude-sonnet-5": (3.00, 15.00),  # (2.00, 10.00) introductory through 2026-08-31, not modeled
     "claude-opus-4-7": (5.00, 25.00),
@@ -61,7 +62,6 @@ _COST_PER_1M: dict[str, tuple[float, float]] = {
     "gpt-5.6-terra": (2.00, 12.00),
     "gpt-5.6-sol": (5.00, 30.00),
     "gpt-5.4": (2.50, 15.00),
-    "gpt-5.1-chat-latest": (1.25, 10.00),
 }
 
 

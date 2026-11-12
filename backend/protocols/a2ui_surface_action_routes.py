@@ -65,7 +65,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from google.adk.events import Event, EventActions
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from adk.agui import APP_NAME
 from adk.session import get_session_service
@@ -105,6 +105,14 @@ class SurfaceActionRequest(BaseModel):
     """The body of ``POST /api/sessions/{id}/surface-action``."""
 
     surface_id: str = Field(alias="surfaceId", min_length=1, max_length=128)
+
+    @field_validator("surface_id")
+    @classmethod
+    def public_control_surface(cls, value: str) -> str:
+        if value.startswith("private:"):
+            raise ValueError("Private surfaces are display-only; use the stashed control surface")
+        return value
+
     action: SurfaceActionPayload
 
     model_config = {"populate_by_name": True, "extra": "forbid"}

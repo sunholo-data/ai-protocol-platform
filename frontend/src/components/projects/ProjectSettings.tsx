@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, FolderKanban, MessageSquare, Plus } from "lucide-react";
 import { UploadDropZone } from "@/components/doc-browser/UploadDropZone";
+import { MemoryList } from "@/components/memory/MemoryList";
 import { useProjectChatHref } from "@/hooks/useProjectChatHref";
 import { useUserSkills } from "@/hooks/useUserSkills";
 import {
-  addDocumentsToProject,
   deleteProject,
   updateProject,
   useProject,
@@ -20,10 +20,14 @@ import {
 import { fetchWithAuth } from "@/lib/apiClient";
 import { navigateTo, useOptionalRouter } from "@/lib/useOptionalRouter";
 import type { Skill, WelcomeConfig } from "@/types/skill";
+import { useLocale } from "@/i18n";
+import { skillText } from "@/hooks/useSkillText";
 import { AddDocumentsDialog, type SharedLibrary } from "./AddDocumentsDialog";
 import { InstructionsEditor } from "./InstructionsEditor";
 import { MAX_PROJECT_NAME } from "./NewProjectInline";
 import { ProjectDocumentRow } from "./ProjectDocumentCard";
+import { ProjectKnowledgeBases } from "./ProjectKnowledgeBases";
+import { ProjectSources } from "./ProjectSources";
 
 /** Server-side cap on a project's instructions (§5). */
 export const MAX_PROJECT_INSTRUCTIONS = 8000;
@@ -147,12 +151,10 @@ function ProjectSettingsLoaded({ project, uid, onPoll }: { project: Project; uid
     navigateTo(router, `${base}?${qs.toString()}`);
   }
 
-  async function onUploaded(docId: string, filename: string) {
-    setNotice({ kind: "status", text: `Adding ${filename}…` });
-    const r = await addDocumentsToProject(project.id, [docId]);
-    if (!r.ok) setNotice({ kind: "alert", text: `${filename} was uploaded but couldn't be added: ${r.message}` });
-    else if (r.failed.length) setNotice({ kind: "alert", text: `${filename} was uploaded but couldn't be added to the project.` });
-    else setNotice({ kind: "status", text: `Added ${filename}` });
+  // The upload itself adds the file to this project (projectId below); a file
+  // saved but not added reports its reason in the drop zone instead.
+  function onUploaded(filename: string) {
+    setNotice({ kind: "status", text: `Added ${filename}` });
   }
 
   return (
@@ -221,6 +223,14 @@ function ProjectSettingsLoaded({ project, uid, onPoll }: { project: Project; uid
         <DefaultSkillPicker project={project} skills={skills} />
       </section>
 
+      <section aria-labelledby="project-memory-heading" className="space-y-3 rounded-lg border p-4">
+        <h2 id="project-memory-heading" className="text-base font-semibold text-foreground">
+          Project memory
+        </h2>
+        <p className="text-sm text-muted-foreground">Only chats in this project use this memory.</p>
+        <MemoryList projectId={project.id} />
+      </section>
+
       <section aria-labelledby="project-docs-heading" className="space-y-3 rounded-lg border p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -247,12 +257,16 @@ function ProjectSettingsLoaded({ project, uid, onPoll }: { project: Project; uid
         )}
         <ProjectDocuments docs={docs} projectId={project.id} onOpen={openDocument} onAdd={() => setAdding(true)} />
         <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">New files are saved to your library and added to this project.</p>
+          <p className="text-xs text-muted-foreground">New files are saved to your library and added to this project as each one finishes. Folders keep their structure in your library.</p>
           <div className="rounded-lg border border-dashed">
-            <UploadDropZone onUploadComplete={(id, name) => void onUploaded(id, name)} className="px-3 py-2" />
+            <UploadDropZone projectId={project.id} onUploadComplete={(_id, name) => onUploaded(name)} className="px-3 py-2" />
           </div>
         </div>
       </section>
+
+      <ProjectSources projectId={project.id} />
+
+      <ProjectKnowledgeBases project={project} />
 
       <DeleteProject project={project} />
 
@@ -612,6 +626,7 @@ function ProjectName({ project }: { project: Project }) {
 function DefaultSkillPicker({ project, skills }: { project: Project; skills: Skill[] }) {
   const [state, setState] = useState<{ kind: "idle" | "saving" | "saved" } | { kind: "error"; message: string }>({ kind: "idle" });
   const [value, setValue] = useState(project.defaultSkillId ?? "");
+  const locale = useLocale();
 
   useEffect(() => setValue(project.defaultSkillId ?? ""), [project.defaultSkillId]);
 
@@ -643,7 +658,7 @@ function DefaultSkillPicker({ project, skills }: { project: Project; skills: Ski
         <option value="">Your default assistant</option>
         {skills.map((s) => (
           <option key={s.skillId} value={s.skillId}>
-            {s.displayName || s.name}
+            {skillText(s, locale).displayName || s.name}
           </option>
         ))}
         {/* A default the user can no longer see still needs a label, never an id. */}

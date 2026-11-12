@@ -141,7 +141,7 @@ describe("DocumentHistoryPanel", () => {
     // The row is a div wrapping the title button + rename button; the
     // active highlight lives on the wrapper.
     const row = screen.getByText("Revenue drivers Q1").closest("div.group")!;
-    expect(row.className).toContain("bg-blue-50");
+    expect(row.className).toContain("bg-primary/10");
   });
 
   it("calls onNewSession when + New conversation is clicked", async () => {

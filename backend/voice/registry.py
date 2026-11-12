@@ -5,6 +5,10 @@ Resolution chain (highest precedence first):
     2. Env var VOICE_TTS_PROVIDER
     3. Default ("gcp_chirp3hd" - the v6 Aitana premium default voice tier)
 
+Names beyond the built-ins come from private packages (``voice.py`` exposing
+``TTS_PROVIDERS``, via ``extensions.private_tts_provider``): a deployment's own
+speech source, e.g. a host-local model.
+
 Mirrors `backend/adk/agent.py` model resolution - explicit string
 dispatch, no clever registration decorators, easy to grep for "which
 providers exist". When a new provider lands in `voice/providers/`, add
@@ -79,7 +83,15 @@ def _build_tts(name: str) -> TTSProvider:
         from voice.providers.gcp_tts import GCPTTSProvider
 
         return GCPTTSProvider(tier=name.removeprefix("gcp_"))
-    raise ValueError(f"Unknown TTS provider {name!r}. Known: browser, gcp_<tier>.")
+    # A deployment's own speech source (a private package's voice.py), chosen by
+    # name like the built-ins. extensions keeps public code off private imports.
+    from extensions import private_tts_provider, private_tts_provider_names
+
+    provider = private_tts_provider(name)
+    if provider is not None:
+        return provider
+    known = ", ".join(["browser", "gcp_<tier>", *private_tts_provider_names()])
+    raise ValueError(f"Unknown TTS provider {name!r}. Known: {known}.")
 
 
 def get_stt(provider_override: str | None = None, model_ref: str | None = None) -> STTProvider:

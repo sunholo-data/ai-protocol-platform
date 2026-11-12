@@ -1,13 +1,15 @@
 """Personal MCP tokens — mint, list, revoke (see ``auth.mcp_tokens``).
 
-  POST   /api/mcp/tokens         {name?, days?} -> {token, ...}  (token shown ONCE)
+  POST   /api/mcp/tokens         {name?, days?, approve?} -> {token, ...}  (token shown ONCE)
   GET    /api/mcp/tokens         the caller's tokens, never the secrets
   DELETE /api/mcp/tokens/{id}    revoke one of the caller's tokens
 
 All three need a real signed-in login (``get_current_user``), which never
 accepts an MCP token, so a leaked token can't mint more of itself. Only
 people may mint: anonymous workshop identities and machine principals are
-refused (a machine already has its own token).
+refused (a machine already has its own token). ``approve: true`` adds the
+right to decide routine human approvals (docs/design/v6.41.0/human-approvals.md);
+only a person can ask for it, for the same reason.
 """
 
 from __future__ import annotations
@@ -26,7 +28,8 @@ _PERSON_AUTH_MODES = {"firebase", "tailnet"}
 
 class CreateToken(BaseModel):
     name: str = Field(default="", max_length=60)
-    days: int = mcp_tokens.DEFAULT_DAYS
+    days: int | None = None
+    approve: bool = False
 
 
 def _person(user: User) -> User:
@@ -39,7 +42,7 @@ def _person(user: User) -> User:
 def create(body: CreateToken, user: User = Depends(get_current_user)) -> dict[str, Any]:  # noqa: B008
     _person(user)
     try:
-        token, record = mcp_tokens.create_token(user.uid, body.name, body.days)
+        token, record = mcp_tokens.create_token(user.uid, body.name, body.days, approve=body.approve)
     except mcp_tokens.TokenError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {**record, "token": token}

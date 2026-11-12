@@ -49,6 +49,22 @@ class ModelEntry(BaseModel):
     fallbacks: list[ChainLink] = []
 
 
+class PickableModel(BaseModel):
+    """One row of the "Specific model" list (models.yaml ``choice.pickable``)."""
+
+    id: str
+    label: str
+    note: str = ""
+
+
+class ChoiceConfig(BaseModel):
+    """What the composer's Model menu offers (models.yaml ``choice``)."""
+
+    fast: str = "lite"
+    thorough: str = "smart"
+    pickable: list[PickableModel] = []
+
+
 class ModelsConfig(BaseModel):
     models: list[ModelEntry]
     defaults: dict[str, str]
@@ -61,6 +77,7 @@ class ModelsConfig(BaseModel):
     # Fail-safe deployment default; MODEL_RESIDENCY_POLICY env overrides.
     residency_default_policy: str = "eu-strict"
     fallback_policy: dict[str, float] = {}
+    choice: ChoiceConfig = ChoiceConfig()
 
     @model_validator(mode="after")
     def validate_references(self) -> ModelsConfig:
@@ -78,6 +95,13 @@ class ModelsConfig(BaseModel):
             for link in entry.fallbacks:
                 if link.id not in model_ids:
                     raise ValueError(f"models[{entry.id!r}].fallbacks references unknown id {link.id!r}")
+        for level in ("fast", "thorough"):
+            ref = getattr(self.choice, level)
+            if ref not in self.tier_variants and ref not in model_ids:
+                raise ValueError(f"choice.{level} = {ref!r} is neither a tier nor a model id")
+        for pick in self.choice.pickable:
+            if pick.id not in model_ids:
+                raise ValueError(f"choice.pickable references unknown id {pick.id!r}")
         return self
 
 
@@ -123,6 +147,7 @@ def load_models_config() -> ModelsConfig:
         tier_variants=tier_variants,
         residency_default_policy=(raw.get("residency") or {}).get("default_policy", "eu-strict"),
         fallback_policy=raw.get("fallback_policy", {}),
+        choice=ChoiceConfig(**(raw.get("choice") or {})),
     )
 
 

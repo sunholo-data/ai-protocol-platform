@@ -132,6 +132,15 @@ def test_project_block_follows_your_instructions(projects, monkeypatch):
     assert "<project_instructions>\nQuote clause numbers.\n</project_instructions>" in out
 
 
+def test_a_skill_without_projects_gets_your_instructions_but_no_project_rule(projects, monkeypatch):
+    """The user guide (defaults.projects: false) answers from app help, so the
+    "use ONLY this project's documents" rule would make it refuse in a project chat."""
+    monkeypatch.setattr("db.projects.get_user_instructions", lambda uid: "Answer in Spanish.")
+    out = asyncio.run(project_context.wrap_with_project_context("Base.", project_block=False)(_ctx("p1")))
+    assert "<user_instructions>" in out
+    assert "<project_rule>" not in out and "This chat is in the user's project" not in out
+
+
 def test_no_project_block_when_unscoped_or_not_owned(projects, monkeypatch):
     assert _wrap(_ctx(), monkeypatch) == "Base."
     assert _wrap(_ctx("p1", uid="bob"), monkeypatch) == "Base."
@@ -173,6 +182,9 @@ class _Bank:
 
     async def ingest_events(self, **kw):
         self.ingested.append(kw)
+
+    async def get(self, *, name):
+        return next(m for m in self.memories if m.name == name)
 
     async def delete(self, *, name):
         self.deleted.append(name)
@@ -265,18 +277,19 @@ def test_scoped_autosave_writes_to_the_project(projects, monkeypatch):
 def test_purge_deletes_only_the_projects_memories(monkeypatch):
     from adk import project_memory
 
+    m = "reasoningEngines/123/memories/"  # real refs are full resource names
     bank = _Bank(
         [
-            _memory("m1", "personal"),
-            _memory("m2", "in p1", project_id="p1"),
-            _memory("m3", "in p2", project_id="p2"),
+            _memory(m + "m1", "personal"),
+            _memory(m + "m2", "in p1", project_id="p1"),
+            _memory(m + "m3", "in p2", project_id="p2"),
         ]
     )
     monkeypatch.setattr(
         "adk.session.get_memory_service", lambda: SimpleNamespace(_agent_engine_id="123", _get_api_client=lambda: bank)
     )
     assert asyncio.run(project_memory.purge_project_memories(UID, "p1")) == 1
-    assert bank.deleted == ["m2"]
+    assert bank.deleted == [m + "m2"]
 
 
 # --- list_documents defaults to the chat's project --------------------------

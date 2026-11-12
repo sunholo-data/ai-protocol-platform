@@ -164,6 +164,51 @@ describe("Add documents — Your documents", () => {
     expect(screen.getByRole("button", { name: "Add 1 document" })).toBeEnabled();
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
+
+  it("Select all picks every document not already in the project", async () => {
+    const user = userEvent.setup();
+    route({
+      [RECENT]: () =>
+        recent([
+          { id: "d-in", originalFilename: "EDP.pdf" },
+          { id: "d1", originalFilename: "LEAP.pdf" },
+          { id: "d2", originalFilename: "Annex.pdf" },
+        ]),
+      [FOLDERS]: () => res(200, { folders: [] }),
+    });
+    renderDialog();
+    await user.click(await screen.findByRole("checkbox", { name: "Select all 2" }));
+    expect(screen.getByRole("button", { name: "Add 2 documents" })).toBeEnabled();
+    await user.click(screen.getByRole("checkbox", { name: "Select all 2" }));
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+  });
+
+  it("Add whole folder sends the folder (with its subfolders) and reports the count", async () => {
+    const user = userEvent.setup();
+    let sent: unknown;
+    route({
+      [RECENT]: () => recent([]),
+      [FOLDERS]: () =>
+        res(200, {
+          folders: [
+            { id: "f1", name: "client" },
+            { id: "f2", name: "client/sessions" },
+            { id: "f3", name: "client/sessions/02" },
+            { id: "f4", name: "client-archive" },
+          ],
+        }),
+      "GET /api/proxy/api/folders/f1/documents": () => res(200, { documents: [{ id: "d7", originalFilename: "Brief.pdf" }] }),
+      "POST /api/proxy/api/projects/p1/documents": (init) => {
+        sent = JSON.parse(String(init?.body));
+        return res(200, { added: ["d7", "d8", "d9"], already: [], failed: [] });
+      },
+    });
+    const { onAdded } = renderDialog();
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Folder" }), await screen.findByRole("option", { name: "client" }));
+    await user.click(await screen.findByRole("button", { name: "Add whole folder (with 2 subfolders)" }));
+    expect(sent).toEqual({ folder_id: "f1", include_subfolders: true });
+    await waitFor(() => expect(onAdded).toHaveBeenCalledWith(3));
+  });
 });
 
 describe("Add documents — Shared library", () => {

@@ -7,6 +7,8 @@ Firestore schema: mcp_servers/{server_id}
                     form ``${ENV_VAR}`` is resolved from the process environment
                     at toolset-build time — see "Secret-bearing headers" below.
   name:      str  — human-readable label
+  workbench: str  — optional; a server-wide workbench tab kind ("github",
+                    adk/a2ui_github_render.py) offered every tool's result
 
 Secret-bearing headers (v6.23.0 MAPS-GROUNDING):
   Every server seeded before Maps Grounding Lite had ``headers: {}`` — none
@@ -178,7 +180,13 @@ def _is_loopback_http(url: str) -> bool:
     return parsed.scheme == "http" and (parsed.hostname or "") in ("127.0.0.1", "localhost", "::1")
 
 
-def _build_header_provider(server_id: str, config: dict, user_email: str = "", user_domain: str = ""):
+def _build_header_provider(
+    server_id: str,
+    config: dict,
+    user_email: str = "",
+    user_domain: str = "",
+    group_tags: frozenset[str] = frozenset(),
+):
     """Return a per-call header provider, or None for a statically-configured server.
 
     THE reason this exists (verified against ADK 1.31.1 on 2026-09-02): the
@@ -198,8 +206,17 @@ def _build_header_provider(server_id: str, config: dict, user_email: str = "", u
     token comes from a cache rather than a blocking mint.
 
     Enabled by ``auth: "google_id_token"`` on the Firestore server config.
+    ``auth: "github_app"`` gets a GitHub App token scoped to this caller's
+    repositories instead (tools/mcp/github_app_auth.py).
     """
-    if (config.get("auth") or "").strip().lower() != "google_id_token":
+    auth = (config.get("auth") or "").strip().lower()
+    if auth == "github_app":
+        from auth.access_context import AccessContext
+        from tools.mcp import github_app_auth
+
+        ctx = AccessContext(uid="", email=user_email, domain=user_domain, group_tags=frozenset(group_tags))
+        return github_app_auth.header_provider(server_id, config, ctx)
+    if auth != "google_id_token":
         return None
 
     audience = (config.get("audience") or config.get("url") or "").strip()
@@ -297,9 +314,11 @@ class TaggedMcpToolset(McpToolset):
     # independent, so caching across readonly_contexts is safe.
     _TOOLS_CACHE_TTL = 300.0
 
-    def __init__(self, *, server_id: str, **kwargs: Any) -> None:
+    def __init__(self, *, server_id: str, render: dict | None = None, workbench: str = "", **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._aitana_server_id = server_id
+        self._aitana_render = render or {}
+        self._aitana_workbench = workbench
         self._tools_cache: tuple[float, list] | None = None
         # Shared-instance close guard (2026-09-30, 300s MCP hang). The agent
         # cache shares this toolset between CONCURRENT turns, and every turn's
@@ -350,6 +369,14 @@ class TaggedMcpToolset(McpToolset):
         async with self._lease():
             tools = await super().get_tools(readonly_context=readonly_context)
         for tool in tools:
+            render = getattr(self, "_aitana_render", {}).get(tool.name)
+            if isinstance(render, dict) and render.get("kind") == "series":
+                tool._aitana_render_config = {**render, "server_id": self._aitana_server_id}
+            elif workbench := getattr(self, "_aitana_workbench", ""):
+                # A server-wide workbench tab (`workbench: github`): every tool
+                # of this server is offered to that kind's renderer, which
+                # draws the ones it knows and ignores the rest.
+                tool._aitana_render_config = {"kind": workbench, "server_id": self._aitana_server_id}
             tool.run_async = self._leased(tool.run_async)
             try:
                 setattr(tool, SERVER_ID_ATTR, self._aitana_server_id)
@@ -359,7 +386,9 @@ class TaggedMcpToolset(McpToolset):
         return tools
 
 
-def get_mcp_tools(server_ids: list[str], user_email: str = "", user_domain: str = "") -> list[McpToolset]:
+def get_mcp_tools(
+    server_ids: list[str], user_email: str = "", user_domain: str = "", group_tags: frozenset[str] = frozenset()
+) -> list[McpToolset]:
     """Return McpToolset instances for the given server IDs.
 
     Reads each server's config from Firestore `mcp_servers/{server_id}`.
@@ -377,12 +406,12 @@ def get_mcp_tools(server_ids: list[str], user_email: str = "", user_domain: str 
     Returns:
         List of McpToolset instances ready to add to an agent's tools list.
     """
-    resolved, _missing = get_mcp_tools_with_status(server_ids, user_email, user_domain)
+    resolved, _missing = get_mcp_tools_with_status(server_ids, user_email, user_domain, group_tags)
     return resolved
 
 
 def get_mcp_tools_with_status(
-    server_ids: list[str], user_email: str = "", user_domain: str = ""
+    server_ids: list[str], user_email: str = "", user_domain: str = "", group_tags: frozenset[str] = frozenset()
 ) -> tuple[list[McpToolset], list[str]]:
     """Resolve server IDs to toolsets AND track which ones failed.
 
@@ -417,7 +446,7 @@ def get_mcp_tools_with_status(
             missing.append(server_id)
             continue
 
-        toolset = _build_toolset(server_id, config, user_email, user_domain)
+        toolset = _build_toolset(server_id, config, user_email, user_domain, group_tags)
         if toolset is None:
             # _build_toolset already logged the reason (missing url, etc).
             missing.append(server_id)
@@ -478,7 +507,13 @@ def _merge_ui_capability_header(headers: dict) -> dict:
     return merged
 
 
-def _build_toolset(server_id: str, config: dict, user_email: str = "", user_domain: str = "") -> McpToolset | None:
+def _build_toolset(
+    server_id: str,
+    config: dict,
+    user_email: str = "",
+    user_domain: str = "",
+    group_tags: frozenset[str] = frozenset(),
+) -> McpToolset | None:
     """Build a McpToolset from a Firestore server config dict.
 
     Always declares UI extension capability via ``UI_CAPABILITY_HEADER`` so
@@ -530,9 +565,19 @@ def _build_toolset(server_id: str, config: dict, user_email: str = "", user_doma
             url=url, headers=headers, timeout=timeout, sse_read_timeout=read_timeout
         )
 
-    header_provider = _build_header_provider(server_id, config, user_email, user_domain)
+    header_provider = _build_header_provider(server_id, config, user_email, user_domain, group_tags)
 
+    render = config.get("render") or {}
+    if isinstance(render, dict):
+        from adk.a2ui_mcp_series_render import register_series_tools
+
+        register_series_tools(server_id, render)
+    else:
+        render = {}
+    workbench = config.get("workbench")
     return TaggedMcpToolset(
+        render=render,
+        workbench=workbench.strip().lower() if isinstance(workbench, str) else "",
         server_id=server_id,
         connection_params=connection,
         header_provider=header_provider,

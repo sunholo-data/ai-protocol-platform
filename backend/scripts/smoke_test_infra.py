@@ -194,7 +194,7 @@ def test_gcs() -> str:
             workspace = "dev"
         elif proj.endswith("-test"):
             workspace = "test"
-        elif proj.endswith("-production"):
+        elif proj.endswith(("-production", "-prod")):
             workspace = "prod"
         else:
             raise RuntimeError(f"cannot infer workspace from project {proj!r}; set LOGS_BUCKET_NAME")

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { FileText, X } from "lucide-react";
 import type { ProjectDocument } from "@/hooks/useProjects";
 import { removeDocumentFromProject } from "@/hooks/useProjects";
-import { relativeTime } from "@/lib/relativeTime";
+import { useFormat } from "@/i18n";
 
 interface ProjectDocumentCardProps {
   projectId: string;
@@ -22,6 +22,7 @@ export function ProjectDocumentRow({ projectId, doc, onOpen }: ProjectDocumentCa
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const when = doc.lastUsedAt ?? doc.updatedAt ?? doc.createdAt ?? null;
+  const fmt = useFormat();
 
   async function remove() {
     setRemoving(true);
@@ -46,7 +47,7 @@ export function ProjectDocumentRow({ projectId, doc, onOpen }: ProjectDocumentCa
           <span className="block truncate text-sm text-foreground group-hover:text-primary">{doc.originalFilename}</span>
           {when && (
             <span className="block text-xs text-muted-foreground">
-              {doc.lastSessionId ? "Last used" : "Added"} {relativeTime(when)}
+              {doc.lastSessionId ? "Last used" : "Added"} {fmt.relative(when)}
             </span>
           )}
         </button>

@@ -24,7 +24,7 @@ import logging
 from typing import Any
 
 from db.chat_sessions import most_recent_session_for_user
-from db.firestore import get_document
+from db.firestore import get_documents
 from tools.documents.context import list_documents_for_user
 
 log = logging.getLogger(__name__)
@@ -86,15 +86,21 @@ def recent_documents_for_user(user_id: str, limit: int = 12) -> list[dict[str, A
                 used[doc_id] = (at, s.session_id, s.title)
 
     rows: dict[str, dict[str, Any]] = {}
-    for doc_id, (at, session_id, title) in used.items():
-        if len(rows) >= limit * 2:
-            break
-        doc = get_document(_PARSED_DOCS_COLLECTION, doc_id)
+    # One batched read of the metadata, not a whole record (blocks and all) per
+    # candidate in turn: at limit=50 that was 100 sequential reads, 1.4 s.
+    candidates = list(used)[: limit * 3]
+    fields = [*_FIELDS, "userId"]
+    found = get_documents(_PARSED_DOCS_COLLECTION, candidates, fields=fields)
+    for doc_id in candidates:
+        doc = found.get(doc_id)
         if not doc or doc.get("userId") != user_id or doc.get("parseStatus") == "failed":
             continue
+        at, session_id, title = used[doc_id]
         rows[doc_id] = _row(doc_id, doc, last_used=at, session_id=session_id, session_title=title)
+        if len(rows) >= limit * 2:
+            break
 
-    for doc in list_documents_for_user(user_id, limit=limit):
+    for doc in list_documents_for_user(user_id, limit=limit, select=fields):
         doc_id = doc.get("__id") or doc.get("id")
         if not doc_id or doc_id in rows:
             continue

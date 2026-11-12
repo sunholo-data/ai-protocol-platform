@@ -165,10 +165,10 @@ export function DocumentVersions({ docId, filename, onRestored, activitySink }: 
 
   return (
     <div className="px-3 py-2">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
         Version history
       </p>
-      <p className="mb-1.5 text-[10px] text-muted-foreground">
+      <p className="mb-1.5 text-[11px] text-muted-foreground">
         Every time this document is regenerated it is saved here. Click a version to bring it back —
         nothing is lost, restoring just adds a new version.
       </p>
@@ -193,16 +193,16 @@ export function DocumentVersions({ docId, filename, onRestored, activitySink }: 
               >
                 <span>Version {v}</span>
                 {isCurrent && (
-                  <span className="rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                  <span className="rounded bg-emerald-100 px-1 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
                     on screen
                   </span>
                 )}
-                {restoring === v && <span className="text-[10px]">restoring…</span>}
+                {restoring === v && <span className="text-[11px]">restoring…</span>}
               </button>
               <button
                 type="button"
                 onClick={() => handleDownloadVersion(v)}
-                className="shrink-0 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="shrink-0 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
                 title={`Download version ${v} as a file`}
                 aria-label={`Download version ${v}`}
               >

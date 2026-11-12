@@ -352,3 +352,20 @@ def test_empty_selection_says_so_and_surfaces_without_one_get_no_line():
     out = render_instruction_with_a2ui_surface_context("BASE", state)
     assert "## b\nSelected now: nothing ticked." in out
     assert "## c\n{" in out
+
+
+def test_private_review_never_reaches_next_turn_model_context_or_summary():
+    from adk.a2ui_privacy import public_surface_snapshot
+
+    private_id = "private:board:review"
+    raw = {"board": {"dataModel": {"count": 1}}, private_id: {"dataModel": {"purpose": "private-canary"}}}
+    assert public_surface_snapshot(raw) == {"board": raw["board"]}
+    rendered = render_instruction_with_a2ui_surface_context(
+        BASE,
+        {
+            "a2ui_surface_state": raw,
+            f"a2ui_surface_context.{private_id}.lastAction": {"context": "private-action-canary"},
+        },
+    )
+    assert "private-canary" not in rendered and "private-action-canary" not in rendered
+    assert "## board" in rendered

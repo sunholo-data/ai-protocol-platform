@@ -55,3 +55,46 @@ export function nextFocusedResult(currentIds: readonly string[], seen: Set<strin
 export function forgetFocusedResult(id: string, seen: Set<string>): void {
   seen.delete(id);
 }
+
+// `focus:<surfaceId>` — a surface Button asks to show another workbench tab.
+// A new tab takes focus on arrival, so a private review panel opened from a
+// board left the phone user hunting for the board again (2026-10-28). This is
+// client-only: nothing reaches the server or the model, which is why a
+// display-only private surface may carry it.
+export const FOCUS_ACTION_PREFIX = "focus:";
+
+type FocusListener = (surfaceId: string) => void;
+const focusListeners = new Set<FocusListener>();
+
+/** A2UISurfaceMount fires this for a `focus:<surfaceId>` action. */
+export function requestWorkbenchFocus(surfaceId: string): void {
+  for (const listener of focusListeners) listener(surfaceId);
+}
+
+/** The workbench subscribes and switches only to a tab it actually has. */
+export function subscribeWorkbenchFocus(fn: FocusListener): () => void {
+  focusListeners.add(fn);
+  return () => {
+    focusListeners.delete(fn);
+  };
+}
+
+type RevealListener = (surfaceId: string) => void;
+const revealListeners = new Set<RevealListener>();
+
+/**
+ * A result card in the transcript was opened: focus that tab AND bring the
+ * workbench into view (unfold it on desktop, show it full screen on a phone).
+ * Plain `requestWorkbenchFocus` only switches tabs.
+ */
+export function requestWorkbenchReveal(surfaceId: string): void {
+  requestWorkbenchFocus(surfaceId);
+  for (const listener of revealListeners) listener(surfaceId);
+}
+
+export function subscribeWorkbenchReveal(fn: RevealListener): () => void {
+  revealListeners.add(fn);
+  return () => {
+    revealListeners.delete(fn);
+  };
+}

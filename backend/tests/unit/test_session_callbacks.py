@@ -3,7 +3,7 @@
 Covers:
 - make_session_tracker: creates index on first turn, skips on subsequent turns
 - make_after_agent_response: bumps counter, flushes every 5 turns, generates
-  title after turn 2 (not turn 1, not turn 3), never crashes on errors
+  title after the first reply, retried until set, never crashes on errors
 - _derive_access_control: falls back to private when document unavailable
 - _try_generate_title: returns None on any exception
 """
@@ -208,21 +208,26 @@ class TestMakeAfterAgentResponse:
         update_kwargs = mock_update.call_args[0][1]
         assert update_kwargs["title"] == "Revenue drivers Q1"
 
-    @patch("adk.callbacks._try_generate_title", return_value="some title")
+    @patch("adk.callbacks._try_generate_title", return_value="Revenue drivers Q1")
     @patch("db.chat_sessions.update_session_fields")
-    def test_no_title_on_turn_1(self, mock_update, mock_title):
+    def test_generates_title_after_first_reply(self, mock_update, mock_title):
+        """A one-question chat must not stay "Untitled chat" in the history."""
         cb = make_after_agent_response()
         ctx = _make_ctx(initialized=True, turn_count=0)  # will become 1
 
         cb(ctx)
 
-        mock_title.assert_not_called()
+        mock_title.assert_called_once()
+        assert mock_update.call_args[0][1]["title"] == "Revenue drivers Q1"
+        assert ctx.state["titleSet"] is True
 
     @patch("adk.callbacks._try_generate_title", return_value="some title")
     @patch("db.chat_sessions.update_session_fields")
-    def test_no_title_on_turn_3(self, mock_update, mock_title):
+    def test_no_title_once_one_is_set(self, mock_update, mock_title):
+        """A set title (or the user's rename after it) is never overwritten."""
         cb = make_after_agent_response()
-        ctx = _make_ctx(initialized=True, turn_count=2)  # will become 3
+        ctx = _make_ctx(initialized=True, turn_count=1)  # will become 2
+        ctx.state["titleSet"] = True
 
         cb(ctx)
 
@@ -285,11 +290,11 @@ class TestMakeAfterAgentResponse:
         """
         cb = make_after_agent_response()
 
-        # --- Turn 2: generation returns None (thin context) ---
+        # --- Turn 1: generation returns None (thin context) ---
         mock_title.return_value = None
-        ctx = _make_ctx(initialized=True, turn_count=1)  # → 2
+        ctx = _make_ctx(initialized=True, turn_count=0)  # → 1
         cb(ctx)
-        assert mock_title.call_count == 1, "first attempt fires on turn 2"
+        assert mock_title.call_count == 1, "first attempt fires after the first reply"
         assert not ctx.state.get("titleSet"), "B3: titleSet must remain False when generation returned None"
 
         # --- Turn 5 (next flush boundary): retry, this time succeeds ---
@@ -298,8 +303,8 @@ class TestMakeAfterAgentResponse:
         cb(ctx)
 
         assert mock_title.call_count == 2, (
-            "B3: title generation must be retried at turn 5 because "
-            "state['titleSet'] was never set on turn 2 (generation returned None)."
+            "B3: title generation must be retried because state['titleSet'] "
+            "was never set on turn 1 (generation returned None)."
         )
         # Find the call that wrote the new title
         title_writes = [c.args[1] for c in mock_update.call_args_list if c.args[1].get("title") == "Generated title"]

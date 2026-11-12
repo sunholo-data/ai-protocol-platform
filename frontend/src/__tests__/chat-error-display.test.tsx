@@ -19,6 +19,8 @@ function makeReturn(overrides: Partial<UseSkillAgentReturn>): UseSkillAgentRetur
     stageLabel: null,
     delegations: [],
     fallbacks: [],
+    modelEvents: [],
+    modelWait: null,
     compactions: [],
     tidyingUp: false,
     resolvedModel: null,

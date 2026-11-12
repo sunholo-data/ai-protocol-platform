@@ -790,6 +790,39 @@ def test_fork_skipped_skill_is_not_an_mcp_gate_failure(tmp_path):
     assert summary.mcp_missing == []
 
 
+def test_demo_skill_left_out_by_flag_is_not_an_mcp_gate_failure(tmp_path, monkeypatch):
+    # The demo check runs BEFORE the .fork-skip one, so a demo skill was never
+    # recorded as skipped_by_fork — and a fork with _INCLUDE_DEMO_SKILLS=false
+    # failed every deploy on demos it never seeded (document-analyst ->
+    # ext-apps-map, maps-assistant -> maps-grounding-lite).
+    monkeypatch.setenv("_INCLUDE_DEMO_SKILLS", "false")
+    _fake_template_dir(tmp_path, "maps-assistant")
+    check = {"mcp_missing": ["maps-assistant -> maps-grounding-lite"], "mcp_warnings": []}
+
+    with (
+        patch("admin.platform_seed.skill_config.list_skills", return_value=[]),
+        patch("admin.mcp_registry_check.verify_mcp_registry", return_value=check),
+    ):
+        summary = seed(templates_root=tmp_path)
+
+    assert summary.mcp_missing == []
+
+
+def test_a_seeded_skill_with_a_missing_server_still_fails_the_gate(tmp_path):
+    _fake_template_dir(tmp_path, "web-browser")
+    check = {"mcp_missing": ["web-browser -> browser"], "mcp_warnings": []}
+
+    with (
+        patch("admin.platform_seed.skill_config.list_skills", return_value=[]),
+        patch("admin.platform_seed.skill_config.create_skill") as mock_create,
+        patch("admin.mcp_registry_check.verify_mcp_registry", return_value=check),
+    ):
+        mock_create.side_effect = lambda **kw: _make_config(name=kw["name"])
+        summary = seed(templates_root=tmp_path)
+
+    assert summary.mcp_missing == ["web-browser -> browser"]
+
+
 # --- access_control.tags_from (user guide: the skill gets the deployment's guide tags) ---
 
 

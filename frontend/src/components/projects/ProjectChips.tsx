@@ -22,7 +22,7 @@ function Chips({ projectIds }: { projectIds: readonly string[] }) {
   const label = names.length === 1 ? `In project ${names[0]}` : `In projects: ${names.join(", ")}`;
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-0.5 rounded bg-primary/10 px-1 py-0.5 text-[10px] font-medium text-primary"
+      className="inline-flex shrink-0 items-center gap-0.5 rounded bg-primary/10 px-1 py-0.5 text-[11px] font-medium text-primary"
       title={label}
       aria-label={label}
       data-testid="project-chips"

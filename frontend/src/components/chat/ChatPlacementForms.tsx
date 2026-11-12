@@ -132,6 +132,8 @@ export interface ChatSurfaceItem {
   title?: string;
   /** Restored from history (not a live turn) → anchor strictly by `createdAt`. */
   replayed: boolean;
+  /** A workbench result, drawn in the transcript as a card that opens it. */
+  result?: boolean;
 }
 
 /**
